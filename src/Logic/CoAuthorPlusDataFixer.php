@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Enum\CAPPostMetaKeys;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 use WP_Error;
@@ -487,5 +488,26 @@ class CoAuthorPlusDataFixer {
 		}
 
 		return $filtered_author_cap_fields;
+	}
+
+	/**
+	 * Checks if a value is unique for a given CAP field.
+	 *
+	 * @param CAPPostMetaKeys $field The field to check.
+	 * @param string          $value The value to check.
+	 *
+	 * @return bool
+	 */
+	public function is_unique_value( CAPPostMetaKeys $field, string $value ): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return null === $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				$field->value,
+				$value
+			)
+		);
 	}
 }
