@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Utils;
 
 use cli\Table;
+use NewspackCustomContentMigrator\Logic\Compare;
 use WP_CLI;
 
 /**
@@ -102,6 +103,7 @@ class ConsoleTable {
 	 * @param string $right The name of the second/right array.
 	 *
 	 * @return array[]
+	 * @deprecated Use output_comparison_table instead.
 	 */
 	public static function output_value_comparison( array $keys, array $left_set, array $right_set, bool $strict = true, string $left = 'LEFT', string $right = 'RIGHT' ) {
 		if ( empty( $keys ) ) {
@@ -177,6 +179,97 @@ class ConsoleTable {
 			'different'    => $different_rows,
 			'undetermined' => $undetermined_rows,
 		);
+	}
+
+	/**
+	 * This function will take two arrays, compare their values key-by-key, and output the results in a table.
+	 *
+	 * @param array  $keys Specific keys to compare. If empty, all keys will be compared.
+	 * @param array  $left First array to compare.
+	 * @param array  $right Second array to compare.
+	 * @param bool   $strict Whether to use strict comparison or not.
+	 * @param string $left_handle The name of the first/left array.
+	 * @param string $right_handle The name of the second/right array.
+	 * @param array  $comparison The comparison array, if already calculated.
+	 *
+	 * @return void
+	 */
+	public static function output_value_comparison_table( array $keys, array $left, array $right, bool $strict = true, string $left_handle = 'LEFT', string $right_handle = 'RIGHT', array $comparison = [] ): void {
+		if (
+			empty( $comparison ) ||
+			! empty(
+			array_diff(
+				[
+					'matching',
+					'different',
+					'undetermined',
+				],
+				array_keys( $comparison )
+			)
+			)
+		) {
+			$comparison = Compare::values( $keys, $left, $right, $strict, $left_handle, $right_handle );
+		}
+
+		$table = new Table();
+		$table->setHeaders(
+			[
+				'',
+				'Match?',
+				$left_handle,
+				$right_handle,
+			]
+		);
+
+		$display_normalizer = function ( $value ) {
+			if ( is_bool( $value ) ) {
+				return $value ? 'true' : 'false';
+			}
+
+			if ( is_int( $value ) ) {
+				return "(int) $value";
+			}
+
+			if ( is_null( $value ) ) {
+				return 'null';
+			}
+
+			return $value;
+		};
+
+		foreach ( $comparison['keys'] as $key ) {
+			$row = [
+				$key,
+			];
+
+			if ( array_key_exists( $key, $comparison['matching'] ) ) {
+				$row[] = '✅';
+				$row[] = $display_normalizer( $comparison['matching'][ $key ][ $left_handle ] );
+				$row[] = $display_normalizer( $comparison['matching'][ $key ][ $right_handle ] );
+			} elseif ( array_key_exists( $key, $comparison['different'] ) ) {
+				$row[] = '❌';
+				$row[] = $display_normalizer( $comparison['different'][ $key ][ $left_handle ] );
+				$row[] = $display_normalizer( $comparison['different'][ $key ][ $right_handle ] );
+			} else {
+				$row[] = '-';
+
+				if ( array_key_exists( $key, $comparison['undetermined'] ) && array_key_exists( $left_handle, $comparison['undetermined'][ $key ] ) ) {
+					$row[] = $display_normalizer( $comparison['undetermined'][ $key ][ $left_handle ] );
+				} else {
+					$row[] = '';
+				}
+
+				if ( array_key_exists( $key, $comparison['undetermined'] ) && array_key_exists( $right_handle, $comparison['undetermined'][ $key ] ) ) {
+					$row[] = $display_normalizer( $comparison['undetermined'][ $key ][ $right_handle ] );
+				} else {
+					$row[] = '';
+				}
+			}
+
+			$table->addRow( $row );
+		}
+
+		$table->display();
 	}
 
 	/**
