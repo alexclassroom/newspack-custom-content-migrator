@@ -295,4 +295,59 @@ class Users {
 
 		return $clone;
 	}
+
+	/**
+	 * Updates user fields if necessary.
+	 *
+	 * @param WP_User $user The user to update.
+	 *
+	 * @return bool|null|WP_Error True if the user fields were updated, false if no update was made, null if no update was necessary, or a WP_Error if the update explicitly failed.
+	 */
+	public function update_user_fields_if_necessary( WP_User $user ): bool|null|WP_Error {
+		$validated_user = $this->get_user_with_validated_data( $user );
+
+		if ( is_wp_error( $validated_user ) ) {
+			return $validated_user;
+		}
+
+		$original_handle  = 'original';
+		$validated_handle = 'validated';
+
+		$comparison = Compare::values(
+			[],
+			$user->to_array(),
+			$validated_user->to_array(),
+			true,
+			$original_handle,
+			$validated_handle
+		);
+
+		do_action( 'newspack_validated_user_comparison_results', $comparison, $user, $validated_user, $original_handle, $validated_handle );
+
+		if ( empty( $comparison['different'] ) ) {
+			return null;
+		}
+
+		$updates = [];
+		foreach ( $comparison['different'] as $key => $values ) {
+			$updates[ $key ] = $values[ $validated_handle ];
+		}
+
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$result = $wpdb->update(
+			$wpdb->users,
+			$updates,
+			[ 'ID' => $user->ID ],
+		);
+
+		if ( false === $result ) {
+			return new WP_Error( 'newspack-unable-to-update-user-fields', 'Unable to update user fields: ' . $wpdb->last_error );
+		} elseif ( 0 === $result ) {
+			return false;
+		} else {
+			return true;
+		}
+	}
 }
