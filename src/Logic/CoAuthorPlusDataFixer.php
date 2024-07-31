@@ -362,9 +362,9 @@ class CoAuthorPlusDataFixer {
 		$filtered_cap_fields = $this->get_filtered_cap_fields(
 			$guest_author->ID,
 			[
-				'cap-user_email',
-				'cap-user_login',
-				'cap-linked_account',
+				CAPPostMetaKeys::EMAIL->value,
+				CAPPostMetaKeys::LOGIN->value,
+				CAPPostMetaKeys::LINKED_ACCOUNT->value,
 			]
 		);
 
@@ -383,11 +383,11 @@ class CoAuthorPlusDataFixer {
 				return false;
 			}
 
-			if ( 'cap-linked_account' === $cap_field ) {
+			if ( CAPPostMetaKeys::LINKED_ACCOUNT->value === $cap_field ) {
 				return false;
 			}
 
-			if ( 'cap-user_email' === $cap_field ) {
+			if ( CAPPostMetaKeys::EMAIL->value === $cap_field ) {
 				$user_by_email = get_user_by( 'email', $values );
 
 				if ( ! empty( $user_by_email ) ) {
@@ -401,7 +401,7 @@ class CoAuthorPlusDataFixer {
 				}
 			}
 
-			if ( 'cap-user_login' === $cap_field ) {
+			if ( CAPPostMetaKeys::LOGIN->value === $cap_field ) {
 				$values = str_replace( 'cap-', '', $values );
 
 				$user_by_login = get_user_by( 'login', $values );
