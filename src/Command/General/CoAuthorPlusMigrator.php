@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\NMT;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use \NewspackCustomContentMigrator\Logic\Posts;
 use \NewspackCustomContentMigrator\PluginSetup;
@@ -612,13 +613,7 @@ class CoAuthorPlusMigrator implements RegisterCommandInterface {
 	 */
 	public function require_cap_plugin() {
 		if ( false === $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::warning( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-
-			// Install and activate the CAP plugin.
-			PluginSetup::setup_coauthors_plus();
-
-			// reinitialize the CAP dependency.
-			$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
+			NMT::exit_with_message( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
 		}
 	}
 

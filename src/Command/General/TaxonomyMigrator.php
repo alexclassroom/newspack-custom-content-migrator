@@ -4,8 +4,8 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use InvalidArgumentException;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use Newspack\MigrationTools\Log\CliLogger;
-use Newspack\MigrationTools\Log\FileLogger;
+use Newspack\MigrationTools\Util\Log\CliLog;
+use Newspack\MigrationTools\Util\Log\PlainFileLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Logic\Taxonomy;
@@ -731,12 +731,15 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 			wp_die( esc_html( $e->getMessage() ) );
 		}
 
-		$logfile    = "deleted-{$taxonomy}-ids.log";
+		$cli_log            = CliLog::get_logger( __FUNCTION__ . ':' . $taxonomy );
+		$plain_file_loggger = PlainFileLog::get_logger( 'delete-terms', sprintf( 'deleted-%s-ids.log', $taxonomy ) );
+
 		$term_count = count( $terms );
+		$cli_log->info( sprintf( 'Found %d terms to delete:', $term_count ) );
 		foreach ( $terms as $idx => $term_id ) {
 			wp_delete_term( $term_id, $taxonomy );
-			CliLogger::log( sprintf( '(%d of %d)', ++$idx, $term_count ) );
-			FileLogger::log( $logfile, $term_id );
+			$cli_log->info( sprintf( '(%d of %d) deleted term ID %d', ++$idx, $term_count, $term_id ) );
+			$plain_file_loggger->info( $term_id );
 		}
 	}
 

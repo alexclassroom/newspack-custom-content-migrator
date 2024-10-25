@@ -601,7 +601,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
 		$batch           = $assoc_args['batch'] ?? null;
 		$index           = $assoc_args['index'] ?? null;
-		$log_file_prefix = $assoc_args['log-file-prefix'] ?? 'broken_media_urls_batch';
+		$log_file = 'broken_media_urls_batch.log';
 
 		$this->attachment_logic->get_broken_attachment_urls_from_posts(
 			[],
@@ -609,8 +609,8 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 			$posts_per_batch,
 			$batch,
 			$index,
-			function( $post_id, $broken_url ) use ( $batch, $log_file_prefix ) {
-				$this->log( sprintf( '%s_%s.log', $log_file_prefix, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
+			function( $post_id, $broken_url ) use ( $batch, $log_file ) {
+				$this->log( sprintf( '%s_%s.log', $log_file, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
 			}
 		);
 	}
@@ -624,7 +624,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	public function cmd_regenerate_media_thumbnails( $args, $assoc_args ) {
 		$posts_per_batch = $assoc_args['posts-per-batch'] ?? -1;
 		$batch           = $assoc_args['batch'] ?? 1;
-		$log_file_prefix = 'regenerated_media_thumnails.sql';
+		$log_file        = 'regenerated_media_thumbnails.log';
 
 		$meta_query = [
 			[
@@ -668,7 +668,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 				$metadata = wp_generate_attachment_metadata( $post_id, $fullsizepath );
 				wp_update_attachment_metadata( $post_id, $metadata );
 
-				$this->logger->log( $log_file_prefix, sprintf( '(%d/%d) Thumnails regenerated for media %d', $index, $posts_per_batch, $post_id ) );
+				$this->logger->log( $log_file, sprintf( '(%d/%d) Thumnails regenerated for media %d', $index, $posts_per_batch, $post_id ) );
 			}
 
 			update_post_meta( $post_id, '_newspack_regenerated_thumnails', true );
@@ -686,7 +686,6 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	public function cmd_get_hosts_post_content( $args, $assoc_args ) {
 		$posts_per_batch = $assoc_args['posts-per-batch'] ?? 10000;
 		$batch           = $assoc_args['batch'] ?? 1;
-		$log_file_prefix = 'broken_media_urls_batch';
 
 		$posts = get_posts(
 			[

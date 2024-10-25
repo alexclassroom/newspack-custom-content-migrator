@@ -269,29 +269,9 @@ class PrelaunchSiteQAMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Create a unified log file name prefix for the command, with a timestamp. Also creates a directory is possible
-	 * 
-	 * @param string $command_name The name of the commande.
-	 * 
-	 * @return string The log file name prefix, with the folder. For example: qa_check_broken_images_logs/qa_2022-08-28_00-00-00_check_broken_images
-	 */
-	public function get_log_file_name( $command_name ) {
-		$log_file_prefix = sprintf( 'qa_%s_%s', gmdate( 'Y-m-d_H-i-s' ), $command_name );
-		$log_folder_name = $this->logger->get_le_log_path();
-
-		// Append the LE log folder to the filename.
-		$log_file_prefix = $log_folder_name . '/' . $log_file_prefix;
-		return $log_file_prefix;
-	}
-
-	/**
 	 * Wrapper function for calling the check_broken_images command
 	 */
 	public function call_check_broken_images() {
-		$assoc_args = array(
-			'log-file-prefix' => $this->get_log_file_name( 'check_broken_images' ),
-		);
-
 		if ( $this->is_dry_run_mode() ) {
 			$assoc_args['dry-run'] = true;
 		}

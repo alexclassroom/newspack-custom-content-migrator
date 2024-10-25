@@ -4,11 +4,10 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use Newspack\MigrationTools\Log\FileLogger;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_Post;
 
@@ -62,13 +61,14 @@ class ZocaloMigrator implements RegisterCommandInterface {
 
 		$site_url = trailingslashit( get_site_url() );
 		$meta_key = 'sub_title';
+		$file_loggger = FileLog::get_logger( 'import-subtitles', 'import-subtitles.log' );
 
 		foreach ( $this->get_published_posts_with_meta_key( $meta_key, $assoc_args, $migration_meta ) as $post ) {
 			$sub_title = trim( get_post_meta( $post->ID, $meta_key, true ) );
 			if ( empty( $sub_title ) ) {
 				continue;
 			}
-			FileLogger::log( 'sub_titles.log', sprintf( 'Updated sub title on post: %s', "$site_url?p=p={$post->ID}" ), Logger::SUCCESS );
+			$file_loggger->info( sprintf( 'Updated sub title on post: %s', "$site_url?p=p={$post->ID}" ) );
 
 			update_post_meta( $post->ID, 'newspack_post_subtitle', $sub_title );
 			MigrationMeta::update( $post->ID, $migration_meta['key'], 'post', $migration_meta['version'] );
@@ -91,6 +91,8 @@ class ZocaloMigrator implements RegisterCommandInterface {
 
 		$site_url = trailingslashit( get_site_url() );
 		$meta_key = 'by_line';
+
+		$file_logger = FileLog::get_logger( 'import-post-authors', 'import-post-authors.log' );
 
 		foreach ( $this->get_published_posts_with_meta_key( $meta_key, $assoc_args, $migration_meta ) as $post ) {
 			$authors_to_assign = [];
@@ -116,8 +118,7 @@ class ZocaloMigrator implements RegisterCommandInterface {
 			$authors_to_assign = array_filter( $authors_to_assign );
 			if ( ! empty( $authors_to_assign ) ) {
 				$this->coauthorsplus_logic->assign_guest_authors_to_post( $authors_to_assign, $post->ID );
-				FileLogger::log( 'post_authors.log',
-					sprintf( 'Assigned author(s): "%s" on post "%s"', implode( ',', $authors_to_assign ), "$site_url?p={$post->ID}" ), Logger::SUCCESS );
+				$file_logger->info( sprintf( 'Assigned author(s): "%s" on post "%s"', implode( ',', $authors_to_assign ), "$site_url?p={$post->ID}" ));
 			}
 
 			MigrationMeta::update( $post->ID, $migration_meta['key'], 'post', $migration_meta['version'] );
@@ -130,6 +131,8 @@ class ZocaloMigrator implements RegisterCommandInterface {
 		// Remove "by" prefix on author name.
 		$author_args['display_name'] = preg_replace( '/^by /i', '', trim( $author_name ) );
 
+		$file_logger = FileLog::get_logger( 'import-post-authors', 'import-post-authors.log' );
+
 		if ( empty( $author_args['display_name'] ) ) {
 			$guest_author_id = $this->default_author_id;
 		} else {
@@ -140,11 +143,8 @@ class ZocaloMigrator implements RegisterCommandInterface {
 			$guest_author_id = $this->coauthorsplus_logic->create_guest_author( $author_args );
 			if ( is_wp_error( $guest_author_id ) ) {
 				$guest_author_id = 0;
-				FileLogger::log(
-					'post_authors.log',
-					sprintf( 'Could not create guest author with display name "%s" for post ID %d', $author_args['display_name'], $post->ID ),
-					Logger::ERROR
-				);
+				$file_logger->error(
+					sprintf( 'Could not create guest author with display name "%s" for post ID %d', $author_args['display_name'], $post->ID ) );
 			}
 		}
 

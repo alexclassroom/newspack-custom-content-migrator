@@ -32,7 +32,7 @@ class PluginSetup {
 	 * 
 	 * @param string $level Error reporting level. 'dev' is default. 'live' will not change error reporting.
 	 */
-	public static function configure_error_reporting( $level = 'dev' ) {
+	public static function configure_error_reporting( $level = 'dev' ): void {
 		if ( 'dev' === $level ) {
 			// phpcs:disable -- Adds extra debugging config options for dev purposes.
 			@ini_set( 'display_errors', 1 );
@@ -52,8 +52,6 @@ class PluginSetup {
 			if ( ! defined( 'WP_DEBUG_DISPLAY' ) ) {
 				define( 'WP_DEBUG_DISPLAY', true );
 			}
-		} elseif( 'live' === $level ) {
-			// Do not alter default error reporting.
 		}
 	}
 
@@ -104,60 +102,6 @@ class PluginSetup {
 	}
 
 	/**
-	 * Checks whether wordpress-importer is active and valid, and if not, installs and activates it.
-	 */
-	public static function setup_wordpress_importer() {
-		$plugin_installer = \NewspackCustomContentMigrator\PluginInstaller::get_instance();
-		$plugin_slug      = 'wordpress-importer';
-		$is_installed     = $plugin_installer->is_installed( $plugin_slug );
-		$is_active        = $plugin_installer->is_active( $plugin_slug );
-
-		if ( $is_installed && ! $is_active ) {
-			WP_CLI::line( sprintf( 'Activating the %s plugin now...', $plugin_slug ) );
-			try {
-				$plugin_installer->activate( $plugin_slug );
-			} catch ( \Exception $e ) {
-				WP_CLI::error( 'WP Importer Plugin activation error: ' . $e->getMessage() );
-			}
-		} elseif ( ! $is_installed ) {
-			WP_CLI::line( sprintf( 'Installing and activating the %s plugin now...', $plugin_slug ) );
-			try {
-				$plugin_installer->install( $plugin_slug );
-				$plugin_installer->activate( $plugin_slug );
-			} catch ( \Exception $e ) {
-				WP_CLI::error( 'WP Importer Plugin installation error: ' . $e->getMessage() );
-			}
-		}
-	}
-
-	/**
-	 * Checks whether Co-Authors-Plus is active and valid, and if not, installs and activates it.
-	 */
-	public static function setup_coauthors_plus() {
-		$plugin_installer = \NewspackCustomContentMigrator\PluginInstaller::get_instance();
-		$plugin_slug      = 'co-authors-plus';
-		$is_installed     = $plugin_installer->is_installed( $plugin_slug );
-		$is_active        = $plugin_installer->is_active( $plugin_slug );
-
-		if ( $is_installed && ! $is_active ) {
-			WP_CLI::line( sprintf( 'Activating the %s plugin now...', $plugin_slug ) );
-			try {
-				$plugin_installer->activate( $plugin_slug );
-			} catch ( \Exception $e ) {
-				WP_CLI::error( 'Plugin activation error: ' . $e->getMessage() );
-			}
-		} elseif ( ! $is_installed ) {
-			WP_CLI::line( sprintf( 'Installing and activating the %s plugin now...', $plugin_slug ) );
-			try {
-				$plugin_installer->install( $plugin_slug );
-				$plugin_installer->activate( $plugin_slug );
-			} catch ( \Exception $e ) {
-				WP_CLI::error( 'Plugin installation error: ' . $e->getMessage() );
-			}
-		}
-	}
-
-	/**
 	 * Add hooks for all commands.
 	 *
 	 * Note that to add a hook for a specific command, you should add it in the command class in the command (not the constructor).
@@ -166,26 +110,15 @@ class PluginSetup {
 	 * @return void
 	 */
 	public static function add_hooks(): void {
-		// Disable the simple CLI logging from the migration tools and use WP_CLI's version.
-		add_filter('newspack_migration_tools_log_clilog_disable', '__return_true' );
-
-		// And use our fancy WP_CLI logger instead.
-		add_action( 'newspack_migration_tools_cli_log', [ __CLASS__, 'action_cli_log' ], 10, 3 );
-	}
-
-	/**
-	 * @param string $message Message to log.
-	 * @param string $level Log level - see constants in Logger class.
-	 * @param bool $exit_on_error If true, will exit the script on error.
-	 *
-	 * @return void
-	 */
-	public static function action_cli_log( string $message, string $level, bool $exit_on_error ): void {
-		static $logger = null;
-		if ( is_null( $logger ) ) {
-			$logger = new Utils\Logger();
+		if ( ! defined( 'NCCM_DISABLE_CLI_LOG' ) || empty( 'NCCM_DISABLE_CLI_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_cli_log', '__return_true' );
 		}
-		$logger->wp_cli_log( $message, $level, $exit_on_error );
+		if ( ! defined( 'NCCM_DISABLE_FILE_LOG' ) || empty( 'NCCM_DISABLE_FILE_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_file_log', '__return_true' );
+		}
+		if ( ! defined( 'NCCM_DISABLE_PLAIN_LOG' ) || empty( 'NCCM_DISABLE_PLAIN_LOG' ) ) {
+			add_filter( 'newspack_migration_tools_enable_plain_log', '__return_true' );
+		}
 	}
 
 }
