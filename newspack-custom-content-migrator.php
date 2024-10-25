@@ -76,6 +76,7 @@ PluginSetup::register_command_classes(
 		Command\General\TagDivThemesPluginsMigrator::class,
 		Command\General\GhostCMSMigrator::class,
 		Command\General\Multibranded::class,
+		Command\General\EllingtonCMSMigrator::class,
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\JEPBailiwickMigrator::class,
