@@ -4,14 +4,13 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DOMDocument;
 use DOMNode;
-use DOMNodeList;
 use Exception;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Util\WordPressXMLHandler;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use stdClass;
 use WP_CLI;
 use WP_Error;

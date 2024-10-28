@@ -10,7 +10,6 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\PHP;
 use WP_CLI;
 use WP_Error;
 
