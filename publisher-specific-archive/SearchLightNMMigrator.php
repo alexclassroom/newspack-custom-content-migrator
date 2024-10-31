@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Search Light New Mexico.

@@ -3,8 +3,8 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use \NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use WP_CLI;
 
 class ReaderRevenueMigrator implements RegisterCommandInterface {
 

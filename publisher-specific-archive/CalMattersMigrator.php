@@ -2,9 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for CalMatters.

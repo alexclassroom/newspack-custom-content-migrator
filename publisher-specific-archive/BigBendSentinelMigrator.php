@@ -3,11 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Gravity_Forms\Gravity_Forms\Settings\Fields\Hidden;
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\Redirection as RedirectionLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Big Bend Sentinel.

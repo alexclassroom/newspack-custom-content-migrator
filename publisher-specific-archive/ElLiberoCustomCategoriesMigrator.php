@@ -2,12 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use stdClass;
-use \WP_CLI;
+use WP_CLI;
 use WP_Error;
-use WP_Term;
 
 /**
  * This custom migrator was necessary because El Libero had various custom categories/post types, which had a complex

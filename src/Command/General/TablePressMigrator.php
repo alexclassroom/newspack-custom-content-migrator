@@ -3,8 +3,8 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Util\TablePress as TablePressLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\TablePress as TablePressLogic;
 use WP_CLI;
 
 /**

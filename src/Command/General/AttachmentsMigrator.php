@@ -8,10 +8,10 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Util\BatchLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
@@ -31,11 +31,6 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	const ATTACHMENT_TRASH_FOLDER   = 'newspack_media_trash';
 
 	/**
-	 * @var AttachmentsLogic.
-	 */
-	private $attachment_logic;
-
-	/**
 	 * Logger.
 	 *
 	 * @var Logger $logger Logger instance.
@@ -51,7 +46,6 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachment_logic = new AttachmentsLogic();
 		$this->logger           = new Logger();
 		$this->block_generator = new GutenbergBlockGenerator();
 	}
@@ -263,7 +257,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 				$attachment_id = attachment_url_to_postid( $url );
 				if ( ! $attachment_id ) {
 					// If the attachment doesn't exist, import it.
-					$attachment_id = $this->attachment_logic->import_attachment_for_post( $post->ID, $src );
+					$attachment_id = Attachments::import_attachment_for_post( $post->ID, $src );
 
 					if ( is_wp_error( $attachment_id ) ) {
 						$this->logger->log( $logfile, sprintf( 'Failed to import attachment for post %d: %s', $post->ID, $attachment_id->get_error_message() ), Logger::ERROR );
@@ -603,7 +597,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		$index           = $assoc_args['index'] ?? null;
 		$log_file = 'broken_media_urls_batch.log';
 
-		$this->attachment_logic->get_broken_attachment_urls_from_posts(
+		Attachments::get_broken_attachment_urls_from_posts(
 			[],
 			$is_using_s3,
 			$posts_per_batch,
@@ -728,7 +722,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 			array_reduce(
 				$non_posts,
 				function( $carry, $post ) {
-					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $post->post_content ) );
+					return array_merge( $carry, Attachments::get_images_sources_from_content( $post->post_content ) );
 				},
 				[]
 			)
@@ -755,7 +749,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 						return $carry;
 					}
 
-					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $widget['text'] ) );
+					return array_merge( $carry, Attachments::get_images_sources_from_content( $widget['text'] ) );
 				},
 				[]
 			)

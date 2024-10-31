@@ -2,10 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use \WP_CLI;
-use \WP_Query;
+use Newspack\MigrationTools\Logic\Attachments;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for LkldNow.
@@ -18,17 +17,9 @@ class IndyWeekMigrator implements InterfaceCommand {
 	private static $instance = null;
 
 	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachments = new Attachments();
 	}
 
 	/**
@@ -144,7 +135,7 @@ HTML;
 			}
 
 			WP_CLI::log( 'Downloading thumbnail...' );
-			$thumbnail_id = $this->attachments->import_external_file( $print->coverUrl );
+			$thumbnail_id = Attachments::import_external_file( $print->coverUrl );
 
 			set_post_thumbnail( $post_id, $thumbnail_id );
 			WP_CLI::log( 'Print ' . $print->title . ' has been added.' );

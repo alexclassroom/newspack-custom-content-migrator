@@ -4,12 +4,11 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\NMT;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\PluginSetup;
-use \WP_CLI;
-use \WP_Query;
+use WP_CLI;
+use WP_Query;
 use WP_User_Query;
 
 /**

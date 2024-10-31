@@ -2,13 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Logic\Posts as PostLogic;
+use Newspack\MigrationTools\Logic\Taxonomy as TaxonomyLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
 use NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Taxonomy as TaxonomyLogic;
-use \NewspackCustomContentMigrator\Logic\Posts as PostLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for VTDigger.

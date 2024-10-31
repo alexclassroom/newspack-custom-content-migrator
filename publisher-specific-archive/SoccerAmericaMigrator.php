@@ -3,13 +3,13 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 /* Internal dependencies */
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Attachments;
-use \NewspackCustomContentMigrator\Logic\Posts;
+
+use Newspack\MigrationTools\Logic\Attachments;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 /* External dependencies */
-use WP_CLI;
 
 /**
  * Custom migration scripts for Soccer America.
@@ -29,13 +29,6 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * @var Logger.
 	 */
 	private $logger;
-
-	/**
-	 * Attachments logic.
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * Dry run mode - set to true to prevent changes.
@@ -84,8 +77,6 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
-
-		$this->attachments = new Attachments();
 
 		// Define where each CSV field should import to (articles).
 		$this->core_fields_mapping = [
@@ -1404,7 +1395,7 @@ class SoccerAmericaMigrator implements InterfaceCommand {
 	 * Import an image.
 	 */
 	private function import_image( $data ) {
-		$attachment_id = $this->attachments->import_external_file(
+		$attachment_id = Attachments::import_external_file(
 			$this->get_field_from_row( 'image_file', $data )
 		);
 		if ( is_wp_error( $attachment_id ) ) {

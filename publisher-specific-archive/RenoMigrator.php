@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackPostImageDownloader\Downloader as PostImageDownloader;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \WP_CLI;
+use NewspackPostImageDownloader\Downloader as PostImageDownloader;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Reno News.

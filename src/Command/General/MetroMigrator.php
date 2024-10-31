@@ -3,8 +3,8 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
 use WP_CLI;
 
 class MetroMigrator implements RegisterCommandInterface {
@@ -611,14 +611,10 @@ HTML;
 
 		$found = preg_match_all( $local_links_pattern, $slot->embed_code, $local_links );
 
-		if ( $found ) {
-			$attachments_logic = new Attachments();
-		}
-
 		foreach ( $local_links[1] as $local_link ) {
 			$file = end( explode( '/', $local_link ) );
 			$filename = pathinfo( $file, PATHINFO_FILENAME );
-			$attachment_id = $attachments_logic->get_attachment_by_filename( $filename);
+			$attachment_id = Attachments::get_attachment_by_filename( $filename);
 			$attachment_url = wp_get_attachment_url( $attachment_id );
 			$searches[] = $local_link;
 			$replaces[] = $attachment_url;

@@ -3,7 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use WP_CLI;
 
 class MauiTimesMigrator implements InterfaceCommand {
 

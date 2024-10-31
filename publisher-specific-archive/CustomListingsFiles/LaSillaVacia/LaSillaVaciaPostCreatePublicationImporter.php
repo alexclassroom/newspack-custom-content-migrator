@@ -3,12 +3,11 @@
 namespace Newspack_Listings\Importer;
 
 use Exception;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack_Listings\Contracts\Importer_Mode;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\MigrationPostAuthors;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-
-use WP_Post;
 use WP_CLI;
+use WP_Post;
 
 class LaSillaVaciaPostCreatePublicationImporter extends Abstract_Callable_Post_Create
 {

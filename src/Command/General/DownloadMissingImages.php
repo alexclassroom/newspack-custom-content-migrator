@@ -3,11 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\MigrationMeta;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 class DownloadMissingImages implements RegisterCommandInterface {
@@ -18,10 +18,6 @@ class DownloadMissingImages implements RegisterCommandInterface {
 	private $command_meta_version;
 	private $log_file;
 
-	/**
-	 * @var Attachments
-	 */
-	private $attachmentsLogic;
 
 	/**
 	 * @var Posts
@@ -37,7 +33,6 @@ class DownloadMissingImages implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachmentsLogic = new Attachments();
 		$this->postsLogic       = new Posts();
 		$this->logger           = new Logger();
 
@@ -192,7 +187,7 @@ class DownloadMissingImages implements RegisterCommandInterface {
 		// Is it in the media_folder?
 		$media_import_path = $this->get_media_import_path_if_file_exists( $url_path, $media_location );
 		if ( $media_import_path ) {
-			$attachment_id = $this->attachmentsLogic->import_external_file( $media_import_path, false, false, false,
+			$attachment_id = Attachments::import_external_file( $media_import_path, false, false, false,
 				false, $post->ID );
 			if ( ! is_wp_error( $attachment_id ) ) {
 				return $attachment_id;
@@ -216,7 +211,7 @@ class DownloadMissingImages implements RegisterCommandInterface {
 
 		if ( in_array( $url_host, array_keys( $path_translations['hosts'] ) ) ) {
 			$url           = $path_translations['hosts'][ $url_host ] . $url_path;
-			$attachment_id = $this->attachmentsLogic->import_external_file( $url, false, false, false, false,
+			$attachment_id = Attachments::import_external_file( $url, false, false, false, false,
 				$post->ID );
 			if ( ! is_wp_error( $attachment_id ) ) {
 				return $attachment_id;
@@ -258,7 +253,7 @@ class DownloadMissingImages implements RegisterCommandInterface {
 		if ( file_exists( $path_in_uploads_dir ) ) {
 			$local_path = untrailingslashit( ABSPATH ) . $url_path;
 			// The file is where it should be, but the DB does not know about it. Let's import it.
-			$attachment_id = $this->attachmentsLogic->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$local_path,
 				false,
 				false,
@@ -277,7 +272,7 @@ class DownloadMissingImages implements RegisterCommandInterface {
 		if ( file_exists( trailingslashit( $media_location) . $url_path ) ) {
 			$local_path = trailingslashit( $media_location) . $url_path;
 			// The file is where it should be, but the DB does not know about it. Let's import it.
-			$attachment_id = $this->attachmentsLogic->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$local_path,
 				false,
 				false,
@@ -364,7 +359,7 @@ class DownloadMissingImages implements RegisterCommandInterface {
 			}
 
 			$post       = get_post( $post_id );
-			$image_urls = array_unique( $this->attachmentsLogic->get_images_sources_from_content( $post->post_content ) );
+			$image_urls = array_unique( Attachments::get_images_sources_from_content( $post->post_content ) );
 			if ( empty( $image_urls ) ) {
 				continue;
 			}

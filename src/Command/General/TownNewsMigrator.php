@@ -4,10 +4,10 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use DirectoryIterator;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Utils\Logger;
 use SimpleXMLElement;
 use WP_CLI;
@@ -25,13 +25,6 @@ class TownNewsMigrator implements RegisterCommandInterface {
 	private $logger;
 
 	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
-
-	/**
 	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
 	 */
 	private $coauthorsplus_logic;
@@ -46,7 +39,6 @@ class TownNewsMigrator implements RegisterCommandInterface {
 	 */
 	private function __construct() {
 		$this->logger                    = new Logger();
-		$this->attachments               = new Attachments();
 		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
@@ -705,7 +697,7 @@ class TownNewsMigrator implements RegisterCommandInterface {
 			} else {
 				$avatar_id = null;
 				if ( ! empty( $avatar ) ) {
-					$avatar_id = $this->attachments->import_external_file( $avatar, $display_name );
+					$avatar_id = Attachments::import_external_file( $avatar, $display_name );
 
 					if ( is_wp_error( $avatar_id ) ) {
 						$this->logger->log( self::LOG_FILE, sprintf( "Can't download user avatar for the post %d: %s", $post_id, $avatar_id->get_error_message() ), Logger::WARNING );
@@ -898,7 +890,7 @@ class TownNewsMigrator implements RegisterCommandInterface {
 		}
 
 		$media_file_path = "$dir_path/$media_source";
-		$attachment_id   = $this->attachments->import_external_file( $media_file_path, $media_title, $media_caption, null, $media_title, $parent_id );
+		$attachment_id   = Attachments::import_external_file( $media_file_path, $media_title, $media_caption, null, $media_title, $parent_id );
 
 		if ( is_wp_error( $attachment_id ) ) {
 			$this->logger->log( self::LOG_FILE, sprintf( "Couldn't import the media '%s' as a featured image for the post %d.", $media_file_path, $parent_id ), Logger::WARNING );

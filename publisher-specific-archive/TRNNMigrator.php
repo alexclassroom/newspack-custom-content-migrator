@@ -2,9 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
-use \WP_Error;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for The Real News Network.

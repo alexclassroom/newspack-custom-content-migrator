@@ -3,9 +3,9 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\NinjaTablesHelper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Logic\NinjaTables as NinjaTablesLogic;
+use WP_CLI;
 
 /**
  * NinjaTables Plugin Migrator.
@@ -15,7 +15,7 @@ class NinjaTablesMigrator implements RegisterCommandInterface {
 	use WpCliCommandTrait;
 
 	/**
-	 * @var NinjaTablesLogic $ninja_tables_logic
+	 * @var NinjaTablesHelper $ninja_tables_logic
 	 */
 	private $ninja_tables_logic;
 
@@ -23,7 +23,7 @@ class NinjaTablesMigrator implements RegisterCommandInterface {
 	 * NinjaTablesMigrator constructor.
 	 */
 	private function __construct() {
-		$this->ninja_tables_logic = new NinjaTablesLogic();
+		$this->ninja_tables_logic = new NinjaTablesHelper();
 	}
 
 	/**

@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for East Mojo.

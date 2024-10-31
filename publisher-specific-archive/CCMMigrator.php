@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 

@@ -8,7 +8,7 @@ use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
 use S3_Uploads\Plugin;
 use Simple_Local_Avatars;
 use stdClass;
-use \WP_CLI;
+use WP_CLI;
 
 class BerkeleysideMigrator implements InterfaceCommand {
 

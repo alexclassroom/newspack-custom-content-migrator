@@ -2,11 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Baristanet.

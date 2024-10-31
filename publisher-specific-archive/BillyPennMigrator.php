@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 use WP_Query;
 
 /**

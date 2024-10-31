@@ -4,9 +4,9 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Redirection;
 use Newspack\MigrationTools\Util\CsvIterator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;

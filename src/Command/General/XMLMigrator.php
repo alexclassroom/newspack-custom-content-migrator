@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
+use DOMDocument;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
 use WP_CLI;
 use XMLReader;
-use DOMDocument;
 
 /**
  * Custom migration scripts for Posts' content.

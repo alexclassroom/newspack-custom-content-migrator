@@ -7,15 +7,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Posts;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use stdClass;
-use \WP_CLI;
-use \WP_Query;
-use \WP_User_Query;
+use WP_CLI;
+use WP_Query;
+use WP_User_Query;
 
 /**
  * Custom migration scripts for MinnPost.

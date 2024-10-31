@@ -3,15 +3,15 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DOMElement;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Redirection;
 use Newspack_Scraper_Migrator_HTML_Parser;
 use Newspack_Scraper_Migrator_Util;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
@@ -82,13 +82,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 	 * @var null|InterfaceCommand Instance.
 	 */
 	private static $instance = null;
-
-	/**
-	 * Attachments instance.
-	 *
-	 * @var Attachments Instance.
-	 */
-	private $attachments;
 
 	/**
 	 * Logger instance.
@@ -179,7 +172,6 @@ class LookoutLocalMigrator implements InterfaceCommand {
 		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-util.php' );
 		require realpath( $plugin_dir . '/vendor/automattic/newspack-cms-importers/newspack-scraper-migrator/includes/class-newspack-scraper-migrator-html-parser.php' );
 
-		$this->attachments              = new Attachments();
 		$this->logger                   = new Logger();
 		$this->scraper                  = new Newspack_Scraper_Migrator_Util();
 		$this->crawler                  = new Crawler();
@@ -432,7 +424,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 
 				// Download image.
 				WP_CLI::line( sprintf( 'Downloading %s', $data_src ) );
-				$att_id = $this->attachments->import_external_file(
+				$att_id = Attachments::import_external_file(
 					$data_src, $title = null, $caption = null, $description = null, $alt = null, $post_id, $args = [], $desired_filename = ''
 				);
 
@@ -796,7 +788,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			) );
 			if ( ! $attachment_id ) {
 				// Download.
-				$attachment_id = $this->attachments->import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
+				$attachment_id = Attachments::import_external_file( $crawled_data['avatar_url'], $crawled_data['name'] );
 			}
 
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
@@ -919,7 +911,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$src = $this->dev_fake_image_override;
 		}
 		WP_CLI::line( sprintf( "Downloading image '%s' ...", $src ) );
-		$attachment_id = $this->attachments->import_external_file(
+		$attachment_id = Attachments::import_external_file(
 			$src,
 			$title,
 			$caption,
@@ -977,7 +969,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			rename( $tmp_file, $tmp_file_new );
 
 			// Now try to import the local tmp file with the new extension.
-			$attachment_id = $this->attachments->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$tmp_file_new,
 				$title,
 				$caption,
@@ -3770,7 +3762,7 @@ class LookoutLocalMigrator implements InterfaceCommand {
 			$alt          = $data['lead']['altText'];
 			// Next -- find url and download image.
 			$url;
-			$attachment_id = $this->attachments->import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
+			$attachment_id = Attachments::import_external_file( $url, $title = null, ( $hide_caption ? $caption : null ), $description = null, $alt, $post_id, $args = [] );
 			set_post_thumbnail( $post_id, $attachment_id );
 
 

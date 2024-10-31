@@ -7,14 +7,14 @@ use DateTimeZone;
 use DOMDocument;
 use DOMElement;
 use Exception;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Logic\Redirection as RedirectionLogic;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
@@ -59,13 +59,6 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 	private $redirection_logic;
 
 	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
-
-	/**
 	 * Get Instance.
 	 *
 	 * @return HighCountryNewsMigrator
@@ -79,7 +72,6 @@ class HighCountryNewsMigrator implements InterfaceCommand {
 			self::$instance->redirection               = new Redirection();
 			self::$instance->logger                    = new Logger();
 			self::$instance->gutenberg_block_generator = new GutenbergBlockGenerator();
-			self::$instance->attachments               = new Attachments();
 			self::$instance->json_iterator             = new JsonIterator();
 			self::$instance->redirection_logic         = new RedirectionLogic();
 		}
@@ -776,7 +768,7 @@ QUERY;
 			$image_id = 0;
 			if ( ! empty( $issue->image ) ) {
 				$blob_file_path      = trailingslashit( realpath( $blobs_folder ) ) . $issue->image->blob_path;
-				$image_attachment_id = $this->attachments->import_attachment_for_post(
+				$image_attachment_id = Attachments::import_attachment_for_post(
 					$post_id,
 					$blob_file_path,
 					'Magazine cover: ' . $issue_name,
@@ -874,7 +866,7 @@ QUERY;
 	private function get_issue_pdf_attachment_id( int $post_id, object $issue, array $pdfurls ): int {
 		if ( array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
 			$pdf_url          = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
-			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+			$pdf_attachment_id = Attachments::import_attachment_for_post(
 				$post_id,
 				$pdf_url,
 			);
@@ -891,7 +883,7 @@ QUERY;
 				$effective_date = new DateTime( $issue->effective, new DateTimeZone( 'America/Denver' ) );
 				$filename       = 'issue-' . $effective_date->format( 'Y_m_d' ) . '.pdf';
 			}
-			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+			$pdf_attachment_id = Attachments::import_attachment_for_post(
 				$post_id,
 				$issue->digitalEditionURL,
 				'',
@@ -2250,7 +2242,7 @@ QUERY;
 
 			$digital_issue_link = '';
 			if ( ! empty( $issue['digitalEditionURL'] ) ) {
-				$digital_issue_id = $this->attachments->import_external_file( $issue['digitalEditionURL'] );
+				$digital_issue_id = Attachments::import_external_file( $issue['digitalEditionURL'] );
 
 				if ( is_wp_error( $digital_issue_id ) ) {
 					$this->logger->log( 'issues-meta.log', sprintf( 'Error getting digital edition for issue %s: %s', $issue['@id'], $digital_issue_id->get_error_message() ), Logger::WARNING );
@@ -2593,7 +2585,7 @@ QUERY;
 
 		file_put_contents( $tmp_destination_file_path, file_get_contents( $file_blob_path ) );
 
-		$attachment_id = $this->attachments->import_external_file( $tmp_destination_file_path, $image_data['filename'] );
+		$attachment_id = Attachments::import_external_file( $tmp_destination_file_path, $image_data['filename'] );
 
 		wp_delete_file( $tmp_destination_file_path );
 		return $attachment_id;

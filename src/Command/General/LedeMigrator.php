@@ -3,11 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Lede;
-use \NewspackCustomContentMigrator\Logic\Posts;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Lede;
+use Newspack\MigrationTools\Logic\Posts;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use WP_CLI;
 
 /**
  * Lede migration commands.

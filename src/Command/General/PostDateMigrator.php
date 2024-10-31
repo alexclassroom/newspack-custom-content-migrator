@@ -11,8 +11,8 @@ use DateTime;
 use DateTimeZone;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\MigrationTools\Util\BatchLogic;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 
 /**

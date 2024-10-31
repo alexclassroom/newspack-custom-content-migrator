@@ -4,8 +4,8 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Utils\Logger;
+use WP_CLI;
 
 class UsersMigrator implements RegisterCommandInterface {
 

@@ -9,12 +9,12 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use CWS_PageLinksTo;
 use Exception;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
@@ -31,8 +31,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private CoAuthorsPlusHelper $coauthorsplus_logic;
 
 	private Posts $posts_logic;
-
-	private Attachments $attachments_logic;
 	private Logger $logger;
 
 	private GutenbergBlockGenerator $block_generator;
@@ -45,7 +43,6 @@ class TheEmancipatorMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->posts_logic         = new Posts();
-		$this->attachments_logic   = new Attachments();
 		$this->gutenberg_block_gen = new GutenbergBlockGenerator();
 		$this->logger              = new Logger();
 		$this->block_generator     = new GutenbergBlockGenerator();
@@ -453,7 +450,7 @@ EOT
 				$image_info = $content_img[ $basename ] ?? [];
 				$caption    = $image_info['caption'] ?? '';
 				WP_CLI::log( "\t processing image " . $url );
-				$attachment_id = $this->attachments_logic->import_attachment_for_post( $post->ID, $url, $caption, [ 'post_excerpt' => $caption ] );
+				$attachment_id = Attachments::import_attachment_for_post( $post->ID, $url, $caption, [ 'post_excerpt' => $caption ] );
 
 				if ( ! is_wp_error( $attachment_id ) ) {
 					if ( ! empty( $image_info ) ) {
@@ -487,7 +484,7 @@ EOT
 					}
 
 					$caption       = $item['caption'] ?? '';
-					$attachment_id = $this->attachments_logic->import_attachment_for_post( $post->ID, $image_url, $caption, [ 'post_excerpt' => $caption ] );
+					$attachment_id = Attachments::import_attachment_for_post( $post->ID, $image_url, $caption, [ 'post_excerpt' => $caption ] );
 					if ( ! is_wp_error( $attachment_id ) ) {
 						update_post_meta( $post->ID, '_thumbnail_id', $attachment_id );
 						update_post_meta( $post->ID, 'newspack_featured_image_position', 'hidden' );

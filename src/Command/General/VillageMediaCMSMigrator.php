@@ -8,11 +8,11 @@ use DOMDocument;
 use DOMElement;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
 use WP_CLI;
@@ -28,12 +28,6 @@ class VillageMediaCMSMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	/**
-	 * Attachments instance.
-	 *
-	 * @var Attachments|null Attachments instance.
-	 */
-	protected ?Attachments $attachments;
 
 	/**
 	 * Gutenberg block generator.
@@ -67,7 +61,6 @@ class VillageMediaCMSMigrator implements RegisterCommandInterface {
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->attachments     = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
 		$this->cap             = new CoAuthorsPlusHelper();
 		$this->posts           = new Posts();
@@ -1210,7 +1203,7 @@ class VillageMediaCMSMigrator implements RegisterCommandInterface {
 		$is_featured_image = (bool) intval( $media->getElementsByTagName( 'isfeatured' )->item( 0 )->nodeValue );
 		$is_gallery_item   = (bool) intval( $media->getElementsByTagName( 'isgalleryitem' )->item( 0 )->nodeValue );
 
-		$attachment_id = $this->attachments->import_external_file(
+		$attachment_id = Attachments::import_external_file(
 			$url,
 			sanitize_title( $name ),
 			$attribution,

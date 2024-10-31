@@ -3,9 +3,9 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Newsletters;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Newsletters;
-use \WP_CLI;
+use WP_CLI;
 
 class NewslettersMigrator implements RegisterCommandInterface {
 

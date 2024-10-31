@@ -5,11 +5,11 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateTimeImmutable;
 use DateTimeZone;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\GutenbergBlockManipulator;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\GutenbergBlockManipulator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_CLI\ExitException;
@@ -51,7 +51,6 @@ class CarsonNowMigrator implements RegisterCommandInterface {
 		$this->reader_content_cutoff_date = DateTimeImmutable::createFromFormat( self::DRUPAL_DATE_FORMAT, '2023-01-01T00:00:00' );
 		$this->logger                     = new Logger();
 		$this->gutenberg_block_generator  = new GutenbergBlockGenerator();
-		$this->attachments                = new Attachments();
 
 		$this->utc_timezone  = new DateTimeZone( 'UTC' );
 		$this->site_timezone = new DateTimeZone( 'America/Los_Angeles' );
@@ -260,7 +259,7 @@ class CarsonNowMigrator implements RegisterCommandInterface {
 				$attrs['post_excerpt'] = $attrs['description'] ?? '';
 				$attrs['post_title']   = empty( $attrs['title'] ) ? $attrs['post_excerpt'] : $attrs['title'];
 				$attrs['alt']          = empty( $attrs['alt'] ) ? $attrs['post_title'] : $attrs['alt'];
-				$attachments[]         = $this->attachments->import_attachment_for_post( $post->ID, $img['url'], $attrs['alt'], $attrs );
+				$attachments[]         = Attachments::import_attachment_for_post( $post->ID, $img['url'], $attrs['alt'], $attrs );
 			}
 			if ( ! empty( $attachments ) ) {
 				// First is featured.

@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -25,11 +25,6 @@ class BenitoLinkMigrator implements InterfaceCommand {
 	private $posts;
 
 	/**
-	 * @var Attachments Attachments instance.
-	 */
-	private $attachments;
-
-	/**
 	 * @var GutenbergBlockGenerator GutenbergBlockGenerator instance.
 	 */
 	private $block_generator;
@@ -44,7 +39,6 @@ class BenitoLinkMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->posts = new Posts();
-		$this->attachments = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
 		$this->logger = new Logger();
 	}
@@ -175,12 +169,12 @@ class BenitoLinkMigrator implements InterfaceCommand {
 					if ( 0 == $att_id || ! is_numeric( $att_id ) ) {
 
 						WP_CLI::line( sprintf( 'Downloading %s ...', $image ) );
-						$att_id = $this->attachments->import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
+						$att_id = Attachments::import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
 						if ( is_wp_error( $att_id ) || ! $att_id ) {
 							// Try again without the local hostname.
 							if ( 0 === strpos( $image, 'https://benitolink.local/' ) ) {
 								$image = str_replace( 'https://benitolink.local/', 'https://benitolink.com/', $image );
-								$att_id = $this->attachments->import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
+								$att_id = Attachments::import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
 							}
 							if ( is_wp_error( $att_id ) || ! $att_id ) {
 								$this->logger->log( 'benitolink-migrate-galleries__errDownloading.log', sprintf( 'Err downloading -- PostID %d image %s : %s', $post_id, $image, $att_id->get_error_message() ), $this->logger::WARNING );
@@ -208,12 +202,12 @@ class BenitoLinkMigrator implements InterfaceCommand {
 					$att_id = attachment_url_to_postid( $image_local );
 					if ( 0 == $att_id || ! is_numeric( $att_id ) ) {
 						WP_CLI::line( sprintf( 'Downloading %s ...', $image ) );
-						$att_id = $this->attachments->import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
+						$att_id = Attachments::import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
 						if ( is_wp_error( $att_id ) || ! $att_id ) {
 							// Try again without the local hostname.
 							if ( 0 === strpos( $image, 'https://benitolink.local/' ) ) {
 								$image = str_replace( 'https://benitolink.local/', 'https://benitolink.com/', $image );
-								$att_id = $this->attachments->import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
+								$att_id = Attachments::import_external_file( $image, $title = null, $caption = null, $description = null, $alt = null, $post_id );
 							}
 							if ( is_wp_error( $att_id ) || ! $att_id ) {
 								$this->logger->log( 'benitolink-migrate-galleries__errDownloading.log', sprintf( 'Err downloading -- PostID %d image %s : %s', $post_id, $image, $att_id->get_error_message() ), $this->logger::WARNING );

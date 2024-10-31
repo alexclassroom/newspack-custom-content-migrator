@@ -3,10 +3,10 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Utils\Logger as Logger;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Utils\Logger as Logger;
+use WP_CLI;
 
 /**
  * Reusable Blocks Migrator.

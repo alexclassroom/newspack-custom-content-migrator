@@ -6,12 +6,12 @@ use DateTimeZone;
 use DOMDocument;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Util\WordPressXMLHandler;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\Logger;
@@ -294,13 +294,6 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	private $logger;
 
 	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
-
-	/**
 	 * CoAuthorsPlus instance.
 	 *
 	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
@@ -331,7 +324,6 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 */
 	private function __construct() {
 		$this->logger                    = new Logger();
-		$this->attachments               = new Attachments();
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
@@ -3135,7 +3127,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			$post_content_blocks = [];
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
-				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+				$file_post_id = Attachments::import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
 				$filename     = basename( $pdf_file_path );
 
 				if ( is_wp_error( $file_post_id ) ) {
@@ -3165,7 +3157,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			if ( ! is_file( $cover_file_path ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
 			} else {
-				$cover_file_post_id = $this->attachments->import_external_file( $cover_file_path, null, null, null, null, $wp_issue_post_id );
+				$cover_file_post_id = Attachments::import_external_file( $cover_file_path, null, null, null, null, $wp_issue_post_id );
 
 				if ( is_wp_error( $cover_file_post_id ) ) {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload cover file %s: %s', $cover_file_path, $cover_file_post_id->get_error_message() ), Logger::WARNING );
@@ -5004,7 +4996,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		foreach ( $filenames as $filename ) {
 			$media_path = $media_dir . '/' . $filename;
 			if ( file_exists( $media_path ) ) {
-				$attachment_id = $this->attachments->import_attachment_for_post(
+				$attachment_id = Attachments::import_attachment_for_post(
 					$wp_post_id,
 					$media_path,
 					$media['caption'],

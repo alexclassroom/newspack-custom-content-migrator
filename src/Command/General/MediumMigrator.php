@@ -3,11 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Medium;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Medium;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
@@ -36,13 +36,6 @@ class MediumMigrator implements RegisterCommandInterface {
 	private $medium_logic = null;
 
 	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
-
-	/**
 	 * Instance of SimpleLocalAvatars.
 	 *
 	 * @var null|SimpleLocalAvatars
@@ -68,7 +61,6 @@ class MediumMigrator implements RegisterCommandInterface {
 	 */
 	private function __construct() {
 		$this->medium_logic               = new Medium();
-		$this->attachments                = new Attachments();
 		$this->simple_local_avatars_logic = new SimpleLocalAvatars();
 		$this->logger                     = new Logger();
 		$this->block_generator            = new GutenbergBlockGenerator();
@@ -181,7 +173,7 @@ class MediumMigrator implements RegisterCommandInterface {
 			}
 
 			if ( ! empty( $author['avatar'] ) ) {
-				$avatar_id = $this->attachments->import_external_file( $author['avatar'], $author['display_name'] );
+				$avatar_id = Attachments::import_external_file( $author['avatar'], $author['display_name'] );
 				if ( is_wp_error( $avatar_id ) ) {
 					$this->logger->log( self::$log_file, ' -- Error importing author avatar: ' . $avatar_id->get_error_message(), Logger::WARNING );
 				} else {
@@ -244,7 +236,7 @@ class MediumMigrator implements RegisterCommandInterface {
 
 				// Download or import the image file.
 				WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
-				$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
+				$attachment_id = Attachments::import_external_file( $src, $title, $caption, null, $alt, $post_id );
 			
 				if ( $figure->count() > 0 ) {
 					$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
@@ -333,7 +325,7 @@ class MediumMigrator implements RegisterCommandInterface {
 
 		// Set the featured image.
 		if ( ! empty( $article['featured_image'] ) ) {
-			$featured_image_id = $this->attachments->import_external_file(
+			$featured_image_id = Attachments::import_external_file(
 				$article['featured_image']['url'],
 				$article['title'],
 				$article['featured_image']['caption'],

@@ -3,12 +3,12 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
@@ -183,14 +183,6 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 	 * @var Logger Logger instance.
 	 */
 	private $logger;
-
-	/**
-	 * Attachments instance.
-	 *
-	 * @var Attachments Attachments instance.
-	 */
-	private $attachments;
-
 	/**
 	 * Posts instance.
 	 *
@@ -225,7 +217,6 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 	private function __construct() {
 		$this->coauthors_plus   = new CoAuthorsPlusHelper();
 		$this->logger           = new Logger();
-		$this->attachments      = new Attachments();
 		$this->posts            = new Posts();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		$this->crawler          = new Crawler();
@@ -579,9 +570,9 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 			 * Check if already imported. We'll have to make this complex and unperformant at this pint because of historical reasons how we've gradually been importing different data from a specific publisher :(
 			 *  1. check by uid
 			 *  2. check by original URL
-			 *  3. also check if `$this->attachments->import_external_file( $url );` returning an existing URL by:
+			 *  3. also check if `Attachments::import_external_file( $url );` returning an existing URL by:
 			 *      - fetching all attachment IDs
-			 *      - calling `$this->attachments->import_external_file( $url );`
+			 *      - calling `Attachments::import_external_file( $url );`
 			 *      - checking if it returned one of the existing IDs
 			 */
 			$existing_att_id = null;
@@ -606,7 +597,7 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 			}
 			// Get existing or import new attachment ID.
 			if ( ! $existing_att_id ) {
-				$att_id = $this->attachments->import_external_file( $url );
+				$att_id = Attachments::import_external_file( $url );
 				if ( is_wp_error( $att_id ) ) {
 					$err_msg = $att_id->get_error_message() ?? '/na';
 					$this->logger->log( 'chorus_assets_errors.log', sprintf( 'Error importing URL: %s ErrMsg: %s', $url, $err_msg ) );
@@ -966,7 +957,7 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 				if ( ! $attachment_id ) {
 					// Download featured image.
 					WP_CLI::line( "Downloading featured image {$url} ..." );
-					$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+					$attachment_id = Attachments::import_external_file( $url, $title, $caption, null, null, $post_id );
 				}
 
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
@@ -1206,7 +1197,7 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 				if ( ! $attachment_id ) {
 					// Download seo image.
 					WP_CLI::line( "Downloading seo image {$url} ..." );
-					$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+					$attachment_id = Attachments::import_external_file( $url, $title, $caption, null, null, $post_id );
 				}
 
 				if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
@@ -1728,7 +1719,7 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 		if ( ! $attachment_id ) {
 			// Import image.
 			WP_CLI::line( sprintf( 'Downloading image %s ...', $url ) );
-			$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, null, null, $post_id );
+			$attachment_id = Attachments::import_external_file( $url, $title, $caption, null, null, $post_id );
 		}
 
 		// Logg errors.
@@ -1804,7 +1795,7 @@ class ChorusCmsMigrator implements RegisterCommandInterface {
 			if ( ! $attachment_id ) {
 				// Import image.
 				WP_CLI::line( sprintf( 'Downloading gallery image %d/%d %s ...', $key_image + 1, count( $component['gallery']['images'] ), $url ) );
-				$attachment_id = $this->attachments->import_external_file( $url, $title, $caption, $description = null, $alt = null, $post_id = 0, $args = [] );
+				$attachment_id = Attachments::import_external_file( $url, $title, $caption, $description = null, $alt = null, $post_id = 0, $args = [] );
 
 				// Set distribution details.
 				if ( ! isset( $component['image']['asset']['usageRights'] ) || ! $component['image']['asset']['usageRights'] ) {

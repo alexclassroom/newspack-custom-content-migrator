@@ -3,9 +3,8 @@
 namespace NewspackCustomContentMigrator\Logic;
 
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use WP_Error;
-
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
+use WP_Error;
 
 /**
  * Class to handle fixing CoAuthors Plus data.

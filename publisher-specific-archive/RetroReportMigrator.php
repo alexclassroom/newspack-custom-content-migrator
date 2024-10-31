@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Logic\Sponsors;
 use Newspack\MigrationTools\Util\JsonIterator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use NewspackCustomContentMigrator\Logic\Sponsors;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
@@ -42,13 +42,6 @@ class RetroReportMigrator implements InterfaceCommand {
 	 * @var string
 	 */
 	private $log_name;
-
-	/**
-	 * Attachments logic.
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * Simple Local Avatars.
@@ -133,8 +126,6 @@ class RetroReportMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
-
-		$this->attachments = new Attachments();
 
 		$this->co_authors_plus = new CoAuthorsPlusHelper();
 
@@ -669,7 +660,7 @@ class RetroReportMigrator implements InterfaceCommand {
 
 			if ( $image ) {
 				$image_path     = untrailingslashit( ABSPATH ) . $image;
-				$attachment_id = $this->attachments->import_external_file( $image_path );
+				$attachment_id = Attachments::import_external_file( $image_path );
 
 				$this->logger->log( $this->log_name, sprintf( 'Importing the avatar for user %s...', $full_name ) );
 
@@ -1440,7 +1431,7 @@ class RetroReportMigrator implements InterfaceCommand {
 				$this->logger->log( $this->log_name, sprintf( 'Importing thumbnail from %s', $value ) );
 
 				$image_path     = untrailingslashit( ABSPATH ) . $value;
-				$attachment_id = $this->attachments->import_external_file( $image_path );
+				$attachment_id = Attachments::import_external_file( $image_path );
 
 				if ( is_wp_error( $attachment_id ) ) {
 					$this->logger->log( $this->log_name, sprintf( 'There was a problem importing the image %1$s because: %2$s', $image_path, $attachment_id->get_error_message() ) );
@@ -2388,10 +2379,10 @@ HTML;
 
 		$filename = explode( '/', $block->image );
 		$filename = end( $filename );
-		$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+		$attachment_id = Attachments::get_attachment_by_filename( $filename );
 		if ( is_null( $attachment_id ) ) {
 			$image_path    = untrailingslashit( ABSPATH ) . $block->image;
-			$attachment_id = $this->attachments->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$image_path,     // Image URL.
 				$block->copy, // Title.
 				$block->copy, // Caption.

@@ -4,11 +4,11 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use InvalidArgumentException;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\PlainFileLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use stdClass;
 use WP_CLI;
 

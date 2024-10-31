@@ -11,20 +11,20 @@ use DOMNodeList;
 use DOMXPath;
 use Exception;
 use Generator;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\Images;
+use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\General\DownloadMissingImages;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Posts;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users;
-use NewspackCustomContentMigrator\Logic\Images;
-use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
@@ -630,13 +630,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 	private $json_iterator;
 
 	/**
-	 * Attachments.
-	 *
-	 * @var Attachments $attachments
-	 */
-	private $attachments;
-
-	/**
 	 * Console table.
 	 *
 	 * @var ConsoleTable $console_table
@@ -688,7 +681,6 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 		$this->simple_local_avatars            = new SimpleLocalAvatars();
 		$this->redirection                     = new Redirection();
 		$this->logger                          = new Logger();
-		$this->attachments                     = new Attachments();
 		$this->posts                           = new Posts();
 		$this->console_table                   = new ConsoleTable();
 		$this->taxonomy                        = new Taxonomy();
@@ -2050,7 +2042,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_FILENOTFOUND.log', sprintf( 'user_email: %s > json_file: %s > image_file_path: %s does not exist.', $email, $json_file['file'], $image_file_path ), $this->logger::WARNING );
 					continue;
 				}
-				$att_id = $this->attachments->import_external_file( $image_file_path, $ga->ID );
+				$att_id = Attachments::import_external_file( $image_file_path, $ga->ID );
 				if ( is_wp_error( $att_id ) ) {
 					$this->logger->log( 'cmd_update_all_author_avatars__ERROR_ATTACHMENTIMPORT.log', sprintf( 'file:%s err:%s', $image_file_path, $att_id->get_error_message() ), $this->logger::WARNING );
 					continue;
@@ -3577,7 +3569,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 				);
 				if ( isset( $article['picture']['name'] ) ) {
 					$featured_img_url             = 'https://www.lasillavacia.com/media/' . $article['picture']['name'];
-					$featured_image_attachment_id = $this->attachments->import_external_file( $featured_img_url );
+					$featured_image_attachment_id = Attachments::import_external_file( $featured_img_url );
 					if ( is_wp_error( $featured_image_attachment_id ) || ! $featured_image_attachment_id ) {
 						$msg = sprintf( 'ERROR: Article ID %d, error importing featured image URL %s err: %s', $original_article_id, $featured_img_url, is_wp_error( $featured_image_attachment_id ) ? $featured_image_attachment_id->get_error_message() : '/' );
 						$this->file_logger( $msg );
@@ -4501,7 +4493,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			if ( $post_id !== 0 ) {
 				update_post_meta( $post_id, 'newspack_featured_image_position', '' );
 			}
-			$featured_image_attachment_id = $this->attachments->import_external_file(
+			$featured_image_attachment_id = Attachments::import_external_file(
 				$full_file_path,
 				$image['FriendlyName'] ?? $image['name'],
 				$image['caption'] ?? '',
@@ -8753,7 +8745,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 			$path           = "/tmp/convert_base64_images/$post->ID-$key.$file_extension";
 			file_put_contents( $path, $data ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_file_put_contents
 
-			$attachment_id  = $this->attachments->import_external_file( $path, null, null, null, null, $post->ID );
+			$attachment_id  = Attachments::import_external_file( $path, null, null, null, null, $post->ID );
 			$attachment_url = wp_get_attachment_url( $attachment_id );
 			ConsoleColor::cyan( $attachment_url )->output();
 
@@ -8844,7 +8836,7 @@ class LaSillaVaciaMigrator implements InterfaceCommand {
 
 			$post_id = wp_insert_post( $post );
 
-			$attachment_id = $this->attachments->import_external_file( $file_path, false, false, false, false, $post_id );
+			$attachment_id = Attachments::import_external_file( $file_path, false, false, false, false, $post_id );
 
 			if ( is_wp_error( $attachment_id ) ) {
 				$this->logger->log(
@@ -8939,7 +8931,7 @@ BLOCK;
 				continue;
 			}
 
-			$attachment_id = $this->attachments->import_external_file( $file_path );
+			$attachment_id = Attachments::import_external_file( $file_path );
 			$audio_url     = wp_get_attachment_url( $attachment_id );
 			$audio_block   = <<<BLOCK
 <!-- wp:audio {"id":$attachment_id} -->
@@ -9008,7 +9000,7 @@ BLOCK;
 			$this->handle_saving_post_content_as_meta( $post->post_content, $post->ID );
 
 			echo WP_CLI::colorize( "%BHANDLING IMAGES%n\n" );
-			$image_urls = $this->attachments->get_images_sources_from_content( $post->post_content );
+			$image_urls = Attachments::get_images_sources_from_content( $post->post_content );
 			foreach ( $image_urls as $image_url ) {
 				ConsoleColor::high_contrast_kv_output( 'Original URL', $image_url );
 
@@ -9025,7 +9017,7 @@ BLOCK;
 
 					if ( ! str_contains( $new_image_url, 'lasilla.com' ) ) {
 						echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
-						$attachment_id  = $this->attachments->import_external_file( $new_image_url, null, null, null, null, $post->ID );
+						$attachment_id  = Attachments::import_external_file( $new_image_url, null, null, null, null, $post->ID );
 						$attachment_url = wp_get_attachment_url( $attachment_id );
 
 						$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
@@ -9048,7 +9040,7 @@ BLOCK;
 				$file_exists        = file_exists( $full_filename_path );
 				ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
-				$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+				$possible_attachment_id = Attachments::maybe_get_existing_attachment_id( $full_filename_path, $filename );
 				ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 				if ( $possible_attachment_id ) {
@@ -9056,7 +9048,7 @@ BLOCK;
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
 				} elseif ( $file_exists ) {
 					echo WP_CLI::colorize( "%YAttempting to download image%n\n" );
-					$attachment_id  = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+					$attachment_id  = Attachments::import_external_file( $full_filename_path, null, null, null, null, $post->ID );
 					$attachment_url = wp_get_attachment_url( $attachment_id );
 
 					$post->post_content = str_replace( $image_url, $attachment_url, $post->post_content );
@@ -9075,11 +9067,11 @@ BLOCK;
 					ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 					if ( $file_exists ) {
-						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_id      = Attachments::import_external_file( $full_filename_path, null, null, null, null, $post->ID );
 						$attachment_url     = wp_get_attachment_url( $attachment_id );
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
-						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$possible_attachment_id = Attachments::maybe_get_existing_attachment_id( $full_filename_path, $filename );
 						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
@@ -9102,11 +9094,11 @@ BLOCK;
 					ConsoleColor::high_contrast_kv_output( 'File Exists?', $file_exists ? 'Yes' : 'Nope' );
 
 					if ( $file_exists ) {
-						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_id      = Attachments::import_external_file( $full_filename_path, null, null, null, null, $post->ID );
 						$attachment_url     = wp_get_attachment_url( $attachment_id );
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
-						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$possible_attachment_id = Attachments::maybe_get_existing_attachment_id( $full_filename_path, $filename );
 						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
@@ -9144,11 +9136,11 @@ BLOCK;
 
 					if ( $file_exists ) {
 						WP_CLI::success('File exists');
-						$attachment_id      = $this->attachments->import_external_file( $full_filename_path, null, null, null, null, $post->ID );
+						$attachment_id      = Attachments::import_external_file( $full_filename_path, null, null, null, null, $post->ID );
 						$attachment_url     = wp_get_attachment_url( $attachment_id );
 						$post->post_content = str_replace( $match, $attachment_url, $post->post_content );
 					} else {
-						$possible_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $full_filename_path, $filename );
+						$possible_attachment_id = Attachments::maybe_get_existing_attachment_id( $full_filename_path, $filename );
 						ConsoleColor::high_contrast_kv_output( 'Possible Attachment ID', $possible_attachment_id ?? 'Nope' );
 
 						if ( $possible_attachment_id ) {
@@ -9568,7 +9560,7 @@ BLOCK;
 			ConsoleColor::high_contrast_kv_output( 'Post ID', $post_id );
 			$post = get_post( $post_id );
 
-			$featured_image = $this->attachments->get_images_sources_from_content( $post->post_content );
+			$featured_image = Attachments::get_images_sources_from_content( $post->post_content );
 
 			if ( is_array( $featured_image ) && ! empty( $featured_image ) ) {
 				$featured_image = $featured_image[0];
@@ -9610,7 +9602,7 @@ BLOCK;
 			return null;
 		}
 
-		$attachment_id = $this->attachments->import_external_file( $file_path );
+		$attachment_id = Attachments::import_external_file( $file_path );
 		$audio_url     = wp_get_attachment_url( $attachment_id );
 		return <<<BLOCK
 <!-- wp:audio {"id":$attachment_id} -->
@@ -9652,7 +9644,7 @@ BLOCK;
 	private function handle_profile_photo( string $filename, string $media_location ): int {
 		$media_location = trailingslashit( $media_location );
 		if ( file_exists( $media_location . $filename ) ) {
-			return $this->attachments->import_external_file(
+			return Attachments::import_external_file(
 				$media_location . $filename,
 				false,
 				false,

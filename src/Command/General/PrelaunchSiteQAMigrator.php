@@ -11,7 +11,7 @@ use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * General Prelaunch QA migrator

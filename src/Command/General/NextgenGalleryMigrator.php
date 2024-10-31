@@ -3,12 +3,12 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use \WP_CLI;
-use \NewspackPostImageDownloader\Downloader;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackPostImageDownloader\Downloader;
+use WP_CLI;
 
 class NextgenGalleryMigrator implements RegisterCommandInterface {
 

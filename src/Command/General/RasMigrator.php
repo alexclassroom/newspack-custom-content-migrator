@@ -3,11 +3,11 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\Reader_Activation;
+use Newspack_Popups_Model;
+use Newspack_Segments_Model;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
-use Newspack\Reader_Activation;
-use Newspack_Segments_Model;
-use Newspack_Popups_Model;
 
 /**
  * Profile Press reusable commands.
