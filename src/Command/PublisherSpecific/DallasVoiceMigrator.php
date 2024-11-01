@@ -9,6 +9,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use simplehtmldom\HtmlDocument;
@@ -26,12 +27,17 @@ class DallasVoiceMigrator implements InterfaceCommand {
 	 */
 	private Logger $logger;
 
+	/**
+	 * @var GutenbergBlockGenerator
+	 */
+	private GutenbergBlockGenerator $block_generator;
 
 	/**
 	 * Private constructor.
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
+		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -73,6 +79,14 @@ class DallasVoiceMigrator implements InterfaceCommand {
 			[ $this, 'cmd_fix_image_blocks_wrong_attachment_id_reference' ],
 			[
 				'shortdesc' => 'Fix wrong attachment ID reference in Image Blocks',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator dallasvoice-fix-gallery-blocks-wrong-attachment-id-reference',
+			[ $this, 'cmd_fix_gallery_blocks_wrong_attachment_id_reference' ],
+			[
+				'shortdesc' => 'Fix wrong attachment ID reference in Gallery Blocks',
 			]
 		);
 	}
@@ -346,6 +360,103 @@ class DallasVoiceMigrator implements InterfaceCommand {
 		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
 	}
 
+	/** 
+	 * Fixes Galleries with non-existent attachment IDs.
+	 */
+	public function cmd_fix_gallery_blocks_wrong_attachment_id_reference( array $args, array $assoc_args ): void {
+		$dry_run      = ! empty( $assoc_args['dry-run'] ) ? (bool) $assoc_args['dry-run'] : false;
+
+		$migration_datetime = date( 'Y-m-d H-i-s' );
+		$migration_name     = 'dallasvoice-fix-gallery-blocks' . ( $dry_run ? '-dry-run' : '' );
+
+		// Logs.
+		$log = $migration_datetime . '-' . $migration_name . '.log';
+
+		// CSV.
+		$csv              = $migration_datetime . '-' . $migration_name . '.csv';
+		$csv_file_pointer = fopen( $csv, 'w' );
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Post ID',
+				'Post Title',
+				'Old Content',
+				'New Content',
+				'Local URL',
+				'Staging URL',
+				'Live URL',
+			]
+		);
+
+		global $wpdb;
+
+		$post_ids = $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT `ID` FROM `$wpdb->posts` WHERE `post_type` IN ('post', 'page') AND `post_content` LIKE '%<!-- wp:gallery%'"
+			)
+		);
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( 'DallasVoice: Fix Gallery Blocks', count( $post_ids ), 1 );
+
+		foreach ( $post_ids as $post_index => $post_id ) {
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'DallasVoice: Fix Gallery Blocks [Post #%d: %d/%d] [Memory: %s]',
+					$post_id,
+					$post_index + 1,
+					count( $post_ids ),
+					size_format( memory_get_usage( true ) )
+				)
+			);
+
+			$old_content = get_post_field( 'post_content', $post_id );
+			$new_content = $old_content;
+
+			$blocks = parse_blocks( $old_content );
+
+			$new_blocks  = $this->fix_gallery_blocks( $blocks );
+			$new_content = serialize_blocks( $new_blocks );
+
+			if ( $new_content === $old_content ) {
+				continue;
+			}
+
+			if ( ! $dry_run ) {
+				wp_save_post_revision( $post_id );
+				
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $new_content,
+					] 
+				);
+			}
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$post_index + 1, // #.
+					$post_id, // Post ID.
+					get_the_title( $post_id ), // Post Title.
+					$old_content, // Old Content.
+					$new_content, // New Content.
+					get_permalink( $post_id ), // Local URL.
+					str_replace( home_url( '/' ), 'https://dallasvoice-newspack.newspackstaging.com/', get_permalink( $post_id ) ), // Staging URL.
+					str_replace( home_url( '/' ), 'https://dallasvoice.com/', get_permalink( $post_id ) ), // Live URL.
+				]
+			);
+		}
+
+		$progress_bar->finish();
+
+		// Close CSV.
+		fclose( $csv_file_pointer );
+
+		WP_CLI::success( sprintf( 'Done. See %s', $log ) );
+	}
+
 	/**
 	 * Helper function to get Gallery Settings based on Shortcode ID.
 	 * 
@@ -390,6 +501,50 @@ class DallasVoiceMigrator implements InterfaceCommand {
 
 			if ( $block['blockName'] === 'core/image' ) {
 				$block = $this->get_fixed_image_block( $block );
+			}
+		}
+
+		return $blocks;
+	}
+
+	/**
+	 * Fix Gallery Blocks recursively.
+	 * 
+	 * @return array
+	 */
+	private function fix_gallery_blocks( array &$blocks ): array {
+		foreach ( $blocks as &$block ) {
+			if ( $block['blockName'] !== 'core/gallery' ) {
+				continue;
+			}
+
+			foreach ( $block['innerBlocks'] as &$imageBlock ) {
+				$attachment_id = $imageBlock['attrs']['id'];
+				$attachment_post = get_post( $attachment_id );
+
+				if ( $attachment_post && $attachment_post->post_type === 'attachment' ) {
+					continue; // All Good! Nothing to change
+				}
+
+				if ( ! $attachment_post || $attachment_post->post_type !== 'attachment' ) {
+					$attachment_id = (int) $imageBlock['attrs']['id'] + 1000000000;
+					$attachment_post = get_post( $attachment_id );
+				}
+
+				if ( ! $attachment_post || $attachment_post->post_type !== 'attachment' ) {
+					// No such attachment
+					// Debug..
+
+					continue;
+				}
+
+				$imageBlock = $this
+					->block_generator
+					->get_image(
+						$attachment_post,
+						$imageBlock['attrs']['sizeSlug'] ?? 'large',
+						false,
+					);
 			}
 		}
 
