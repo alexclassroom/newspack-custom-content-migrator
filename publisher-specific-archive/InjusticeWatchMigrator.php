@@ -6,9 +6,9 @@ use Exception;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Redirection;
 use Newspack\MigrationTools\Util\CsvIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_Post;
 

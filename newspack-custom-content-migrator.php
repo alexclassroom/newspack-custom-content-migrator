@@ -29,15 +29,7 @@ PluginSetup::add_hooks();
 
 PluginSetup::register_command_classes(
 	[
-		Command\General\CssMigrator::class,
-		Command\General\PostsMigrator::class,
-		Command\General\MetaToContentMigrator::class,
-		Command\General\MenusMigrator::class,
-		Command\General\ContentConverterPluginMigrator::class,
-		Command\General\SettingsMigrator::class,
-		Command\General\WooCommMigrator::class,
 		Command\General\ReaderRevenueMigrator::class,
-		Command\General\CampaignsMigrator::class,
 		Command\General\ListingsMigrator::class,
 		Command\General\InlineFeaturedImageMigrator::class,
 		Command\General\SubtitleMigrator::class,

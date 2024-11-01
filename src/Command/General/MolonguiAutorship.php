@@ -10,8 +10,8 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

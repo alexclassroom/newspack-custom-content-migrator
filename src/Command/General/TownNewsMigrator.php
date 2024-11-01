@@ -7,8 +7,8 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use SimpleXMLElement;
 use WP_CLI;
 

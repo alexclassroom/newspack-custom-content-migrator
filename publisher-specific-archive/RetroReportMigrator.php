@@ -7,8 +7,8 @@ use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
 use Newspack\MigrationTools\Logic\Sponsors;
 use Newspack\MigrationTools\Util\JsonIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

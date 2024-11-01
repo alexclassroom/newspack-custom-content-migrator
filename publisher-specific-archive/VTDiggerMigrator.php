@@ -4,10 +4,10 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Logic\Posts as PostLogic;
 use Newspack\MigrationTools\Logic\Taxonomy as TaxonomyLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

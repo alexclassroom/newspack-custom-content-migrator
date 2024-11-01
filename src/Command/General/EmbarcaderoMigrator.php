@@ -10,11 +10,11 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\WordPressXMLHandler;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

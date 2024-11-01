@@ -5,11 +5,11 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
 use NewspackCustomContentMigrator\Command\General\ChorusCmsMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

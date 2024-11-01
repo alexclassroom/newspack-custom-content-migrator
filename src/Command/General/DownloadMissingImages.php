@@ -5,9 +5,9 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 class DownloadMissingImages implements RegisterCommandInterface {

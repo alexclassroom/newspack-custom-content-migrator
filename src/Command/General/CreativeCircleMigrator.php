@@ -5,9 +5,9 @@ namespace NewspackCustomContentMigrator\Command\General;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack_Scraper_Migrator_Creative_Circle_Scraper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 class CreativeCircleMigrator implements RegisterCommandInterface {

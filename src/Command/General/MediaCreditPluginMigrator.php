@@ -21,8 +21,8 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

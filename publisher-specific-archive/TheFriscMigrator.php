@@ -4,9 +4,9 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
 use simplehtmldom\HtmlDocument;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;

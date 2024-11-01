@@ -13,10 +13,10 @@ use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Redirection;
 use Newspack\MigrationTools\Logic\Redirection as RedirectionLogic;
 use Newspack\MigrationTools\Util\JsonIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 class HighCountryNewsMigrator implements InterfaceCommand {

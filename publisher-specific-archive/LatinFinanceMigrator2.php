@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack_WXR_Exporter;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Utils\Logger;
 use PDO;
 use PDOException;
 use stdClass;

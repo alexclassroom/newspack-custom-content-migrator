@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

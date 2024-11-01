@@ -8,9 +8,9 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Utils\Logger;
 use stdClass;
 use WP_CLI;
 use WP_Query;

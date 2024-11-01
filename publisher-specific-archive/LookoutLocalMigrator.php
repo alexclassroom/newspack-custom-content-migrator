@@ -7,12 +7,12 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack_Scraper_Migrator_HTML_Parser;
 use Newspack_Scraper_Migrator_Util;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use NewspackCustomContentMigrator\Utils\Logger;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
 

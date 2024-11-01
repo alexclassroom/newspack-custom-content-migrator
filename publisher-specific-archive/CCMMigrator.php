@@ -5,10 +5,10 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

@@ -5,8 +5,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 /* Internal dependencies */
 
 use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /* External dependencies */
