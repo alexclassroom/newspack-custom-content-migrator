@@ -12,8 +12,6 @@ use Bramus\Monolog\Formatter\ColoredLineFormatter;
 use WP_CLI;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Util\Log\CliLog;
-use Newspack\MigrationTools\Util\Log\PlainFileLog;
-use Newspack\MigrationTools\Util\Log\PlainLineFormatter;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 
 /**
@@ -56,7 +54,7 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 			'newspack-content-migrator southwestregionalpublishing dev-helper-get-category-ids',
 			self::get_command_closure( 'cmd_dev_helper_get_category_ids' ),
 			[
-				'shortdesc' => 'Quickly get category IDs and validate if they exist, or if multiple category names exist with different IDs.',
+				'shortdesc' => 'Quickly get category IDs and validate if they exist, or if multiple category names exist with different IDs. Outputs {CAT_NAME},{ID} for easy CSV import.',
 				'synopsis'  => [],
 			]
 		);
@@ -140,9 +138,12 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 				),
 				ARRAY_A
 			);
+
 			if ( empty( $term_rows ) ) {
+				// Note if category doesn't exist.
 				$this->logger_cli_level->error( $category_name . ',NOT_FOUND' );
 			} else {
+				// If multiple IDs exist for same category name, log all of them to spot and resolve ambiguity.
 				foreach ( $term_rows as $term_row ) {
 					$this->logger_cli_plain->debug( $category_name . ',' . $term_row['term_id'] );
 				}
