@@ -7,12 +7,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Bramus\Monolog\Formatter\ColoredLineFormatter;
-
 use WP_CLI;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use Bramus\Monolog\Formatter\ColoredLineFormatter;
 
 /**
  * SouthwestRegionalPublishingMigrator.
