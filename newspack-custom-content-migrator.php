@@ -78,6 +78,7 @@ PluginSetup::register_command_classes(
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 	]
 );
 
