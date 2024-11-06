@@ -7,6 +7,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Bramus\Monolog\Formatter\ColoredLineFormatter;
+
 use WP_CLI;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Util\Log\CliLog;
@@ -22,17 +24,28 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 	use WpCliCommandTrait;
 
 	/**
-	 * CLI logger.
+	 * CLI logger, plain, just message.
 	 *
 	 * @var CliLog $logger_cli CLI Logger.
 	 */
-	private $logger_cli;
+	private $logger_cli_plain;
+	
+	/**
+	 * CLI logger, plain, just level and message.
+	 *
+	 * @var CliLog $logger_cli CLI Logger.
+	 */
+	private $logger_cli_level;
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->logger_cli = CliLog::get_logger( 'cli', new PlainLineFormatter() );
+		// Just message.
+		$this->logger_cli_plain = CliLog::get_logger( 'cli-message', new ColoredLineFormatter( null, "%message%\n", null, true ) );
+		
+		// Just level and message.
+		$this->logger_cli_level = CliLog::get_logger( 'cli-level-message', new ColoredLineFormatter( null, "%level_name%: %message%\n", null, true ) );
 	}
 
 	/**
@@ -128,10 +141,10 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 				ARRAY_A
 			);
 			if ( empty( $term_rows ) ) {
-				$this->logger_cli->info( $category_name . ',NOT_FOUND' );
+				$this->logger_cli_level->error( $category_name . ',NOT_FOUND' );
 			} else {
 				foreach ( $term_rows as $term_row ) {
-					$this->logger_cli->info( $category_name . ',' . $term_row['term_id'] );
+					$this->logger_cli_plain->debug( $category_name . ',' . $term_row['term_id'] );
 				}
 			}
 		}
