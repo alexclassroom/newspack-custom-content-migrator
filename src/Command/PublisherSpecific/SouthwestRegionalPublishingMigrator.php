@@ -1,23 +1,29 @@
 <?php
+/**
+ * Southwest Regional Publishing specific commands.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use WP_CLI;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Util\Log\CliLog;
-use Newspack\MigrationTools\Util\Log\CliLogPlain;
-use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\PlainFileLog;
 use Newspack\MigrationTools\Util\Log\PlainLineFormatter;
-use Bramus\Monolog\Formatter\ColoredLineFormatter;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 
+/**
+ * SouthwestRegionalPublishingMigrator.
+ */
 class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
 	/**
 	 * CLI logger.
+	 *
 	 * @var CliLog $logger_cli CLI Logger.
 	 */
 	private $logger_cli;
@@ -37,8 +43,8 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 			'newspack-content-migrator southwestregionalpublishing dev-helper-get-category-ids',
 			self::get_command_closure( 'cmd_dev_helper_get_category_ids' ),
 			[
-				'shortdesc'     => 'Quickly get category IDs and validate if they exist, or if multiple category names exist with different IDs.',
-				'synopsis'      => [],
+				'shortdesc' => 'Quickly get category IDs and validate if they exist, or if multiple category names exist with different IDs.',
+				'synopsis'  => [],
 			]
 		);
 	}
@@ -46,8 +52,8 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 	/**
 	 * Add the byline to the content if there is one.
 	 *
-	 * @param array $pos_args
-	 * @param array $assoc_args
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
@@ -108,9 +114,10 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 			'Reporter Sports',
 		];
 
-		foreach ($category_names as $category_name) {
+		foreach ( $category_names as $category_name ) {
 			$term_rows = $wpdb->get_results(
-				$wpdb->prepare( "SELECT t.term_id
+				$wpdb->prepare(
+					"SELECT t.term_id
 					FROM $wpdb->terms t
 					JOIN $wpdb->term_taxonomy tt 
 					ON tt.term_id = t.term_id
@@ -120,7 +127,7 @@ class SouthwestRegionalPublishingMigrator implements RegisterCommandInterface {
 				),
 				ARRAY_A
 			);
-			if ( empty( $term_rows ) ){
+			if ( empty( $term_rows ) ) {
 				$this->logger_cli->info( $category_name . ',NOT_FOUND' );
 			} else {
 				foreach ( $term_rows as $term_row ) {
