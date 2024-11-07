@@ -67,7 +67,6 @@ class PluginSetup {
 		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
 			if ( is_a( $command_class, WpCliCommandInterface::class, true ) ) {
 				CliLog::get_logger('register_command_classes')->debug( sprintf('Registering commands for class %s.', $command_class) );
-				// Register commands for class.
 				array_map( function ( $command ) {
 					WP_CLI::add_command( ...$command );
 				}, $command_class::get_cli_commands() );
