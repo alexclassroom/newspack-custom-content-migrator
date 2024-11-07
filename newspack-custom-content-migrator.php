@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.7.1
+ * Version:     1.7.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -78,6 +78,7 @@ PluginSetup::register_command_classes(
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 	]
 );
 
