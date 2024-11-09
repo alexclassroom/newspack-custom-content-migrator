@@ -77,7 +77,7 @@ PluginSetup::register_command_classes(
 		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific commands. Remove from below when launched.
-		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\BailiwickMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 	]
 );
