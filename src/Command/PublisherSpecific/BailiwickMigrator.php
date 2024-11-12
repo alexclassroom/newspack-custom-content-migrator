@@ -30,6 +30,9 @@ class BailiwickMigrator implements RegisterCommandInterface {
 	private function __construct() {
 		$this->cli_logger  = CliLog::get_logger( 'bw' );
 		$this->file_logger = FileLog::get_logger( 'bw' );
+		if (! defined( 'NP_LIVE' ) ) {
+			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
+		}
 	}
 
 	public static function register_commands(): void {
@@ -175,7 +178,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				[ 'destination' => $filename, 'url' => $url ]
 			);
 
-			$response = wp_remote_get( $url, ['timeout' => 10] );
+			$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
 
 			// Check for errors
 			if ( is_wp_error( $response ) ) {
@@ -289,7 +292,6 @@ class BailiwickMigrator implements RegisterCommandInterface {
 					continue;
 				}
 				$post['ID'] = $existing_id;
-
 			}
 
 			if ( ++$counter % 10 === 0 ) {
@@ -319,20 +321,83 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				$post['meta_input']['newspack_post_subtitle'] = $lead;
 			}
 
-			$content     = (string) $article_xml->content;
-			$description = (string) $article_xml->description;
-
+			$content              = (string) $article_xml->content;
+			$description          = (string) $article_xml->description;
 			$post['post_content'] = $content . $description;
-			$post_id              = wp_insert_post( $post );
+
+			$post_id = wp_insert_post( $post );
 			if ( is_wp_error( $post_id ) ) {
 				$this->cli_logger->error( 'Failed to import article', [ 'error' => $post_id ] );
 				continue;
 			}
 
+
 			$this->cli_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'to_url' => "$home_url/?p=$post_id" ] );
 			$file_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'from_url' => $url ] );
 
+			$content   = get_post_field( 'post_content', $post_id );
+			$replacers = [];
+			if ( str_contains( $content, '<h1>' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
+			}
+			if (str_contains( $content, '<img ' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
+			}
+			if ( ! empty( $replacers ) ) {
+				$html_doc = new HtmlDocument( $content );
+				foreach ( $replacers as $replacer ) {
+					$replacer( $html_doc, $post_id );
+				}
+				$content = $html_doc->save();
+
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => $content,
+					]
+				);
+			}
+
 			$this->set_featured_image_on_post( $post_id, (string) $article_xml->image ?? '' );
+		}
+	}
+
+	private function fix_h1s( HtmlDocument $html_doc, int $post_id ): void {
+		$h1s = $html_doc->find( 'h1' );
+		foreach ( $h1s as $h1 ) {
+			$h1->tag = 'h2';
+		}
+	}
+
+	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
+		$gb_blocks = new GutenbergBlockGenerator();
+		$images    = $html_doc->find( 'img' );
+		if ( empty( $images ) ) {
+			$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $id ] );
+			return;
+		}
+		foreach ( $images as $img ) {
+			$src = $img?->getAttribute( 'src' );
+			if ( ! $src ) {
+				continue; // TODO
+			}
+			if ( ! str_starts_with( $src, 'http' ) ) {
+				$src = NP_LIVE . $src;
+			}
+			$att_id = $this->get_image_from_url( $src, $post_id );
+			if ( is_wp_error( $att_id ) ) {
+				$this->cli_logger->error( 'Failed to import inline image', [ 'post_id' => $post_id, 'src' => $src, 'error' => $att_id ] );
+				continue;
+			}
+			FileLog::get_logger( 'bw-images' )->notice( 'Imported inline image', [ 'post_id' => $post_id, 'src' => $src ] );
+
+			$img->outertext = serialize_block(
+				$gb_blocks->get_image(
+					get_post( $att_id ),
+					'full',
+					false
+				)
+			);
 		}
 	}
 
