@@ -5,6 +5,7 @@ namespace NewspackCustomContentMigrator;
 
 use Newspack\MigrationTools\Command\WpCliCommandInterface;
 use Newspack\MigrationTools\Command\WpCliCommands;
+use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use WP_CLI;
 
@@ -66,10 +67,9 @@ class PluginSetup {
 		// Get the commands from implementers of the newspack_migration_tools_command_classes hook.
 		foreach ( WpCliCommands::get_classes_with_cli_commands() as $command_class ) {
 			if ( is_a( $command_class, WpCliCommandInterface::class, true ) ) {
-				CliLog::get_logger('register_command_classes')->debug( sprintf('Registering commands for class %s.', $command_class) );
-				array_map( function ( $command ) {
-					WP_CLI::add_command( ...$command );
-				}, $command_class::get_cli_commands() );
+				array_map( fn( $command ) => WP_CLI::add_command( ...$command ), $command_class::get_cli_commands() );
+			} else {
+				NMT::exit_with_message( sprintf( 'Class %s does not implement WpCliCommandInterface.', $command_class ), [ CliLog::get_logger( 'PluginSetup' ) ] );
 			}
 		}
 
@@ -83,7 +83,7 @@ class PluginSetup {
 				}
 			}
 		} catch ( \Exception $o_0 ) {
-			WP_CLI::error( sprintf('Error registering command for class %s. Message: %s', $command_class, $o_0->getMessage() ));
+			NMT::exit_with_message( sprintf( 'Error registering command for class %s. Message: %s', $command_class, $o_0->getMessage() ), [ CliLog::get_logger( 'PluginSetup' ) ] );
 		}
 
 	}
