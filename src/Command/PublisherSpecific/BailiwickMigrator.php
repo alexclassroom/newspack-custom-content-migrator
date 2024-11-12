@@ -2,6 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use DateInterval;
+use DateTime;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
@@ -16,7 +18,6 @@ use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Psr\Log\LoggerInterface;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
-use WP_CLI\ExitException;
 use WP_Error;
 
 class BailiwickMigrator implements RegisterCommandInterface {
@@ -46,6 +47,55 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			'description' => 'Refresh existing articles',
 			'optional'    => true,
 		];
+
+		$from_date = [
+			'type'        => 'assoc',
+			'name'        => 'from-date',
+			'description' => 'From date in format YYYY-MM-DD',
+			'optional'    => false,
+		];
+		$to_date   = [
+			'type'        => 'assoc',
+			'name'        => 'to-date',
+			'description' => 'To date in format YYYY-MM-DD', // TODO. Are these inclusive?
+			'optional'    => false,
+		];
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-download-xml',
+			self::get_command_closure( 'cmd_download_xml' ),
+			[
+				'shortdesc' => 'Download XML files from date range.',
+				'synopsis'  => [
+					$from_date,
+					$to_date,
+					[
+						'type'        => 'assoc',
+						'name'        => 'base-url',
+						'description' => 'Url including auth string – you should get this from the publisher',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'output-dir',
+						'description' => 'Optional. Where to put the downloaded xml files – defaults to current dir', // TODO. Are these inclusive?
+						'optional'    => true,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'overwrite',
+						'description' => 'Optional. Whether to overwrite existing files with the same file name when writing the xml to disk. If not set the download will append a number to the filename.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'days-pr-file',
+						'description' => 'Optional. How many days in each file downloaded. Defaults to 10.',
+						'optional'    => true,
+					]
+				],
+			]
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator bw-import-articles-from-xml',
@@ -84,6 +134,119 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		);
 	}
 
+	public function cmd_download_xml( array $pos_args, array $assoc_args ): void {
+		$from_date    = $assoc_args['from-date'];
+		$to_date      = $assoc_args['to-date'];
+		$base_url     = $assoc_args['base-url'];
+		$output_dir   = $assoc_args['output-dir'] ?? '';
+		$overwrite    = $assoc_args['overwrite'] ?? false;
+		$days_pr_file = $assoc_args['days-pr-file'] ?? 10;
+
+		if ( ! empty( $output_dir ) ) {
+			if ( ! file_exists( $output_dir ) ) {
+				NMT::exit_with_message( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+			}
+		}
+
+		$date_format_for_url  = 'd/m/Y';
+		$short_iso8601_format = 'Y-m-d';
+		foreach ( $this->get_date_range_chunks( $from_date, $to_date, $days_pr_file ) as $chunk ) {
+
+			$url = sprintf(
+				'%s&from=%s&to=%s',
+				$base_url, $chunk['from']->format( $date_format_for_url ),
+				$chunk['to']->format( $date_format_for_url )
+			); // This assumes that we use '&' because the url needs auth.
+
+			$domain   = parse_url( $base_url, PHP_URL_HOST );
+			$filename = sanitize_file_name( sprintf( '%s-%s-%s.xml', $domain, $chunk['from']->format( $short_iso8601_format ), $chunk['to']->format( $short_iso8601_format ) ) );
+			if ( ! empty( $output_dir ) ) {
+				if ( ! file_exists( $output_dir ) ) {
+					NMT::exit_with_message( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+				}
+				$filename = trailingslashit( $output_dir ) . $filename;
+			}
+			$this->cli_logger->info(
+				sprintf(
+					'Downloading XML for %s to %s',
+					$chunk['from']->format( $short_iso8601_format ),
+					$chunk['to']->format( $short_iso8601_format )
+				),
+				[ 'destination' => $filename, 'url' => $url ]
+			);
+
+			$response = wp_remote_get( $url, ['timeout' => 10] );
+
+			// Check for errors
+			if ( is_wp_error( $response ) ) {
+				NMT::exit_with_message( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
+			}
+
+			if ( ! $overwrite ) {
+				$counter   = 0;
+				$file_info = pathinfo( $filename );
+
+				// Loop until we find a unique filename
+				while ( file_exists( $filename ) ) {
+					$counter++;
+					$filename = $file_info['dirname'] . '/' . $file_info['filename'] . '_' . $counter . '.' . $file_info['extension'];
+				}
+			}
+
+			file_put_contents( $filename, wp_remote_retrieve_body( $response ) );
+		}
+
+	}
+
+	private function get_date_range_chunks( string $from_date, string $to_date, int $chunk_size ): array {
+
+		$short_iso8601_format = 'Y-m-d';
+		$start                = DateTime::createFromFormat( $short_iso8601_format, $from_date );
+		if ( ! $start ) {
+			NMT::exit_with_message( sprintf( 'Invalid start date %s', $from_date ), [ $this->cli_logger ] );
+		}
+		$end = DateTime::createFromFormat( $short_iso8601_format, $to_date );
+		if ( ! $end ) {
+			NMT::exit_with_message( sprintf( 'Invalid end date %s', $to_date ), [ $this->cli_logger ] );
+		}
+
+
+		// Make sure the end date is inclusive by adding one day
+		$end->modify( '+1 day' ); // TODO. Yah?
+
+		// Interval of 10 days
+		$interval = new DateInterval( "P{$chunk_size}D" );
+
+		$current_start = clone $start;
+		$chunks        = [];
+
+		// Loop until we reach the end date
+		while ( $current_start < $end ) {
+			// Calculate the next end date by adding 10 days
+			$current_end = clone $current_start;
+			$current_end->add( $interval );
+
+			// If the calculated end date exceeds the original end date, limit it
+			if ( $current_end > $end ) {
+				$current_end = $end;
+			}
+
+			// Subtract one day to make the range inclusive (At least I think so TODO)
+			$modified_end = $current_end->modify( '-1 day' );
+
+			// Store the current range in the result
+			$chunks[] = array(
+				'from' => $current_start,
+				'to'   => $modified_end,
+			);
+
+			// Move the start date to the next interval
+			$current_start = clone $current_end;
+			$current_start->modify( '+1 day' ); // Start from the next day
+		}
+
+		return array_reverse( $chunks );
+	}
 
 	/**
 	 * TODO:
@@ -136,7 +299,10 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			$post['meta_input']['_old_path'] = $path;
 
 			$category_name = (string) $article_xml->category;
-			$taxonomy_helper->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+			$cat_id        = $taxonomy_helper->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+			if ( ! is_wp_error( $cat_id ) ) {
+				$post['post_category'] = [ $cat_id ];
+			}
 
 			$tags = explode( ',', (string) $article_xml->tags );
 			if ( ! empty( $tags ) ) {
@@ -166,19 +332,34 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			$this->cli_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'to_url' => "$home_url/?p=$post_id" ] );
 			$file_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'from_url' => $url ] );
 
-			$featured_image = trim( ( (string) $article_xml->image ?? '' ) );
-			if ( ! empty( $featured_image ) ) {
-				$post['meta_input']['_old_image'] = $featured_image;
-
-				$attachment_id = $this->get_image_from_url( $featured_image, $post_id );
-				if ( ! is_wp_error( $attachment_id ) ) {
-					set_post_thumbnail( $post_id, $attachment_id );
-					FileLog::get_logger( 'bw-images' )->notice( 'Imported featured image', [ 'post_id' => $post_id, 'image' => $featured_image ] );
-				} else {
-					FileLog::get_logger( 'bw-images' )->error( 'Could not download featured image', [ 'post_id' => $post_id, 'image' => $featured_image ] );
-				}
-			}
+			$this->set_featured_image_on_post( $post_id, (string) $article_xml->image ?? '' );
 		}
+	}
+
+	private function set_featured_image_on_post( int $post_id, string $image_url ): void {
+		$image_url = trim( $image_url );
+		if ( empty( $image_url ) ) {
+			return;
+		}
+		$data['_old_featured_image'] = $image_url;
+		if ( ! str_starts_with( $image_url, 'http' ) ) {
+			$image_url = trailingslashit( NP_LIVE ) . trim( $image_url, '/' );
+		}
+
+		$attachment_id = $this->get_image_from_url( $image_url, $post_id );
+		if ( ! is_wp_error( $attachment_id ) ) {
+			$data['_thumbnail_id'] = $attachment_id;
+			FileLog::get_logger( 'bw-images' )->notice( 'Imported featured image', [ 'post_id' => $post_id, 'image' => $image_url ] );
+		} else {
+			FileLog::get_logger( 'bw-images' )->error( 'Could not download featured image', [ 'post_id' => $post_id, 'image' => $image_url ] );
+		}
+		wp_update_post(
+			[
+				'ID'         => $post_id,
+				'meta_input' => $data,
+			]
+		);
+
 	}
 
 	public function cmd_import_inline_images( array $pos_args, array $assoc_args ): void {
@@ -304,7 +485,6 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 		return trailingslashit( $upload_dir['path'] ) . $sanitized_filename;
 	}
-
 
 
 }
