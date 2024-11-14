@@ -7,16 +7,17 @@ use DateTime;
 use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
-use Newspack\MigrationTools\Logic\Concrete5XmlParser;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
-use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Logic\Concrete5Xml;
 use Psr\Log\LoggerInterface;
 use simplehtmldom\HtmlDocument;
+use SimpleXMLElement;
 use WP_CLI;
 use WP_Error;
 
@@ -30,7 +31,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 	private function __construct() {
 		$this->cli_logger  = CliLog::get_logger( 'bw' );
 		$this->file_logger = FileLog::get_logger( 'bw' );
-		if (! defined( 'NP_LIVE' ) ) {
+		if ( ! defined( 'NP_LIVE' ) ) {
 			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
 		}
 	}
@@ -108,30 +109,6 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				'synopsis'  => [
 					$xml_file,
 					$refresh,
-				],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator bw-import-featured-images',
-			self::get_command_closure( 'cmd_import_featured_images' ),
-			[
-				'shortdesc' => 'Import featured images.',
-				'synopsis'  => [
-					$refresh,
-					// TODO. Add more args like post id, etc.
-				],
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator bw-import-inline-images',
-			self::get_command_closure( 'cmd_import_inline_images' ),
-			[
-				'shortdesc' => 'Import inline images.',
-				'synopsis'  => [
-					$refresh,
-					// TODO. Add more args like post id, etc.
 				],
 			]
 		);
@@ -251,22 +228,24 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		return array_reverse( $chunks );
 	}
 
+	private function get_var_from_simplexml( string $var_name, SimpleXMLElement $article ): string {
+		return trim( (string) $article->{$var_name} ?? '' );
+	}
+
 	/**
 	 * TODO:
-	 *  - Fetch inline images
 	 *  - Get author
-	 *  - Fix formatting in content
-	 *  - Transform links. Probably impossible in this run.
+	 *  - Fix formatting in content – Need to find problematic articles to fix this one.
 	 *  - While it's great that this can fetch from urls and files, we should probably download the files when fetching from urls.
-	 *  - Clean up <h1> tags in content.
-	 *  - Sanitize the HTML a little bit if possible.
+	 * @throws Exception
 	 */
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
 		$xml_file_path = $assoc_args['xml-file'];
 		$refresh       = $assoc_args['refresh-existing'] ?? false;
-		$parser        = null;
+		$xml_fetcher   = null;
 		try {
-			$parser = new Concrete5XmlParser( $xml_file_path );
+			$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file_path ] );
+			$xml_fetcher = new Concrete5Xml( $xml_file_path );
 		} catch ( Exception $o_0 ) {
 			NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
 		}
@@ -277,53 +256,53 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		$file_logger = FileLog::get_logger( 'bw-article-import' );
 
 		$counter = 0;
-		foreach ( $parser->get_articles() as $article_xml ) {
+		foreach ( $xml_fetcher->get_articles() as $article ) {
+
+			if ( ++$counter % 10 === 0 ) {
+				$this->cli_logger->info( sprintf( 'Processed %s articles', $counter ) );
+			}
+
 			$post = [
 				'post_type'   => 'post',
 				'post_status' => 'publish',
 			];
 
-			$url         = trim( (string) $article_xml->url );
-			$path        = parse_url( $url, PHP_URL_PATH );
+			$url         = $article['url'];
+			$path        = parse_url( $article['url'], PHP_URL_PATH );
 			$existing_id = $this->get_post_id_by_old_path( $path );
 			if ( ! empty( $existing_id ) ) {
 				if ( ! $refresh ) {
-					$this->cli_logger->info( 'Article already imported', [ 'path' => $path, 'ID' => $existing_id ] );
+					$this->cli_logger->notice( 'Article already imported', [ 'path' => $path, 'ID' => $existing_id ] );
 					continue;
 				}
 				$post['ID'] = $existing_id;
 			}
 
-			if ( ++$counter % 10 === 0 ) {
-				$this->cli_logger->info( sprintf( 'Imported %s articles', $counter ) );
-			}
-
 			$post['meta_input']['_old_path'] = $path;
 
-			$category_name = (string) $article_xml->category;
+			$category_name = $article['category'];
 			$cat_id        = $taxonomy_helper->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 			if ( ! is_wp_error( $cat_id ) ) {
 				$post['post_category'] = [ $cat_id ];
 			}
 
-			$tags = explode( ',', (string) $article_xml->tags );
+			$tags = explode( ',', $article['tags'] );
 			if ( ! empty( $tags ) ) {
 				$post['tags_input'] = $tags;
 			}
 
-			$post['post_title'] = (string) $article_xml->title;
+			$post['post_title'] = $article['title'];
 			$post['post_name']  = basename( $url );
 
-//		$post-['post_author'] = $this->author; //TODO
-			$post['post_date'] = (string) $article_xml->datePublic;
-			$lead              = (string) $article_xml->lead;
+			$post['post_author'] = $this->get_author( $article['author'] );
+
+			$post['post_date'] = $article['datePublic'];
+			$lead              = $article['lead'];
 			if ( ! empty( $lead ) ) {
 				$post['meta_input']['newspack_post_subtitle'] = $lead;
 			}
 
-			$content              = (string) $article_xml->content;
-			$description          = (string) $article_xml->description;
-			$post['post_content'] = $content . $description;
+			$post['post_content'] = $article['description'] . $article['content'];
 
 			$post_id = wp_insert_post( $post );
 			if ( is_wp_error( $post_id ) ) {
@@ -340,7 +319,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			if ( str_contains( $content, '<h1>' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
 			}
-			if (str_contains( $content, '<img ' ) ) {
+			if ( str_contains( $content, '<img ' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
 			}
 			if ( ! empty( $replacers ) ) {
@@ -358,7 +337,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				);
 			}
 
-			$this->set_featured_image_on_post( $post_id, (string) $article_xml->image ?? '' );
+			$this->set_featured_image_on_post( $post_id, $article['image'] );
 		}
 	}
 
@@ -369,11 +348,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
+	//TODO. What about alt texts?
 	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
 		$gb_blocks = new GutenbergBlockGenerator();
 		$images    = $html_doc->find( 'img' );
 		if ( empty( $images ) ) {
-			$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $id ] );
+			$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $post_id ] );
+
 			return;
 		}
 		foreach ( $images as $img ) {
@@ -424,94 +405,33 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				'meta_input' => $data,
 			]
 		);
-
 	}
 
-	public function cmd_import_inline_images( array $pos_args, array $assoc_args ): void {
-		$refresh     = $assoc_args['refresh-existing'] ?? false;
-		$post_helper = new Posts();
-		$gb_blocks   = new GutenbergBlockGenerator();
-		foreach ( $post_helper->get_all_posts_ids() as $id ) {
-			$content = get_post_field( 'post_content', $id );
-			if ( ! str_contains( $content, '<img ' ) ) {
-				$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $id ] );
-				continue;
-			}
-			$trut     = '';
-			$html_doc = new HtmlDocument( $content );
-
-			$images = $html_doc->find( 'img' );
-			if ( empty( $images ) ) {
-				$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $id ] );
-				continue;
-			}
-			foreach ( $images as $img ) {
-				$src = $img?->getAttribute( 'src' );
-				if ( ! $src ) {
-					return; // TODO
-				}
-				if ( ! str_starts_with( $src, 'http' ) ) {
-					$src = NP_LIVE . $src;
-				}
-				$att = $this->get_image_from_url( $src, $id );
-				if ( is_wp_error( $att ) ) {
-					$this->cli_logger->error( 'Failed to import inline image', [ 'post_id' => $id, 'src' => $src, 'error' => $att ] );
-					continue;
-				}
-				$img_text = $img->find( '<p><strong>' );
-				if ( ! empty( $img_text ) ) {
-					// Might be risky. We don't know if this is the correct image it's under.
-					$img_text = $img_text[0]->innertext;
-				}
-
-				$img->outertext = serialize_block(
-					$gb_blocks->get_image(
-						get_post( $att ),
-						'full',
-						false
-					)
-				);
-			}
-			$text = $html_doc->save();
-			wp_update_post(
-				[
-					'ID'           => $id,
-					'post_content' => $text,
-				]
-			);
-
-			$this->cli_logger->notice( 'Imported inline images', [ 'post_id' => $id ] );
-
-
-			// todo. Set migration meta.
+	private function get_author( string $author_name ): int {
+		$default_author = 1; // TODO. Not right -use the correct one once it's been created.
+		if ( empty( $author_name ) ) {
+			return $default_author;
 		}
-	}
-
-	public function cmd_import_featured_images( array $pos_args, array $assoc_args ): void {
-		$refresh     = $assoc_args['refresh-existing'] ?? false;
-		$post_helper = new Posts();
-		$posts       = get_posts(
-			[
-				// TODO. Better query - exlcude ones with featured image already.
-				// Maybe use the BatchLogic class
-				'meta_key'    => '_old_image',
-				'numberposts' => -1,
-			]
-		);
-
-		$counter = 0;
-		foreach ( $posts as $post ) {
-			$featured_image = get_post_meta( $post->ID, '_old_image', true );
-			if ( empty( $featured_image ) ) {
-				continue;
-			}
-			$featured_image_id = $this->get_image_from_url( $featured_image, $post->ID );
-			if ( ! is_wp_error( $featured_image_id ) ) {
-				$this->cli_logger->notice( 'Imported featured image', [ 'post_id' => $post->ID, 'image' => $featured_image ] );
-				set_post_thumbnail( $post->ID, $featured_image_id );
-			}
+		$all_we_have = [ 'user_login' => $author_name ];
+		$maybe_user  = UsersHelper::get_user( $all_we_have );
+		if ( ! empty( $maybe_user ) ) {
+			return $maybe_user->ID;
 		}
+
+		try {
+			$user = UsersHelper::create_or_get_user( [ ...$all_we_have, 'role' => 'contributor_no_edit' ] );
+
+			return $user->ID;
+		} catch ( Exception $e ) {
+			$message = sprintf( 'Could not create user with name %s', $author_name );
+			$this->cli_logger->error( $message, [ 'error' => $e ] );
+			$this->file_logger->critical( $message, [ 'error' => $e ] );
+
+			return $default_author;
+		}
+
 	}
+
 
 	private function get_image_from_url( string $url, int $post_id ): int|WP_Error {
 		if ( empty( $url ) ) {
@@ -542,7 +462,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		return $posts[0]->ID ?? 0;
 	}
 
-	public static function get_predicted_file_path( int $post_id, string $filename ) {
+	public static function get_predicted_file_path( int $post_id, string $filename ): string {
 		// TODO. This assumes that images are uploaded like that with the date. Are they always?
 		$upload_dir = wp_upload_dir( get_post_time( 'Y/m', false, $post_id ), false );
 
