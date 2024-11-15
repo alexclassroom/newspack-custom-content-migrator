@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2e8c2c02a82dd5d0d6a30a8df8287ba5",
+    "content-hash": "efa31abcd1cd4b8d8796fe16a726d477",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -51,16 +51,16 @@
         },
         {
             "name": "automattic/newspack-migration-tools",
-            "version": "dev-trunk",
+            "version": "dev-release/0.2.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2"
+                "reference": "a1d968a9de1021425898625438c7d997a44426a7"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2",
-                "reference": "e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/a1d968a9de1021425898625438c7d997a44426a7",
+                "reference": "a1d968a9de1021425898625438c7d997a44426a7",
                 "shasum": ""
             },
             "require": {
@@ -79,7 +79,6 @@
                 "wp-coding-standards/wpcs": "^3.0",
                 "yoast/phpunit-polyfills": "^2.0"
             },
-            "default-branch": true,
             "type": "library",
             "autoload": {
                 "psr-4": {
@@ -111,10 +110,10 @@
             ],
             "description": "A set of tools to help migration to WordPress.",
             "support": {
-                "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
+                "source": "https://github.com/Automattic/newspack-migration-tools/tree/release/0.2.0",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2024-11-13T14:31:43+00:00"
+            "time": "2024-11-15T14:02:39+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",

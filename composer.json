@@ -32,7 +32,7 @@
     "automattic/newspack-content-converter": "dev-master",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
     "automattic/newspack-scraper-migrator": "dev-trunk",
-    "automattic/newspack-migration-tools": "dev-trunk"
+    "automattic/newspack-migration-tools": "dev-release/0.2.0"
   },
   "require-dev": {
     "automattic/vipwpcs": "^3.0",
