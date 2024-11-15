@@ -4474,8 +4474,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$photo_id_placeholders = implode( ', ', array_fill( 0, count( $original_photo_ids ), '%d' ) );
 			$attachment_ids        = $wpdb->get_col(
 				$wpdb->prepare(
-					"SELECT pm.post_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key <> %s AND pm.meta_value IN ( $photo_id_placeholders )",
-					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					"SELECT pm.post_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key = %s AND pm.meta_value IN ( $photo_id_placeholders )",
+					self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY,
 					...$original_photo_ids
 				)
 			);
