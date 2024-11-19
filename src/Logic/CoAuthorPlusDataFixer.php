@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+use NewspackCustomContentMigrator\Enum\CAPPostMetaKeys;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Taxonomy as TaxonomyConsoleOutputLogic;
 use WP_Error;
@@ -361,9 +362,9 @@ class CoAuthorPlusDataFixer {
 		$filtered_cap_fields = $this->get_filtered_cap_fields(
 			$guest_author->ID,
 			[
-				'cap-user_email',
-				'cap-user_login',
-				'cap-linked_account',
+				CAPPostMetaKeys::EMAIL->value,
+				CAPPostMetaKeys::LOGIN->value,
+				CAPPostMetaKeys::LINKED_ACCOUNT->value,
 			]
 		);
 
@@ -382,11 +383,11 @@ class CoAuthorPlusDataFixer {
 				return false;
 			}
 
-			if ( 'cap-linked_account' === $cap_field ) {
+			if ( CAPPostMetaKeys::LINKED_ACCOUNT->value === $cap_field ) {
 				return false;
 			}
 
-			if ( 'cap-user_email' === $cap_field ) {
+			if ( CAPPostMetaKeys::EMAIL->value === $cap_field ) {
 				$user_by_email = get_user_by( 'email', $values );
 
 				if ( ! empty( $user_by_email ) ) {
@@ -400,7 +401,7 @@ class CoAuthorPlusDataFixer {
 				}
 			}
 
-			if ( 'cap-user_login' === $cap_field ) {
+			if ( CAPPostMetaKeys::LOGIN->value === $cap_field ) {
 				$values = str_replace( 'cap-', '', $values );
 
 				$user_by_login = get_user_by( 'login', $values );
@@ -487,5 +488,26 @@ class CoAuthorPlusDataFixer {
 		}
 
 		return $filtered_author_cap_fields;
+	}
+
+	/**
+	 * Checks if a value is unique for a given CAP field.
+	 *
+	 * @param CAPPostMetaKeys $field The field to check.
+	 * @param string          $value The value to check.
+	 *
+	 * @return bool
+	 */
+	public function is_unique_value( CAPPostMetaKeys $field, string $value ): bool {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return null === $wpdb->get_var(
+			$wpdb->prepare(
+				"SELECT meta_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %s",
+				$field->value,
+				$value
+			)
+		);
 	}
 }
