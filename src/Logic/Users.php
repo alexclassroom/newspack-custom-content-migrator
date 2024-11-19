@@ -42,6 +42,53 @@ class Users {
 	}
 
 	/**
+	 * Attempts to obtain a unique user_login field.
+	 *
+	 * @param string $desired_user_login A user_login which would be desired, but should be checked for uniqueness.
+	 * @param int    $exclude_user_id User ID to exclude from checks.
+	 *
+	 * @return string|null
+	 */
+	final public function obtain_unique_user_login( string $desired_user_login, int $exclude_user_id = 0 ): ?string {
+		if ( empty( $desired_user_login ) ) {
+			return null;
+		}
+
+		$logins = [];
+
+		if ( is_email( $desired_user_login ) ) {
+			$logins[]           = $desired_user_login;
+			$desired_user_login = sanitize_user( substr( $desired_user_login, 0, strpos( $desired_user_login, '@' ) ) );
+			$logins[]           = $desired_user_login;
+		}
+
+		if ( ! $this->is_user_field_value_unique( CAPRelatedUserFields::LOGIN, $desired_user_login, $exclude_user_id ) ) {
+			$desired_user_login = $this->obtain_unique_user_field_value(
+				CAPRelatedUserFields::LOGIN,
+				$desired_user_login,
+				$this->callback_random_string_appender(),
+				$exclude_user_id
+			);
+
+			if ( null === $desired_user_login ) {
+				$user_provided_seed                 = apply_filters( 'newspack_provide_unique_user_login', $desired_user_login );
+				$user_provided_make_unique_callback = apply_filters( 'newspack_provide_make_unique_user_login_callback', $this->callback_random_string_appender() );
+
+				if ( ! in_array( $user_provided_seed, $logins, true ) ) {
+					$desired_user_login = $this->obtain_unique_user_field_value(
+						CAPRelatedUserFields::LOGIN,
+						$user_provided_seed,
+						$user_provided_make_unique_callback,
+						$exclude_user_id,
+					);
+				}
+			}
+		}
+
+		return $desired_user_login;
+	}
+
+	/**
 	 * Obtains a unique user nicename.
 	 *
 	 * @param string $desired_user_nicename The desired user nicename.
