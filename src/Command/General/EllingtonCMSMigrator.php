@@ -154,16 +154,6 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			Logger::INFO
 		);
 
-		if ( ! empty( $from_index ) ) {
-			$this->logger->log(
-				$log_file,
-				sprintf( 'Starting from index %d', $from_index ),
-				Logger::INFO
-			);
-
-			$xml_files = array_slice( $xml_files, $from_index );
-		}
-
 		foreach ( array_values( $xml_files ) as $index => $xml_file ) {
 			$this->logger->log(
 				$log_file,
@@ -180,6 +170,10 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 					count( $xml_files )
 				)
 			);
+
+			if ( ! empty( $from_index ) && $index < $from_index ) {
+				continue;
+			}
 
 			$xml_contents = file_get_contents( $xml_dir_path . DIRECTORY_SEPARATOR . $xml_file );
 
