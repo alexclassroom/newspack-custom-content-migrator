@@ -5,11 +5,11 @@ namespace NewspackCustomContentMigrator\Command\General;
 use DateTime;
 use DateTimeZone;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_Error;
 use WP_User;
@@ -19,6 +19,7 @@ use simplehtmldom\HtmlDocument;
  * Custom migration scripts for Posts' content.
  */
 class EllingtonCMSMigrator implements RegisterCommandInterface {
+
 	use WpCliCommandTrait;
 
 	/**
@@ -151,14 +152,14 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$this->logger->log(
 			$log_file,
 			sprintf( 'Found %d files', count( $xml_files ) ),
-			Logger::INFO
+			Logger::LINE
 		);
 
 		foreach ( array_values( $xml_files ) as $index => $xml_file ) {
 			$this->logger->log(
 				$log_file,
 				sprintf( 'Processing %d / %d', $index + 1, count( $xml_files ) ),
-				Logger::INFO
+				Logger::LINE
 			);
 
 			$progress_bar->tick(
