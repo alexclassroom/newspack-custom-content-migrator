@@ -1210,6 +1210,75 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-get-missing-media-filepaths',
+			[ $this, 'cmd_embarcadero_get_missing_media_filepaths' ],
+			[
+				'shortdesc' => 'Creates a CSV file with the location of all missing medias',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'missing-media-csv-path',
+						'description' => 'Path to the CSV file containing the missing media.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-csv-path',
+						'description' => 'Path to the CSV file containing the story photos to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-dir-path',
+						'description' => 'Path to the directory containing the stories\'s photos files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-missing-media-fix',
+			[ $this, 'cmd_embarcadero_fix_missing_media' ],
+			[
+				'shortdesc' => 'Fixes the missing media',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'missing-media-csv-path',
+						'description' => 'Path to the CSV file containing the missing media.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-csv-path',
+						'description' => 'Path to the CSV file containing the story photos to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-photos-dir-path',
+						'description' => 'Path to the directory containing the stories\'s photos files to import.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'story-id-from',
+						'description' => 'Which story ID to start with',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -4491,6 +4560,203 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			WP_CLI::line( sprintf( 'Found %d IDs', count( $original_photo_ids ) ) );
 		}
+	}
+
+	public function cmd_embarcadero_get_missing_media_filepaths( array $args, array $assoc_args ): void {
+		$missing_media_csv_filepath = $assoc_args['missing-media-csv-path'];
+		$story_photos_csv_file_path = $assoc_args['story-photos-csv-path'];
+		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
+		
+		$missing_media_iterator = ( new FileImportFactory() )->get_file( $missing_media_csv_filepath )->getIterator();
+		$photos                 = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+		
+		$header  = [
+			'story_id' => null,
+			'post_id'  => null,
+			'photo_id' => null,
+			'year'     => null,
+			'month'    => null,
+			'day'      => null,
+		];
+		$file = fopen( 'missing-media-filepaths.csv', 'w' );
+		fputcsv( $file, array_keys( $header ) );
+
+		foreach ( $missing_media_iterator as $row ) {
+			$story_id             = $row['story_id'];
+			$post_id              = $row['post_id'];
+			$original_photo_ids   = explode( ',', $row['photo_ids'] );
+
+			foreach ( $original_photo_ids as $photo_id ) {
+				$filenames = [];
+
+				$photo_data = array_filter( $photos, fn ( $photo ) => $photo['photo_id'] === $photo_id );
+				$photo_data = array_shift( $photo_data );
+
+				$media_year  = $photo_data['photo_year'];
+				$media_month = strtolower( gmdate( 'F', mktime( 0, 0, 0, $photo_data['photo_month'], 1 ) ) );
+				$media_dir   = $story_photos_dir_path . '/' . $media_year . '/' . $media_month . '/' . $photo_data['photo_day'];
+
+				// Try various suffixes on the photo name. Some years lack originals, some lack fulls, etc.
+				// This list decreases in photo quality.
+				$filenames[] = $photo_data['photo_name'] . '_original.jpg';
+				$filenames[] = $photo_data['photo_name'] . '_full.jpg';
+				$filenames[] = $photo_data['photo_name'] . '_main.jpg';
+				$filenames[] = $photo_data['photo_name'] . '_thumb.jpg';
+
+				foreach ( $filenames as $filename ) {
+					$file_dir_path     = $media_dir;
+					$new_file_dir_path = str_replace( $story_photos_dir_path, './files-for-import', $file_dir_path );
+					
+					if ( ! file_exists( $file_dir_path . '/' . $filename ) ) {
+						continue;
+					}
+
+					if ( ! file_exists( $new_file_dir_path ) ) {
+						mkdir( $new_file_dir_path, 0777, true );
+					}
+
+					copy( $file_dir_path . '/' . $filename, $new_file_dir_path . '/' . $filename );
+				}
+
+				fputcsv( $file, [
+					$story_id,
+					$post_id,
+					$photo_id,
+					$media_year,
+					$media_month,
+					$photo_data['photo_day']
+				] );
+			}
+		}
+
+		fclose( $file );
+		WP_CLI::line( 'Done!' );
+	}
+
+	public function cmd_embarcadero_fix_missing_media( array $args, array $assoc_args ): void {
+		$missing_media_csv_filepath = $assoc_args['missing-media-csv-path'];
+		$story_photos_csv_file_path = $assoc_args['story-photos-csv-path'];
+		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
+		$story_id_from              = $assoc_args['story-id-from'] ?? null;
+		
+		$missing_media_iterator = ( new FileImportFactory() )->get_file( $missing_media_csv_filepath )->getIterator();
+		$photos                 = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+		
+		$header  = [
+			'story_id'              => null,
+			'post_id'               => null,
+			'staging_url'           => null,
+			'photo_ids'             => null,
+			'count_found_photo_ids' => null,
+			'attachment_ids'        => null,
+			'count_attachment_ids'  => null,
+			'old_post_content'      => null,
+			'new_post_content'      => null,
+		];
+		$qa_file = fopen( 'missing-media-fixed-qa.csv', 'w' );
+		fputcsv( $qa_file, array_keys( $header ) );
+
+		global $wpdb;
+
+		foreach ( $missing_media_iterator as $row ) {
+			$story_id             = (int) $row['story_id'];
+			$post_id              = $row['post_id'];
+			$original_photo_ids   = explode( ',', $row['photo_ids'] );
+
+			WP_CLI::line( sprintf( 'Memory Usage: %s | Story ID: %d | Post ID: %d', size_format( memory_get_usage( true ) ), $story_id, $post_id ) );
+
+			if ( ! $post_id  ) {
+				continue;
+			}
+
+			if ( ! empty( $story_id_from ) && $story_id < (int) $story_id_from ) {
+				continue;
+			}
+
+			if ( $row['difference'] == 'NO' ) {
+				WP_CLI::line( 'No difference found. Skipping...' );
+				continue;
+			}
+
+			$photo_id_placeholders = implode( ', ', array_fill( 0, count( $original_photo_ids ), '%d' ) );
+			$locally_imported_photo_attachment_map = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT pm.post_id as attachment_id,pm.meta_value as photo_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key = %s AND pm.meta_value IN ( $photo_id_placeholders )",
+					self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY,
+					...$original_photo_ids
+				),
+				ARRAY_A
+			);
+
+			$photo_map = [];
+
+			foreach ( $original_photo_ids as $photo_id ) {
+				$attachment_id = null;
+
+				foreach ( $locally_imported_photo_attachment_map as $local_photo_map ) {
+					if ( absint( $local_photo_map['photo_id'] ) === absint( $photo_id ) ) {
+						$attachment_id = $local_photo_map['attachment_id'];
+						break;
+					}
+				}
+
+				if ( ! $attachment_id ) {
+					$photo_data = array_filter( $photos, fn ( $photo ) => $photo['photo_id'] === $photo_id );
+					$photo_data = array_shift( $photo_data );
+
+					$attachment_id = $this->get_attachment_from_media( $post_id, $photo_data, $story_photos_dir_path );
+				}
+
+				$photo_map[ $photo_id ] = $attachment_id;
+			}
+
+			$attachment_ids = array_map( 'absint', array_values( $photo_map ) );
+
+			$block = null;
+
+			if ( count( $attachment_ids ) > 1 ) {
+				$block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $attachment_ids ) );
+			} else {
+				$block = serialize_block( $this->gutenberg_block_generator->get_image( get_post( $attachment_ids[0] ) ) );
+			}
+
+			$old_content = get_post_field( 'post_content', $post_id );
+
+			if ( strpos( $old_content, $block ) !== false ) {
+				WP_CLI::line( sprintf( 'Skipping.. Post already updated', $post_id ) );
+
+				continue;
+			}
+
+			$new_content = $old_content . "\r\n" . $block;
+
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $new_content
+				],
+				[
+					'ID' => $post_id
+				]
+			);
+
+			fputcsv( $qa_file, [
+				$story_id,
+				$post_id,
+				get_permalink( $post_id ),
+				implode( ', ', $original_photo_ids ),
+				count( $original_photo_ids ),
+				implode( ', ', $attachment_ids ),
+				count( $attachment_ids ),
+				$old_content,
+				$new_content,
+			] );
+
+			WP_CLI::line( sprintf( 'Updated %s', $post_id ) );
+		}
+
+		fclose( $qa_file );
+		WP_CLI::line( 'Done!' );
 	}
 
 	/**
