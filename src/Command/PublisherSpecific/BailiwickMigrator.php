@@ -1,4 +1,9 @@
 <?php
+/**
+ * Importer for Bailiwick sites.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
@@ -25,9 +30,20 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+	/**
+	 * Logger for CLI output.
+	 * @var LoggerInterface Logger instance.
+	 */
 	private LoggerInterface $cli_logger;
+	/**
+	 * Logger for file output.
+	 * @var LoggerInterface Logger instance.
+	 */
 	private LoggerInterface $file_logger;
 
+	/**
+	 * Constructor.
+	 */
 	private function __construct() {
 		$this->cli_logger  = CliLog::get_logger( 'bw' );
 		$this->file_logger = FileLog::get_logger( 'bw' );
@@ -36,6 +52,9 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
+	/**
+	 * {@inheritDoc}
+	 */
 	public static function register_commands(): void {
 
 		$xml_file = [
@@ -55,13 +74,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		$from_date = [
 			'type'        => 'assoc',
 			'name'        => 'from-date',
-			'description' => 'From date in format YYYY-MM-DD',
+			'description' => 'From date in format YYYY-MM-DD. For example 2024-11-14',
 			'optional'    => false,
 		];
 		$to_date   = [
 			'type'        => 'assoc',
 			'name'        => 'to-date',
-			'description' => 'To date in format YYYY-MM-DD', // TODO. Are these inclusive?
+			'description' => 'To date in format YYYY-MM-DD. From date in format YYYY-MM-DD. For example 2024-10-31',
 			'optional'    => false,
 		];
 
@@ -96,7 +115,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 						'name'        => 'days-pr-file',
 						'description' => 'Optional. How many days in each file downloaded. Defaults to 10.',
 						'optional'    => true,
-					]
+					],
 				],
 			]
 		);
@@ -114,6 +133,16 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		);
 	}
 
+	/**
+	 * Callback for the `bw-download-xml` command.
+	 *
+	 * Downloads XML files for a given date range.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 *
+	 * @throws \DateMalformedStringException
+	 */
 	public function cmd_download_xml( array $pos_args, array $assoc_args ): void {
 		$from_date    = $assoc_args['from-date'];
 		$to_date      = $assoc_args['to-date'];
@@ -134,7 +163,8 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 			$url = sprintf(
 				'%s&from=%s&to=%s',
-				$base_url, $chunk['from']->format( $date_format_for_url ),
+				$base_url,
+				$chunk['from']->format( $date_format_for_url ),
 				$chunk['to']->format( $date_format_for_url )
 			); // This assumes that we use '&' because the url needs auth.
 
@@ -152,7 +182,10 @@ class BailiwickMigrator implements RegisterCommandInterface {
 					$chunk['from']->format( $short_iso8601_format ),
 					$chunk['to']->format( $short_iso8601_format )
 				),
-				[ 'destination' => $filename, 'url' => $url ]
+				[
+					'destination' => $filename,
+					'url'         => $url,
+				]
 			);
 
 			$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
@@ -168,16 +201,23 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 				// Loop until we find a unique filename
 				while ( file_exists( $filename ) ) {
-					$counter++;
+					++$counter;
 					$filename = $file_info['dirname'] . '/' . $file_info['filename'] . '_' . $counter . '.' . $file_info['extension'];
 				}
 			}
 
 			file_put_contents( $filename, wp_remote_retrieve_body( $response ) );
 		}
-
 	}
 
+	/**
+	 * @param string $from_date
+	 * @param string $to_date
+	 * @param int    $chunk_size
+	 *
+	 * @return array
+	 * @throws \DateMalformedStringException
+	 */
 	private function get_date_range_chunks( string $from_date, string $to_date, int $chunk_size ): array {
 
 		$short_iso8601_format = 'Y-m-d';
@@ -190,11 +230,9 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			NMT::exit_with_message( sprintf( 'Invalid end date %s', $to_date ), [ $this->cli_logger ] );
 		}
 
-
 		// Make sure the end date is inclusive by adding one day
-		$end->modify( '+1 day' ); // TODO. Yah?
+		$end->modify( '+1 day' );
 
-		// Interval of 10 days
 		$interval = new DateInterval( "P{$chunk_size}D" );
 
 		$current_start = clone $start;
@@ -202,7 +240,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 		// Loop until we reach the end date
 		while ( $current_start < $end ) {
-			// Calculate the next end date by adding 10 days
+			// Calculate the next end date.
 			$current_end = clone $current_start;
 			$current_end->add( $interval );
 
@@ -211,7 +249,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				$current_end = $end;
 			}
 
-			// Subtract one day to make the range inclusive (At least I think so TODO)
+			// Subtract one day to make the range inclusive.
 			$modified_end = $current_end->modify( '-1 day' );
 
 			// Store the current range in the result
@@ -228,15 +266,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		return array_reverse( $chunks );
 	}
 
-	private function get_var_from_simplexml( string $var_name, SimpleXMLElement $article ): string {
-		return trim( (string) $article->{$var_name} ?? '' );
-	}
 
 	/**
 	 * TODO:
 	 *  - Get author
 	 *  - Fix formatting in content – Need to find problematic articles to fix this one.
 	 *  - While it's great that this can fetch from urls and files, we should probably download the files when fetching from urls.
+	 *
 	 * @throws Exception
 	 */
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
@@ -272,7 +308,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			$existing_id = $this->get_post_id_by_old_path( $path );
 			if ( ! empty( $existing_id ) ) {
 				if ( ! $refresh ) {
-					$this->cli_logger->notice( 'Article already imported', [ 'path' => $path, 'ID' => $existing_id ] );
+					$this->cli_logger->notice(
+						'Article already imported',
+						[
+							'path' => $path,
+							'ID'   => $existing_id,
+						]
+					);
 					continue;
 				}
 				$post['ID'] = $existing_id;
@@ -311,8 +353,20 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			}
 
 
-			$this->cli_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'to_url' => "$home_url/?p=$post_id" ] );
-			$file_logger->notice( 'Imported article', [ 'post_id' => $post_id, 'from_url' => $url ] );
+			$this->cli_logger->notice(
+				'Imported article',
+				[
+					'post_id' => $post_id,
+					'to_url'  => "$home_url/?p=$post_id",
+				]
+			);
+			$file_logger->notice(
+				'Imported article',
+				[
+					'post_id'  => $post_id,
+					'from_url' => $url,
+				]
+			);
 
 			$content   = get_post_field( 'post_content', $post_id );
 			$replacers = [];
@@ -348,7 +402,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
-	//TODO. What about alt texts?
+	// TODO. What about alt texts?
 	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
 		$gb_blocks = new GutenbergBlockGenerator();
 		$images    = $html_doc->find( 'img' );
@@ -367,10 +421,23 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			}
 			$att_id = $this->get_image_from_url( $src, $post_id );
 			if ( is_wp_error( $att_id ) ) {
-				$this->cli_logger->error( 'Failed to import inline image', [ 'post_id' => $post_id, 'src' => $src, 'error' => $att_id ] );
+				$this->cli_logger->error(
+					'Failed to import inline image',
+					[
+						'post_id' => $post_id,
+						'src'     => $src,
+						'error'   => $att_id,
+					]
+				);
 				continue;
 			}
-			FileLog::get_logger( 'bw-images' )->notice( 'Imported inline image', [ 'post_id' => $post_id, 'src' => $src ] );
+			FileLog::get_logger( 'bw-images' )->notice(
+				'Imported inline image',
+				[
+					'post_id' => $post_id,
+					'src'     => $src,
+				]
+			);
 
 			$img->outertext = serialize_block(
 				$gb_blocks->get_image(
@@ -395,9 +462,21 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		$attachment_id = $this->get_image_from_url( $image_url, $post_id );
 		if ( ! is_wp_error( $attachment_id ) ) {
 			$data['_thumbnail_id'] = $attachment_id;
-			FileLog::get_logger( 'bw-images' )->notice( 'Imported featured image', [ 'post_id' => $post_id, 'image' => $image_url ] );
+			FileLog::get_logger( 'bw-images' )->notice(
+				'Imported featured image',
+				[
+					'post_id' => $post_id,
+					'image'   => $image_url,
+				]
+			);
 		} else {
-			FileLog::get_logger( 'bw-images' )->error( 'Could not download featured image', [ 'post_id' => $post_id, 'image' => $image_url ] );
+			FileLog::get_logger( 'bw-images' )->error(
+				'Could not download featured image',
+				[
+					'post_id' => $post_id,
+					'image'   => $image_url,
+				]
+			);
 		}
 		wp_update_post(
 			[
@@ -419,7 +498,12 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		try {
-			$user = UsersHelper::create_or_get_user( [ ...$all_we_have, 'role' => 'contributor_no_edit' ] );
+			$user = UsersHelper::create_or_get_user(
+				[
+					...$all_we_have,
+					'role' => 'contributor_no_edit',
+				]
+			);
 
 			return $user->ID;
 		} catch ( Exception $e ) {
@@ -429,7 +513,6 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 			return $default_author;
 		}
-
 	}
 
 
@@ -470,6 +553,4 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 		return trailingslashit( $upload_dir['path'] ) . $sanitized_filename;
 	}
-
-
 }

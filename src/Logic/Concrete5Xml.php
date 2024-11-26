@@ -1,4 +1,13 @@
 <?php
+/**
+ * Class Concrete5XmlFetcher
+ *
+ * Fetches articles from a Concrete5 XML file or url.
+ *
+ * It takes care to use very little memory by sipping on only one article at the time.
+ *
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Logic;
 
@@ -7,45 +16,50 @@ use InvalidArgumentException;
 use SimpleXMLElement;
 use XMLReader;
 
-/**
- * Class Concrete5XmlFetcher
- *
- * Fetches articles from a Concrete5 XML file or url.
- *
- * It takes care to use very little memory by sipping on only one article at the time.
- */
 class Concrete5Xml {
 
+	/**
+	 * The path or url to the XML file to read.
+	 *
+	 * @var string File path or url.
+	 */
 	protected string $xml_file_path;
 
+	/**
+	 * Constructor.
+	 *
+	 * @param string $xml_file_path The path or url to the XML file to read.
+	 *
+	 * @throws InvalidArgumentException If the XML file does not exist or the URL is invalid.
+	 */
 	public function __construct( string $xml_file_path ) {
 		$xml_file_path = trim( $xml_file_path );
 		if ( ! str_starts_with( $xml_file_path, 'http' ) ) {
 			if ( ! file_exists( $xml_file_path ) ) {
-				throw new InvalidArgumentException( 'XML file does not exist: ' . $xml_file_path );
+				throw new InvalidArgumentException( 'XML file does not exist: ' . esc_html( $xml_file_path ) );
 			}
 		} elseif ( ! wp_http_validate_url( $xml_file_path ) ) {
-			throw new InvalidArgumentException( 'Invalid URL for XML: ' . $xml_file_path );
+			throw new InvalidArgumentException( 'Invalid URL for XML: ' . esc_html( $xml_file_path ) );
 		}
 		$this->xml_file_path = $xml_file_path;
 	}
 
 	/**
-	 * Returns an iterable generator that yields the content of each <article> element.
+	 * Get each article from the XML file as a sanitized array.
 	 *
-	 * @return iterable
-	 * @throws Exception
+	 * @return iterable Iterable that yields an array with strings sanitized from each <article> element.
+	 * @throws Exception If the file could not be opened by XMLReader.
 	 */
 	public function get_articles(): iterable {
 
 		$reader = XMLReader::open( $this->xml_file_path );
 		if ( ! $reader ) {
-			throw new Exception( 'Failed to open XML file: ' . $this->xml_file_path );
+			throw new Exception( 'Failed to open XML file: ' . esc_html( $this->xml_file_path ) );
 		}
 
 		while ( $reader->read() ) {
 			// Check if the current node is an <article> element
-			if ( $reader->nodeType === XMLReader::ELEMENT && $reader->name === 'article' ) {
+			if ( XMLReader::ELEMENT === $reader->nodeType && 'article' === $reader->name ) {
 				$articleContent = $reader->readInnerXML();
 				yield $this->sanitize_article(
 					simplexml_load_string(
@@ -55,13 +69,18 @@ class Concrete5Xml {
 			}
 		}
 
-		// Close the XMLReader after processing.
 		$reader->close();
 	}
 
+	/**
+	 * Sanitize an article element from the XML file into an array with the available fields.
+	 *
+	 * @param SimpleXMLElement $article A single article element from the XML file.
+	 *
+	 * @return array Keyed array with sanitized strings from the article element.
+	 */
 	private function sanitize_article( SimpleXMLElement $article ): array {
 		// These are the available fields in the Concrete5 XML file.
-		// We sanitize them by trimming and casting them to strings.
 		$fields = [
 			'title',
 			'datePublic',
@@ -74,11 +93,12 @@ class Concrete5Xml {
 			'description',
 			'content',
 		];
+		// Sanitize the fields by trimming and casting them to strings.
 		$sanitized_article = [];
 		foreach ( $fields as $field ) {
 			$sanitized_article[ $field ] = trim( (string) ( $article->{$field} ?? '' ) );
 		}
+
 		return $sanitized_article;
 	}
-
 }

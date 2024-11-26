@@ -10,6 +10,7 @@
 		<exclude name="Universal.Arrays.DisallowShortArraySyntax.Found" />
 		<exclude name="WordPress.Files.FileName.NotHyphenatedLowercase" />
 		<exclude name="WordPress.Files.FileName.InvalidClassFileName" />
+		<exclude name="Squiz.Commenting.ClassComment.Missing" />
 	</rule>
 
 	<rule ref="PHPCompatibilityWP"/>
