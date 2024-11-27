@@ -55,12 +55,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2"
+                "reference": "59186a92edf6b3e1682582f9644d587fc3c7e236"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2",
-                "reference": "e86a0a9ac8870253a9f354cd15cd5b01ed3a24c2",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/59186a92edf6b3e1682582f9644d587fc3c7e236",
+                "reference": "59186a92edf6b3e1682582f9644d587fc3c7e236",
                 "shasum": ""
             },
             "require": {
@@ -114,7 +114,7 @@
                 "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2024-11-13T14:31:43+00:00"
+            "time": "2024-11-27T10:58:00+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
