@@ -8,6 +8,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\GutenbergBlockManipulator;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
@@ -551,43 +552,6 @@ class CarsonNowMigrator implements RegisterCommandInterface {
 	}
 
 	private function get_wp_posts_iterator( array $post_types, array $assoc_args, array $post_statuses = [ 'publish' ], bool $log_progress = true ): iterable {
-		if ( ! empty( $assoc_args['post-id'] ) ) {
-			$all_ids = [ $assoc_args['post-id'] ];
-		} else {
-			$min_post_id = $assoc_args['min-post-id'] ?? 0;
-			$max_post_id = $assoc_args['max-post-id'] ?? PHP_INT_MAX;
-			$num_posts   = $assoc_args['num-posts'] ?? PHP_INT_MAX;
-			global $wpdb;
-			$post_type_placeholders   = implode( ',', array_fill( 0, count( $post_types ), '%s' ) );
-			$post_status_placeholders = implode( ',', array_fill( 0, count( $post_statuses ), '%s' ) );
-			$all_ids                  = $wpdb->get_col(
-				$wpdb->prepare(
-					"SELECT ID
-			FROM {$wpdb->posts}
-			WHERE post_type IN ( $post_type_placeholders )
-			AND post_status IN ( $post_status_placeholders )
-			AND ID BETWEEN %d AND %d
-			ORDER BY ID DESC
-			LIMIT %d",
-					[ ...$post_types, ...$post_statuses, $min_post_id, $max_post_id, $num_posts ]
-				)
-			);
-		}
-		$total_posts = count( $all_ids );
-		$home_url    = home_url();
-		$counter     = 0;
-		if ( $log_progress ) {
-			WP_CLI::log( sprintf( 'Processing %d posts', count( $all_ids ) ) );
-		}
-
-		foreach ( $all_ids as $post_id ) {
-			$post = get_post( $post_id );
-			if ( $post instanceof \WP_Post ) {
-				if ( $log_progress ) {
-					WP_CLI::log( sprintf( 'Processing post %d/%d: %s', ++$counter, $total_posts, "{$home_url}?p={$post_id}" ) );
-				}
-				yield $post;
-			}
-		}
+		Posts::get_posts_iterator( $post_types, $assoc_args, $post_statuses, $log_progress );
 	}
 }
