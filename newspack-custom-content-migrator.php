@@ -79,6 +79,7 @@ PluginSetup::register_command_classes(
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\BailiwickMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
+		Command\PublisherSpecific\UgObserver::class,
 	]
 );
 

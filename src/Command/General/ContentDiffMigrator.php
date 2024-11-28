@@ -103,6 +103,11 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 	 */
 	private $log_updated_blocks_ids;
 
+	private function __construct() {
+		global $wpdb;
+
+		self::$logic    = new ContentDiffMigratorLogic( $wpdb );
+	}
 
 	/**
 	 * {@inheritDoc}
