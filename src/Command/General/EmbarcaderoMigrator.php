@@ -1273,7 +1273,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 						'type'        => 'assoc',
 						'name'        => 'story-id-from',
 						'description' => 'Which story ID to start with',
-						'optional'    => false,
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -4711,6 +4711,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			$attachment_ids = array_map( 'absint', array_values( $photo_map ) );
+			$attachment_ids = array_diff( $attachment_ids, array_map( fn ( $attachment_id ) => absint( trim( $attachment_id ) ), explode( ',', $row['attachment_ids'] ) ) );
 
 			$block = null;
 
