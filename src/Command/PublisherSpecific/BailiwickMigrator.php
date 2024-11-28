@@ -22,7 +22,6 @@ use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Concrete5Xml;
 use Psr\Log\LoggerInterface;
 use simplehtmldom\HtmlDocument;
-use SimpleXMLElement;
 use WP_CLI;
 use WP_Error;
 
@@ -32,11 +31,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Logger for CLI output.
+	 *
 	 * @var LoggerInterface Logger instance.
 	 */
 	private LoggerInterface $cli_logger;
 	/**
 	 * Logger for file output.
+	 *
 	 * @var LoggerInterface Logger instance.
 	 */
 	private LoggerInterface $file_logger;
@@ -141,7 +142,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 *
-	 * @throws \DateMalformedStringException
+	 * @throws \Exception If something goes wrong.
 	 */
 	public function cmd_download_xml( array $pos_args, array $assoc_args ): void {
 		$from_date    = $assoc_args['from-date'];
@@ -168,7 +169,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				$chunk['to']->format( $date_format_for_url )
 			); // This assumes that we use '&' because the url needs auth.
 
-			$domain   = parse_url( $base_url, PHP_URL_HOST );
+			$domain   = wp_parse_url( $base_url, PHP_URL_HOST );
 			$filename = sanitize_file_name( sprintf( '%s-%s-%s.xml', $domain, $chunk['from']->format( $short_iso8601_format ), $chunk['to']->format( $short_iso8601_format ) ) );
 			if ( ! empty( $output_dir ) ) {
 				if ( ! file_exists( $output_dir ) ) {
@@ -188,9 +189,9 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				]
 			);
 
+			// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.wp_remote_get_wp_remote_get, WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- all good comes to those that wait.
 			$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
 
-			// Check for errors
 			if ( is_wp_error( $response ) ) {
 				NMT::exit_with_message( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
 			}
@@ -199,24 +200,27 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				$counter   = 0;
 				$file_info = pathinfo( $filename );
 
-				// Loop until we find a unique filename
+				// Loop until we find a unique filename.
 				while ( file_exists( $filename ) ) {
 					++$counter;
 					$filename = $file_info['dirname'] . '/' . $file_info['filename'] . '_' . $counter . '.' . $file_info['extension'];
 				}
 			}
 
+			// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents -- we kinda need to save the file ;)
 			file_put_contents( $filename, wp_remote_retrieve_body( $response ) );
 		}
 	}
 
 	/**
-	 * @param string $from_date
-	 * @param string $to_date
-	 * @param int    $chunk_size
+	 * Get date range chunks.
 	 *
-	 * @return array
-	 * @throws \DateMalformedStringException
+	 * @param string $from_date The start date in format YYYY-MM-DD.
+	 * @param string $to_date  The end date in format YYYY-MM-DD.
+	 * @param int    $chunk_size How many days of articles to put in each file.
+	 *
+	 * @return array An array of date ranges.
+	 * @throws \DateMalformedStringException If something went very wrong in parsing the dates.
 	 */
 	private function get_date_range_chunks( string $from_date, string $to_date, int $chunk_size ): array {
 
@@ -230,7 +234,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			NMT::exit_with_message( sprintf( 'Invalid end date %s', $to_date ), [ $this->cli_logger ] );
 		}
 
-		// Make sure the end date is inclusive by adding one day
+		// Make sure the end date is inclusive by adding one day.
 		$end->modify( '+1 day' );
 
 		$interval = new DateInterval( "P{$chunk_size}D" );
@@ -238,13 +242,13 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		$current_start = clone $start;
 		$chunks        = [];
 
-		// Loop until we reach the end date
+		// Loop until we reach the end date.
 		while ( $current_start < $end ) {
 			// Calculate the next end date.
 			$current_end = clone $current_start;
 			$current_end->add( $interval );
 
-			// If the calculated end date exceeds the original end date, limit it
+			// If the calculated end date exceeds the original end date, limit it.
 			if ( $current_end > $end ) {
 				$current_end = $end;
 			}
@@ -252,15 +256,15 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			// Subtract one day to make the range inclusive.
 			$modified_end = $current_end->modify( '-1 day' );
 
-			// Store the current range in the result
+			// Store the current range in the result.
 			$chunks[] = array(
 				'from' => $current_start,
 				'to'   => $modified_end,
 			);
 
-			// Move the start date to the next interval
+			// Move the start date to the next interval.
 			$current_start = clone $current_end;
-			$current_start->modify( '+1 day' ); // Start from the next day
+			$current_start->modify( '+1 day' ); // Start from the next day.
 		}
 
 		return array_reverse( $chunks );
@@ -268,12 +272,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 
 	/**
-	 * TODO:
-	 *  - Get author
-	 *  - Fix formatting in content – Need to find problematic articles to fix this one.
-	 *  - While it's great that this can fetch from urls and files, we should probably download the files when fetching from urls.
+	 * Callback for the `bw-import-articles-from-xml` command.
 	 *
-	 * @throws Exception
+	 * Imports articles from an XML file - url or local file.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 *
+	 * @throws Exception If things go wrong.
 	 */
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
 		$xml_file_path = $assoc_args['xml-file'];
@@ -293,8 +299,8 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 		$counter = 0;
 		foreach ( $xml_fetcher->get_articles() as $article ) {
-
-			if ( ++$counter % 10 === 0 ) {
+			++$counter;
+			if ( 0 === $counter % 10 ) {
 				$this->cli_logger->info( sprintf( 'Processed %s articles', $counter ) );
 			}
 
@@ -304,7 +310,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			];
 
 			$url         = $article['url'];
-			$path        = parse_url( $article['url'], PHP_URL_PATH );
+			$path        = wp_parse_url( $article['url'], PHP_URL_PATH );
 			$existing_id = $this->get_post_id_by_old_path( $path );
 			if ( ! empty( $existing_id ) ) {
 				if ( ! $refresh ) {
@@ -352,7 +358,6 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-
 			$this->cli_logger->notice(
 				'Imported article',
 				[
@@ -368,7 +373,9 @@ class BailiwickMigrator implements RegisterCommandInterface {
 				]
 			);
 
-			$content   = get_post_field( 'post_content', $post_id );
+			$content = get_post_field( 'post_content', $post_id );
+
+			// Array holds callbacks to be applied to the content.
 			$replacers = [];
 			if ( str_contains( $content, '<h1>' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
@@ -378,6 +385,7 @@ class BailiwickMigrator implements RegisterCommandInterface {
 			}
 			if ( ! empty( $replacers ) ) {
 				$html_doc = new HtmlDocument( $content );
+				// Run the replacers on the same HTMLDocument so we don't have to parse the content multiple times.
 				foreach ( $replacers as $replacer ) {
 					$replacer( $html_doc, $post_id );
 				}
@@ -395,6 +403,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
+	/**
+	 * Replace all h1 tags with h2 tags.
+	 *
+	 * @param HtmlDocument $html_doc The HTML document to replace in.
+	 * @param int          $post_id  The post ID.
+	 *
+	 * @return void
+	 */
 	private function fix_h1s( HtmlDocument $html_doc, int $post_id ): void {
 		$h1s = $html_doc->find( 'h1' );
 		foreach ( $h1s as $h1 ) {
@@ -402,7 +418,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
-	// TODO. What about alt texts?
+	/**
+	 * Find images in HTMLDocument content and download them and replace with image blocks.
+	 *
+	 * @param HtmlDocument $html_doc The HTML document to replace in.
+	 * @param int          $post_id  The post ID.
+	 *
+	 * @return void
+	 */
 	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
 		$gb_blocks = new GutenbergBlockGenerator();
 		$images    = $html_doc->find( 'img' );
@@ -411,10 +434,12 @@ class BailiwickMigrator implements RegisterCommandInterface {
 
 			return;
 		}
+		// TODO. What about alt texts? I think they are in some img tags.
 		foreach ( $images as $img ) {
 			$src = $img?->getAttribute( 'src' );
 			if ( ! $src ) {
-				continue; // TODO
+				// Not much we can do without that.
+				continue;
 			}
 			if ( ! str_starts_with( $src, 'http' ) ) {
 				$src = NP_LIVE . $src;
@@ -449,6 +474,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		}
 	}
 
+	/**
+	 * Downloads and sets the featured image on a post.
+	 *
+	 * @param int    $post_id   Post ID.
+	 * @param string $image_url Image URL to download image from.
+	 *
+	 * @return void
+	 */
 	private function set_featured_image_on_post( int $post_id, string $image_url ): void {
 		$image_url = trim( $image_url );
 		if ( empty( $image_url ) ) {
@@ -486,23 +519,26 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		);
 	}
 
+	/**
+	 * Create or get author from the name.
+	 *
+	 * @param string $author_name The author name.
+	 *
+	 * @return int The author ID or 0 if not found.
+	 */
 	private function get_author( string $author_name ): int {
-		$default_author = 1; // TODO. Not right -use the correct one once it's been created.
+		$default_author = 1; // TODO. There is some default author logic that we need to implement.
 		if ( empty( $author_name ) ) {
 			return $default_author;
-		}
-		$all_we_have = [ 'user_login' => $author_name ];
-		$maybe_user  = UsersHelper::get_user( $all_we_have );
-		if ( ! empty( $maybe_user ) ) {
-			return $maybe_user->ID;
 		}
 
 		try {
 			$user = UsersHelper::create_or_get_user(
 				[
-					...$all_we_have,
-					'role' => 'contributor_no_edit',
-				]
+					'user_login' => $author_name,
+					'role'       => 'contributor_no_edit',
+				],
+				$author_name
 			);
 
 			return $user->ID;
@@ -516,6 +552,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 	}
 
 
+	/**
+	 * Get image from URL and return the attachment ID.
+	 *
+	 * @param string $url     The URL to the image.
+	 * @param int    $post_id The post ID.
+	 *
+	 * @return int|WP_Error
+	 */
 	private function get_image_from_url( string $url, int $post_id ): int|WP_Error {
 		if ( empty( $url ) ) {
 			return new WP_Error( '', 'No image URL provided' );
@@ -534,10 +578,18 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		return $featured_image_id;
 	}
 
+	/**
+	 * Get the WP post ID by the old path.
+	 *
+	 * @param string $old_path The old path.
+	 *
+	 * @return int The post ID or 0 if not found.
+	 */
 	public function get_post_id_by_old_path( string $old_path ): int {
 		$posts = get_posts(
 			[
 				'meta_key'   => '_old_path',
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 				'meta_value' => $old_path,
 			]
 		);
@@ -545,6 +597,14 @@ class BailiwickMigrator implements RegisterCommandInterface {
 		return $posts[0]->ID ?? 0;
 	}
 
+	/**
+	 * Probably delete this if it makes no sense.
+	 *
+	 * @param int    $post_id  Post ID.
+	 * @param string $filename The filename.
+	 *
+	 * @return string The path.
+	 */
 	public static function get_predicted_file_path( int $post_id, string $filename ): string {
 		// TODO. This assumes that images are uploaded like that with the date. Are they always?
 		$upload_dir = wp_upload_dir( get_post_time( 'Y/m', false, $post_id ), false );

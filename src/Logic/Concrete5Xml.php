@@ -58,7 +58,7 @@ class Concrete5Xml {
 		}
 
 		while ( $reader->read() ) {
-			// Check if the current node is an <article> element
+			// phpcs:disable WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase, WordPress.NamingConventions.ValidVariableName.VariableNotSnakeCase, WordPress.NamingConventions.ValidVariableName.InterpolatedVariableNotSnakeCase
 			if ( XMLReader::ELEMENT === $reader->nodeType && 'article' === $reader->name ) {
 				$articleContent = $reader->readInnerXML();
 				yield $this->sanitize_article(
@@ -67,6 +67,7 @@ class Concrete5Xml {
 					)
 				);
 			}
+			// phpcs:enable
 		}
 
 		$reader->close();
