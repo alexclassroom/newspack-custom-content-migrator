@@ -5,10 +5,12 @@ namespace NewspackCustomContentMigrator\Command\General;
 use DateTimeZone;
 use DOMDocument;
 use Exception;
+use Newspack\MigrationTools\Log\FileLogger;
 use NewspackCustomContentMigrator\Command\General\TaxonomyMigrator;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
+use NewspackCustomContentMigrator\Utils\CsvIterator;
 use NewspackCustomContentMigrator\Utils\Logger;
 use NewspackCustomContentMigrator\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
@@ -4638,14 +4640,24 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$story_photos_csv_file_path = $assoc_args['story-photos-csv-path'];
 		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
 		$story_id_from              = $assoc_args['story-id-from'] ?? null;
+
+		// Logging
+		$file_logger  = new FileLogger;
+		$log_filename = 'embarcadero-fix-missing-media.log';
+
+		$csv_iterator = new CsvIterator;
 		
-		$missing_media_iterator = ( new FileImportFactory() )->get_file( $missing_media_csv_filepath )->getIterator();
-		$photos                 = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+		$photos = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+
+		$qa_filename    = 'missing-media-fixed-qa.csv';
+		$qa_file_exists = file_exists( $qa_filename );
+		$qa_file        = fopen( $qa_filename, 'a' );
 		
 		$header  = [
 			'story_id'              => null,
 			'post_id'               => null,
 			'staging_url'           => null,
+			'revision_url'          => null,
 			'photo_ids'             => null,
 			'count_found_photo_ids' => null,
 			'attachment_ids'        => null,
@@ -4653,19 +4665,51 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			'old_post_content'      => null,
 			'new_post_content'      => null,
 		];
-		$qa_file = fopen( 'missing-media-fixed-qa.csv', 'w' );
-		fputcsv( $qa_file, array_keys( $header ) );
+
+		if ( ! $qa_file_exists ) {
+			fputcsv( $qa_file, array_keys( $header ) );
+		}
 
 		global $wpdb;
 
-		foreach ( $missing_media_iterator as $row ) {
+		$count_csv_rows = $csv_iterator->count_csv_file_entries( $missing_media_csv_filepath, ',' );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar(
+			sprintf(
+				'[Memory Usage: %s] Embarcadero: Fix Missing Media',
+				size_format( memory_get_usage( true ) )
+			),
+			$count_csv_rows
+		);
+
+		foreach ( $csv_iterator->items( $missing_media_csv_filepath, ',' ) as $row ) {
 			$story_id             = (int) $row['story_id'];
-			$post_id              = $row['post_id'];
+			$post_id              = (int) $row['post_id'];
 			$original_photo_ids   = explode( ',', $row['photo_ids'] );
 
-			WP_CLI::line( sprintf( 'Memory Usage: %s | Story ID: %d | Post ID: %d', size_format( memory_get_usage( true ) ), $story_id, $post_id ) );
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory Usage: %s] Embarcadero: Fix Missing Media (Story ID: #%d) (Post ID: #%d)',
+					size_format( memory_get_usage( true ) ),
+					$story_id,
+					$post_id
+				)
+			);
 
-			if ( ! $post_id  ) {
+			$file_logger->log(
+				$log_filename,
+				sprintf(
+					'[Memory Usage: %s] Embarcadero: Fix Missing Media (Story ID: #%d) (Post ID: #%d)',
+					size_format( memory_get_usage( true ) ),
+					$story_id,
+					$post_id
+				)
+			);
+
+			if ( ! $post_id ) {
+				$file_logger->log( $log_filename, '🚫 Empty Post ID', FileLogger::ERROR );
+
 				continue;
 			}
 
@@ -4674,7 +4718,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			}
 
 			if ( $row['difference'] == 'NO' ) {
-				WP_CLI::line( 'No difference found. Skipping...' );
+				$file_logger->log( $log_filename, '👉 No difference found. Skipping...', FileLogger::WARNING );
+
 				continue;
 			}
 
@@ -4712,25 +4757,38 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 			$attachment_ids = array_map( 'absint', array_values( $photo_map ) );
 			$attachment_ids = array_diff( $attachment_ids, array_map( fn ( $attachment_id ) => absint( trim( $attachment_id ) ), explode( ',', $row['attachment_ids'] ) ) );
+			$attachment_ids = array_filter( array_values( $attachment_ids ) );
 
 			$block = null;
 
 			if ( count( $attachment_ids ) > 1 ) {
+				$file_logger->log( $log_filename, '👉 Creating Jetpack Slideshow Block', FileLogger::INFO );
+
 				$block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( $attachment_ids ) );
-			} else {
+			} else if ( count( $attachment_ids ) === 1 ) {
+				$file_logger->log( $log_filename, '👉 Creating Image Block', FileLogger::INFO );
+
 				$block = serialize_block( $this->gutenberg_block_generator->get_image( get_post( $attachment_ids[0] ) ) );
+			} else {
+				$file_logger->log( $log_filename, '🚫 Skipping.. No Attachments to update', FileLogger::WARNING );
+
+				continue;
 			}
 
 			$old_content = get_post_field( 'post_content', $post_id );
 
 			if ( strpos( $old_content, $block ) !== false ) {
-				WP_CLI::line( sprintf( 'Skipping.. Post already updated', $post_id ) );
+				$file_logger->log( $log_filename, '🚫 Post already contains new block!', FileLogger::WARNING );
 
 				continue;
 			}
 
 			$new_content = $old_content . "\r\n" . $block;
 
+			wp_save_post_revision( $post_id );
+
+			// Using $wpdb->update to prevent post_modified from being updated.
+			// Clearing cache immediately after that to make revisions work.
 			$wpdb->update(
 				$wpdb->posts,
 				[
@@ -4741,10 +4799,26 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				]
 			);
 
+			clean_post_cache( $post_id );
+
+			if ( $post_revision_id = wp_save_post_revision( $post_id ) ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_date'     => current_time( 'mysql' ),
+						'post_date_gmt' => current_time( 'mysql', 1 ),
+					],
+					[
+						'ID' => $post_revision_id
+					]
+				);
+			}
+
 			fputcsv( $qa_file, [
 				$story_id,
 				$post_id,
 				get_permalink( $post_id ),
+				$post_revision_id ? admin_url( sprintf( 'revision.php?revision=%d', $post_revision_id ) ) : null,
 				implode( ', ', $original_photo_ids ),
 				count( $original_photo_ids ),
 				implode( ', ', $attachment_ids ),
@@ -4753,11 +4827,16 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$new_content,
 			] );
 
-			WP_CLI::line( sprintf( 'Updated %s', $post_id ) );
+			$file_logger->log( $log_filename, '✅ Post Updated!', FileLogger::SUCCESS );
 		}
 
 		fclose( $qa_file );
-		WP_CLI::line( 'Done!' );
+		
+		$progress_bar->finish();
+
+		$file_logger->log( $log_filename, '🎉 Completed!', FileLogger::SUCCESS );
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -5425,7 +5504,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Only could find a thumbniail: %s for the post %d', $media_path, $wp_post_id ), Logger::WARNING );
 				}
 
-				$this->logger->log( 'imported_inages.log', sprintf( 'Imported photo %s for the post %d', $media_path, $wp_post_id ), Logger::LINE );
+				FileLogger::log( 'imported_images.log', sprintf( 'Imported photo %s for the post %d', $media_path, $wp_post_id ), Logger::LINE );
+
 				return $attachment_id;
 			}
 		}
