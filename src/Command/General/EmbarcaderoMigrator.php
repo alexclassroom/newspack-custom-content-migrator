@@ -5718,18 +5718,19 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			if ( username_exists( $sanitized_byline ) || strlen( $sanitized_byline ) >= 50 ) {
-				$sanitized_byline = substr( $sanitized_byline, 0, 50 );
+			if ( username_exists( $sanitized_byline ) || strlen( $sanitized_byline ) > 50 ) {
+				$sanitized_byline = substr( $sanitized_byline, 0, 45 );
 
 				$sanitized_byline .= '-' . substr( md5( wp_rand() ), 0, 5 );
 			}
 
-			$user_id                         = wp_insert_user(
+			$user_id = wp_insert_user(
 				[
 					'user_login'   => wp_slash( $sanitized_byline ),
-					'user_email'   => '',
+					'user_email'   => $sanitized_byline . '@example.com',
 					'user_pass'    => wp_generate_password(),
 					'display_name' => $row['original_byline'],
+					'role'         => 'Contributor',
 				]
 			);
 
