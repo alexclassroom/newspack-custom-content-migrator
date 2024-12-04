@@ -22,6 +22,7 @@ use WP_CLI;
 class AttachmentsMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
+
 	// Logs.
 	const S3_ATTACHMENTS_URLS_LOG = 'S3_AHTTACHMENTS_URLS.log';
 	const DELETING_MEDIA_LOGS     = 'DELETING_MEDIA_LOGS.log';
@@ -43,11 +44,19 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	private GutenbergBlockGenerator $block_generator;
 
 	/**
+	 * Attachments logic.
+	 * 
+	 * @var Attachments $attachments Attachments instance.
+	 */
+	private Attachments $attachments;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->logger           = new Logger();
+		$this->logger          = new Logger();
 		$this->block_generator = new GutenbergBlockGenerator();
+		$this->attachments     = new Attachments();
 	}
 
 	/**
@@ -238,9 +247,12 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 			$blocks = parse_blocks( $post->post_content );
 			// Target only image blocks with no id and a local image. "Local" is a bit un-scientific here,
 			// but it's fast.
-			$target_blocks = array_filter( $blocks, function ( $block ) {
-				return 'core/image' === $block['blockName'] && empty( $block['attrs']['id'] ) && str_contains( $block['innerHTML'], '/wp-content/uploads/' );
-			} );
+			$target_blocks = array_filter(
+				$blocks,
+				function ( $block ) {
+					return 'core/image' === $block['blockName'] && empty( $block['attrs']['id'] ) && str_contains( $block['innerHTML'], '/wp-content/uploads/' );
+				} 
+			);
 			if ( empty( $target_blocks ) ) {
 				continue;
 			}
@@ -292,13 +304,13 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 	}
 
 		/**
-	 * Gets a list of attachment IDs by years for those attachments which have files on local in (/wp-content/uploads).
-	 *
-	 * @param array $pos_args   Positional arguments.
-	 * @param array $assoc_args Associative Arguments.
-	 *
-	 * @return void
-	 */
+		 * Gets a list of attachment IDs by years for those attachments which have files on local in (/wp-content/uploads).
+		 *
+		 * @param array $pos_args   Positional arguments.
+		 * @param array $assoc_args Associative Arguments.
+		 *
+		 * @return void
+		 */
 	public function cmd_get_atts_by_years( $pos_args, $assoc_args ) {
 		\Newspack\MigrationTools\Command\AttachmentsMigrator::get_instance()->cmd_get_atts_by_years( $pos_args, $assoc_args );
 	}
@@ -512,7 +524,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 			);
 
 			$image_urls_to_not_delete = array_map(
-				function( $url ) {
+				function ( $url ) {
 					return $this->clean_images_url( $url );
 				},
 				$raw_image_urls_to_not_delete
@@ -595,15 +607,15 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
 		$batch           = $assoc_args['batch'] ?? null;
 		$index           = $assoc_args['index'] ?? null;
-		$log_file = 'broken_media_urls_batch.log';
+		$log_file        = 'broken_media_urls_batch.log';
 
-		Attachments::get_broken_attachment_urls_from_posts(
+		$this->attachments->get_broken_attachment_urls_from_posts(
 			[],
 			$is_using_s3,
 			$posts_per_batch,
 			$batch,
 			$index,
-			function( $post_id, $broken_url ) use ( $batch, $log_file ) {
+			function ( $post_id, $broken_url ) use ( $batch, $log_file ) {
 				$this->log( sprintf( '%s_%s.log', $log_file, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
 			}
 		);
@@ -721,8 +733,8 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		return array_unique(
 			array_reduce(
 				$non_posts,
-				function( $carry, $post ) {
-					return array_merge( $carry, Attachments::get_images_sources_from_content( $post->post_content ) );
+				function ( $carry, $post ) {
+					return array_merge( $carry, $this->attachments->get_images_sources_from_content( $post->post_content ) );
 				},
 				[]
 			)
@@ -744,12 +756,12 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		return array_unique(
 			array_reduce(
 				$widgets_content,
-				function( $carry, $widget ) use ( $widgets_content ) {
+				function ( $carry, $widget ) use ( $widgets_content ) {
 					if ( ! is_array( $widget ) || ! array_key_exists( 'text', $widget ) ) {
 						return $carry;
 					}
 
-					return array_merge( $carry, Attachments::get_images_sources_from_content( $widget['text'] ) );
+					return array_merge( $carry, $this->attachments->get_images_sources_from_content( $widget['text'] ) );
 				},
 				[]
 			)
@@ -804,7 +816,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		}
 
 		return array_map(
-			function( $url ) {
+			function ( $url ) {
 				return str_starts_with( $url, '/wp-content/uploads' )
 				? get_site_url() . $url
 				: $url;
@@ -825,7 +837,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		$avatar_ids = $wpdb->get_results( "SELECT meta_value FROM {$wpdb->posts} p INNER JOIN {$wpdb->postmeta} pm ON pm.post_id = p.ID WHERE post_type = 'guest-author' AND meta_key = '_thumbnail_id';" );
 
 		return array_map(
-			function( $avatar_id ) {
+			function ( $avatar_id ) {
 				return wp_get_attachment_url( $avatar_id->meta_value );
 			},
 			$avatar_ids
@@ -844,7 +856,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 		$avatars = $wpdb->get_results( "SELECT meta_value FROM {$wpdb->usermeta} WHERE meta_key = 'simple_local_avatar';" );
 
 		return array_map(
-			function( $avatar ) {
+			function ( $avatar ) {
 				$avatar_details = unserialize( $avatar->meta_value );
 				return wp_get_attachment_url( $avatar_details['media_id'] );
 			},
@@ -865,7 +877,7 @@ class AttachmentsMigrator implements RegisterCommandInterface {
 
 		return array_filter(
 			array_map(
-				function( $default_featured_image ) {
+				function ( $default_featured_image ) {
 					$default_featured_image_details = unserialize( $default_featured_image->option_value ); // phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize
 					return empty( $default_featured_image_details['og_default_image_id'] ) ? '' : wp_get_attachment_url( $default_featured_image_details['og_default_image_id'] );
 				},
