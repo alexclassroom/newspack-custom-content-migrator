@@ -77,7 +77,7 @@ PluginSetup::register_command_classes(
 		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific commands. Remove from below when launched.
-		Command\PublisherSpecific\BailiwickMigrator::class,
+		Command\PublisherSpecific\JEPBailiwickMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
 	]

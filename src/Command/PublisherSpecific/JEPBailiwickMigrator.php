@@ -25,7 +25,7 @@ use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_Error;
 
-class BailiwickMigrator implements RegisterCommandInterface {
+class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
