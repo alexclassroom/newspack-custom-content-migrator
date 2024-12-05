@@ -29,18 +29,28 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+	const META_ORIGINAL_URL = '_original_url';
+
 	/**
 	 * Logger for CLI output.
 	 *
 	 * @var LoggerInterface Logger instance.
 	 */
 	private LoggerInterface $cli_logger;
+
 	/**
 	 * Logger for file output.
 	 *
 	 * @var LoggerInterface Logger instance.
 	 */
 	private LoggerInterface $file_logger;
+	
+	/**
+	 * Taxonomy logic.
+	 *
+	 * @var Taxonomy $taxonomy Taxonomy logic.
+	 */
+	private Taxonomy $taxonomy;
 
 	/**
 	 * Constructor.
@@ -48,6 +58,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	private function __construct() {
 		$this->cli_logger  = CliLog::get_logger( 'bw' );
 		$this->file_logger = FileLog::get_logger( 'bw' );
+		$this->taxonomy    = new Taxonomy();
 		if ( ! defined( 'NP_LIVE' ) ) {
 			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
 		}
@@ -102,7 +113,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					[
 						'type'        => 'assoc',
 						'name'        => 'output-dir',
-						'description' => 'Optional. Where to put the downloaded xml files – defaults to current dir', // TODO. Are these inclusive?
+						'description' => 'Optional. Where to put the downloaded xml files – defaults to current dir',
 						'optional'    => true,
 					],
 					[
@@ -292,33 +303,35 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
 		}
 
-		$taxonomy_helper = new Taxonomy();
-		$home_url        = home_url();
+		$home_url = home_url();
 
 		$file_logger = FileLog::get_logger( 'bw-article-import' );
 
-		$counter = 0;
-		foreach ( $xml_fetcher->get_articles() as $article ) {
+		$articles    = $xml_fetcher->get_articles();
+		$total_count = $xml_fetcher->get_count();
+		$counter     = 0;
+		foreach ( $articles as $article ) {
 			++$counter;
 			if ( 0 === $counter % 10 ) {
 				$this->cli_logger->info( sprintf( 'Processed %s articles', $counter ) );
 			}
 
+			// New post data (or update if already imported).
 			$post = [
 				'post_type'   => 'post',
 				'post_status' => 'publish',
 			];
-
-			$url         = $article['url'];
-			$path        = wp_parse_url( $article['url'], PHP_URL_PATH );
-			$existing_id = $this->get_post_id_by_old_path( $path );
+			
+			// Get existing post ID if already imported.
+			$original_url = $article['url'];
+			$existing_id  = $this->get_post_id_by_original_url( $original_url );
 			if ( ! empty( $existing_id ) ) {
 				if ( ! $refresh ) {
 					$this->cli_logger->notice(
-						'Article already imported',
+						'Article already imported, skipping',
 						[
-							'path' => $path,
-							'ID'   => $existing_id,
+							'url' => $original_url,
+							'ID'  => $existing_id,
 						]
 					);
 					continue;
@@ -326,38 +339,58 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$post['ID'] = $existing_id;
 			}
 
-			$post['meta_input']['_old_path'] = $path;
+			// Basic data.
+			$post['post_title'] = $article['title'];
+			$post['post_name']  = basename( $original_url );
+			$post['post_date']  = $article['datePublic'];
+			
+			// Set lead as Newspack subtitle.
+			$lead = $article['lead'];
+			if ( ! empty( $lead ) ) {
+				$post['meta_input']['newspack_post_subtitle'] = $lead;
+			}
 
+			// Set content.
+			$post['post_content'] = $article['description'] . $article['content'];
+
+			// Set author.
+			$post['post_author'] = $this->get_author( $article['author'] );
+
+			// Set categories.
 			$category_name = $article['category'];
-			$cat_id        = $taxonomy_helper->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+			$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 			if ( ! is_wp_error( $cat_id ) ) {
 				$post['post_category'] = [ $cat_id ];
 			}
-
+			
+			// Set tags.
 			$tags = explode( ',', $article['tags'] );
 			if ( ! empty( $tags ) ) {
 				$post['tags_input'] = $tags;
 			}
 
-			$post['post_title'] = $article['title'];
-			$post['post_name']  = basename( $url );
+			// Save custom postmetas.
+			$post['meta_input'][ self::META_ORIGINAL_URL ] = $original_url;
 
-			$post['post_author'] = $this->get_author( $article['author'] );
-
-			$post['post_date'] = $article['datePublic'];
-			$lead              = $article['lead'];
-			if ( ! empty( $lead ) ) {
-				$post['meta_input']['newspack_post_subtitle'] = $lead;
-			}
-
-			$post['post_content'] = $article['description'] . $article['content'];
-
+			// Insert or update post if it already exists.
 			$post_id = wp_insert_post( $post );
 			if ( is_wp_error( $post_id ) ) {
-				$this->cli_logger->error( 'Failed to import article', [ 'error' => $post_id ] );
+				$this->cli_logger->error(
+					'ERROR: Failed to import article',
+					[
+						'error'   => $post_id,
+						'postarr' => $post,
+					] 
+				);
 				continue;
 			}
 
+			// TODO: Create redirect.
+			$post_link = get_permalink( $post_id );
+			if ( $post_link != $original_url ) {
+			}
+
+			// Logging.
 			$this->cli_logger->notice(
 				'Imported article',
 				[
@@ -369,13 +402,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				'Imported article',
 				[
 					'post_id'  => $post_id,
-					'from_url' => $url,
+					'from_url' => $original_url,
 				]
 			);
 
+			// Custom updates to content.
 			$content = get_post_field( 'post_content', $post_id );
-
-			// Array holds callbacks to be applied to the content.
+			
+			// Define content replacers -- $replacers holds callbacks to be applied to the content.
 			$replacers = [];
 			if ( str_contains( $content, '<h1>' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
@@ -383,6 +417,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( str_contains( $content, '<img ' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
 			}
+
+			// Run the replacers.
 			if ( ! empty( $replacers ) ) {
 				$html_doc = new HtmlDocument( $content );
 				// Run the replacers on the same HTMLDocument so we don't have to parse the content multiple times.
@@ -399,6 +435,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				);
 			}
 
+			// Set featured image.
 			$this->set_featured_image_on_post( $post_id, $article['image'] );
 		}
 	}
@@ -434,7 +471,21 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			return;
 		}
-		// TODO. What about alt texts? I think they are in some img tags.
+		
+		/**
+		 * Some images are small sized (.../cache/...) and wrapped in links like this:
+		 * ```
+		 * <a href="https://www.bailiwickexpress.com/files/5117/3202/4104/kate.jpg" target="_blank">
+		 *      <img src="https://www.bailiwickexpress.com/files/cache/0bce94c80a6c63f1e32ddbed148c7921_f1416263.jpg" alt="kate.jpg" width="500" height="1382" />
+		 *      <br />
+		 * </a>
+		 * ```
+		 * For such images we need to use the <a>'s href as the image source.
+		 */
+		$a = 1;
+
+		// TODO Some images have alt texts in the content and we should just make the code parses them too and put them on the attachments.
+
 		foreach ( $images as $img ) {
 			$src = $img?->getAttribute( 'src' );
 			if ( ! $src ) {
@@ -447,7 +498,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$att_id = $this->get_image_from_url( $src, $post_id );
 			if ( is_wp_error( $att_id ) ) {
 				$this->cli_logger->error(
-					'Failed to import inline image',
+					'ERROR: Failed to import inline image',
 					[
 						'post_id' => $post_id,
 						'src'     => $src,
@@ -504,7 +555,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			);
 		} else {
 			FileLog::get_logger( 'bw-images' )->error(
-				'Could not download featured image',
+				'ERROR: Could not download featured image',
 				[
 					'post_id' => $post_id,
 					'image'   => $image_url,
@@ -543,7 +594,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			return $user->ID;
 		} catch ( Exception $e ) {
-			$message = sprintf( 'Could not create user with name %s', $author_name );
+			$message = sprintf( 'ERROR: Could not create user with name %s', $author_name );
 			$this->cli_logger->error( $message, [ 'error' => $e ] );
 			$this->file_logger->critical( $message, [ 'error' => $e ] );
 
@@ -579,18 +630,18 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get the WP post ID by the old path.
+	 * Get the WP post ID by the original URL.
 	 *
-	 * @param string $old_path The old path.
+	 * @param string $original_url The original URL.
 	 *
 	 * @return int The post ID or 0 if not found.
 	 */
-	public function get_post_id_by_old_path( string $old_path ): int {
+	public function get_post_id_by_original_url( string $original_url ): int {
 		$posts = get_posts(
 			[
-				'meta_key'   => '_old_path',
+				'meta_key'   => self::META_ORIGINAL_URL,
 				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
-				'meta_value' => $old_path,
+				'meta_value' => $original_url,
 			]
 		);
 
