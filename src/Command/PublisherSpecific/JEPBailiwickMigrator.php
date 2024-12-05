@@ -32,6 +32,25 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	use WpCliCommandTrait;
 
 	const META_ORIGINAL_URL = '_original_url';
+	const META_ORIGINAL_AUTHOR = '_original_author';
+
+	/**
+	 * Header images used to determine authors. Can be one or single such images, all either fully qualified URLs, or relative paths, or just file names.
+	 */
+	const AUTHOR__NEWS_TEAM__HEADER_IMAGES = [
+		// 'https://www.bailiwickexpress.com/files/2616/3638/1625/News-Team-By-Line.png',
+		// 'https://www.bailiwickexpress.com/files/5417/2546/0302/News-Team-By-Line.png',
+		'News-Team-By-Line.png',
+	];
+	const AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES = [
+		// 'https://www.bailiwickexpress.com/files/5216/8511/8070/jersey_heritage.png',
+		// 'https://www.bailiwickexpress.com/files/8216/5287/9043/jersey_heritage.png',
+		'jersey_heritage.png',
+	];
+	const AUTHOR__OPINION__HEADER_IMAGES = [
+		// 'https://www.bailiwickexpress.com/files/2516/7965/5634/Opinion-By-Line.jpg',
+		'Opinion-By-Line.jpg',
+	];
 
 	/**
 	 * Logger for CLI output.
@@ -150,6 +169,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				'synopsis'  => [
 					$xml_file,
 					$refresh,
+					[
+						'type'        => 'assoc',
+						'name'        => 'publication',
+						'description' => "Allowed values 'jersey' or 'guernsey'.",
+						'optional'    => false,
+					],
 				],
 			]
 		);
@@ -305,6 +330,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
 		$xml_file_path = $assoc_args['xml-file'];
 		$refresh       = $assoc_args['refresh-existing'] ?? false;
+		$publication   = $assoc_args['publication'];
+		if ( ! in_array( $publication, [ 'jersey', 'guernsey' ], true ) ) {
+			NMT::exit_with_message( 'Invalid publication. Allowed values are "jersey" or "guernsey"', [ $this->cli_logger ] );
+		}
 		$xml_fetcher   = null;
 		try {
 			$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file_path ] );
@@ -364,12 +393,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$post['post_content'] = $article['description'] . $article['content'];
 
 			// Set author.
-			// TODO CHECK
-			$post['post_author'] = $this->get_author( $article['author'] );
+			$post['post_author'] = $this->get_author( $article['author'], $original_url, $publication, $article['description'], $article['content'] );
 
 			// Set categories.
 			$category_name = $article['category'];
-			// TODO CHECK
 			$cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 			if ( ! is_wp_error( $cat_id ) ) {
 				$post['post_category'] = [ $cat_id ];
@@ -390,7 +417,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 
 			// Save custom postmetas.
-			$post['meta_input'][ self::META_ORIGINAL_URL ] = $original_url;
+			$post['meta_input'][ self::META_ORIGINAL_URL ]    = $original_url;
+			$post['meta_input'][ self::META_ORIGINAL_AUTHOR ] = $article['author'];
 
 			// Insert or update post if it already exists.
 			$post_id = wp_insert_post( $post );
@@ -699,12 +727,104 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Create or get author from the name.
 	 *
-	 * @param string $author_name The author name.
+	 * @param string $author_name         The author name.
+	 * @param string $original_url        The original article URL.
+	 * @param string $publication         'jersey' or 'guernsey'.
+	 * @param string $article_description Article description.
+	 * @param string $article_content     Article content.
 	 *
 	 * @return int The author ID or 0 if not found.
 	 */
-	private function get_author( string $author_name ): int {
-		$default_author_id = 1; // TODO. There is some default author logic that we need to implement.
+	private function get_author(
+		string $author_name,
+		string $original_url,
+		string $publication,
+		$article_description,
+		$article_content
+	): int {
+		
+		
+		$default_author = null;
+
+
+		// "News Team" author.
+		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
+			$parsed_url = parse_url( $header_image );
+			$header_image_relative = $parsed_url['path'];
+			if ( str_contains( $article_description, $header_image_relative ) || str_contains( $article_content, $header_image_relative ) ) {
+				// $default_author = 'News Team';
+				$default_author = 'Bailiwick Express News Team';
+			}
+		}
+		
+
+		// "Jersey Heritage" author.
+		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
+			$parsed_url = parse_url( $header_image );
+			$header_image_relative = $parsed_url['path'];
+			if ( str_contains( $article_description, $header_image_relative ) || str_contains( $article_content, $header_image_relative ) ) {
+				$default_author = 'Jersey Heritage';
+			}
+		}
+		// ISSUE -- https://a8c.slack.com/archives/C07UT1REAGJ/p1733422857630239
+
+		// We only created a Jersey Heritage byline on 18 May 2022
+		// so content that pre-dates this may either have a News byline or no byline at all.
+		// rule: any content that pre-dates 18 May 2022 with
+		// 		- 'LOOKING BACK:'
+		// 		- 'What's your home's story?'
+		// 		- 'What's your town's story?'
+		// should also carry Heritage byline.
+		$default_author = 'Jersey Heritage';
+
+
+		// "Opinion" author.
+		// self::AUTHOR__OPINION__HEADER_IMAGES
+		/**
+		 * determine all Opinions by the .../jsy/opinion/... URL segment,
+		 * 		e.g. https://www.bailiwickexpress.com/jsy/opinion/opinion-jerseys-nonsensical-two-tiered-policing-electric-transportation/
+		 * OR by the "Opinion" category ???
+		 */
+		$default_author = "Opinion";
+
+
+		// "Community" author.
+		// https://www.bailiwickexpress.com/jsy/community/
+		$default_author = "Community";
+
+
+		// "Sponsored Content" author.
+		// https://www.bailiwickexpress.com/sponsored-content
+		$default_author = "Sponsored Content";
+		// ===>>> "import these as normal posts under the 'Sponsor Content' category"
+		
+		/**
+		 * BEJ only
+		 */
+		// Petty Debts and Property Lists are NOT normal article content and do not require a byline. They are uploaded by Maddy Pereira. 
+		// Please can we apply a rule for ALL content uploaded by Maddy Pereira to have NO byline? If it is not possible to remove the byline, please apply a generic Bailiwick Express News Team byline.
+		// - The latest in Petty Debts (e.g. https://www.bailiwickexpress.com/jsy/business/latest-petty-debts107/)
+		// - The latest property sales (e.g. https://www.bailiwickexpress.com/jsy/business/latest-property-sales91/)
+		$default_author = "Bailiwick Express News Team";
+		
+		
+		// "Opinion" author
+		// Please can we apply a rule that all content that appears on the Community page carries a generic ‘Bailiwick Express Community’ byline? 
+		// ??? :
+		$default_author = "Bailiwick Express Community";
+		// https://docs.google.com/document/d/1E70Iy7UyPleJe1dIW929WA8sx07iWP0g/edit?disco=AAABZ2DZNKk
+
+
+
+		if ( 'jersey' == $publication ) {
+
+		} else {
+			// Guernsey.
+			
+		}
+
+		// TODO. Default author logic.
+		$default_author_id = 1;
 		if ( empty( $author_name ) ) {
 			return $default_author_id;
 		}
