@@ -3,9 +3,9 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use WP_CLI;
@@ -34,20 +34,12 @@ class PCIJMigrator implements InterfaceCommand {
 	private CoAuthorsPlusHelper $co_authors_plus_logic;
 
 	/**
-	 * Class containing custom Attachments logic.
-	 *
-	 * @var Attachments $attachments
-	 */
-	private Attachments $attachments;
-
-	/**
 	 * Constructor
 	 *
 	 * @return void
 	 */
 	private function __construct() {
 		$this->co_authors_plus_logic = new CoAuthorsPlusHelper();
-		$this->attachments           = new Attachments();
 	}
 
 	/**
@@ -1188,7 +1180,7 @@ class PCIJMigrator implements InterfaceCommand {
 			return new WP_Error( 'file-not-found', 'The file does not exist.' );
 		}
 
-		$result = $this->attachments->import_external_file(
+		$result = Attachments::import_external_file(
 			$media_cache_dir . $featured_image->path,
 			null,
 			$featured_image->caption,

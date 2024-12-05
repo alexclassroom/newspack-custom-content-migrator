@@ -2,10 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Ithaca Voice.
@@ -75,6 +76,8 @@ class IthacaVoiceMigrator implements InterfaceCommand {
 
 		$bwg_tables = array( 'bwg_shortcode', 'bwg_gallery', 'bwg_image' );
 
+		$block_generator = new GutenbergBlockGenerator();
+
 		$this->log( self::GALLERIES_MIGRATION_LOGS, sprintf( 'Checking if Best WordPress Gallery plugin tables exists (%s)', join( ', ', $bwg_tables ) ) );
 		$valid_tables = $this->validate_db_tables_exist( $bwg_tables );
 
@@ -90,7 +93,7 @@ class IthacaVoiceMigrator implements InterfaceCommand {
 				'post_type'   => 'post',
 				'post_status' => array( 'publish' ),
 			),
-			function( $post ) use ( $wpdb ) {
+			function( $post ) use ( $wpdb, $block_generator ) {
 				if ( strpos( strtolower( $post->post_content ), strtolower( '[Best_Wordpress_Gallery' ) ) !== false ) {
 					$matches_shortcodes = $this->squarebracketselement_manipulator->match_shortcode_designations( 'Best_Wordpress_Gallery', $post->post_content );
 
@@ -163,7 +166,7 @@ class IthacaVoiceMigrator implements InterfaceCommand {
 						}
 
 						// Generate Jetpack slide gallery block.
-						$gallery_block = $this->posts_migrator_logic->generate_jetpack_slideshow_block_from_pictures( $images );
+						$gallery_block = $block_generator->get_jetpack_slideshow( $images );
 						// Remove HTML Block tags if exists.
 						$post_content_updated = str_replace( "<!-- wp:html -->\n$shortcode_match\n<!-- /wp:html -->", $gallery_block, $post_content_updated );
 						$post_content_updated = str_replace( "<!-- wp:paragraph -->\n<p>$shortcode_match</p>\n<!-- /wp:paragraph -->", $gallery_block, $post_content_updated );

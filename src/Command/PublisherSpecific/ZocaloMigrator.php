@@ -3,73 +3,40 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\MigrationMeta;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
-use WP_CLI\ExitException;
 use WP_Post;
 
-class ZocaloMigrator implements InterfaceCommand {
+class ZocaloMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	private int $default_author_id;
 
 	private CoAuthorsPlusHelper $coauthorsplus_logic;
-	private Logger $logger;
 
+	/**
+	 * Constructor.
+	 */
 	private function __construct() {
-		// Nothing.
-	}
-
-	/**
-	 * Get Singleton.
-	 *
-	 * @return self
-	 */
-	public static function get_instance(): self {
-		static $instance = null;
-		if ( null === $instance ) {
-			$instance = new self();
-		}
-
-		return $instance;
-	}
-
-	/**
-	 * Do some quick sanity checks and setup before running the commands.
-	 *
-	 * @throws ExitException
-	 */
-	public function preflight(): void {
-		static $has_run = false;
-		if ( $has_run ) {
-			// It looks like this gets called at least more than once pr. run, so bail if we already ran.
-			return;
-		}
-
 		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
-		$this->logger              = new Logger();
-
-		if ( ! $this->coauthorsplus_logic->validate_co_authors_plus_dependencies() ) {
-			WP_CLI::error( '"Co-Authors Plus" plugin not found. Install and activate it before using the migration commands.' );
-		}
-
-		$has_run = true;
 	}
 
 	/**
 	 * @throws Exception
 	 */
-	public function register_commands(): void {
+	public static function register_commands(): void {
 		$generic_args = [
-			'synopsis'      => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--refresh-existing]',
-			'before_invoke' => [ $this, 'preflight' ],
+			'synopsis' => '[--post-id=<post-id>] [--dry-run] [--num-items=<num-items>] [--refresh-existing]',
 		];
 
 		WP_CLI::add_command(
 			'newspack-content-migrator zps-import-post-authors',
-			[ $this, 'cmd_import_post_authors' ],
+			self::get_command_closure( 'cmd_import_post_authors' ),
 			[
 				...$generic_args,
 				'shortdesc' => 'Import authors from ACF data on posts.',
@@ -78,7 +45,7 @@ class ZocaloMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator zps-import-sub-titles',
-			[ $this, 'cmd_import_sub_titles' ],
+			self::get_command_closure( 'cmd_import_sub_titles' ),
 			[
 				...$generic_args,
 				'shortdesc' => 'Import post sub-titles.',
@@ -92,14 +59,16 @@ class ZocaloMigrator implements InterfaceCommand {
 			'key'     => 'import_sub_titles',
 		];
 
+		$site_url = trailingslashit( get_site_url() );
 		$meta_key = 'sub_title';
+		$file_loggger = FileLog::get_logger( 'import-subtitles', 'import-subtitles.log' );
 
 		foreach ( $this->get_published_posts_with_meta_key( $meta_key, $assoc_args, $migration_meta ) as $post ) {
 			$sub_title = trim( get_post_meta( $post->ID, $meta_key, true ) );
 			if ( empty( $sub_title ) ) {
 				continue;
 			}
-			$this->logger->log( 'sub_titles.log', sprintf( 'Updated sub title on post: %s', get_permalink( $post->ID ) ), Logger::SUCCESS );
+			$file_loggger->info( sprintf( 'Updated sub title on post: %s', "$site_url?p=p={$post->ID}" ) );
 
 			update_post_meta( $post->ID, 'newspack_post_subtitle', $sub_title );
 			MigrationMeta::update( $post->ID, $migration_meta['key'], 'post', $migration_meta['version'] );
@@ -120,37 +89,49 @@ class ZocaloMigrator implements InterfaceCommand {
 			'key'     => 'import_post_authors',
 		];
 
+		$site_url = trailingslashit( get_site_url() );
 		$meta_key = 'by_line';
 
+		$file_logger = FileLog::get_logger( 'import-post-authors', 'import-post-authors.log' );
+
 		foreach ( $this->get_published_posts_with_meta_key( $meta_key, $assoc_args, $migration_meta ) as $post ) {
+			$authors_to_assign = [];
 
 			$byline = get_post_meta( $post->ID, $meta_key );
 			if ( empty( $byline ) ) {
 				continue;
 			}
 			if ( ! is_array( $byline ) ) {
-				$this->process_single_author( $byline, $post );
+				$authors_to_assign[] = $this->process_single_author( $byline, $post );
 			} else {
-				$authors = [];
+				$author_strings = [];
 				foreach ( $byline as $author ) {
-					$authors = [
-						...$authors,
+					$author_strings = [
+						...$author_strings,
 						...$this->parse_author_string( wp_strip_all_tags( $author ) ),
 					];
 				}
-				foreach ( array_unique( $authors ) as $author ) {
-					$this->process_single_author( $author, $post );
+				foreach ( array_unique( $author_strings ) as $author ) {
+					$authors_to_assign[] = $this->process_single_author( $author, $post );
 				}
+			}
+			$authors_to_assign = array_filter( $authors_to_assign );
+			if ( ! empty( $authors_to_assign ) ) {
+				$this->coauthorsplus_logic->assign_guest_authors_to_post( $authors_to_assign, $post->ID );
+				$file_logger->info( sprintf( 'Assigned author(s): "%s" on post "%s"', implode( ',', $authors_to_assign ), "$site_url?p={$post->ID}" ));
 			}
 
 			MigrationMeta::update( $post->ID, $migration_meta['key'], 'post', $migration_meta['version'] );
 		}
 	}
 
-	private function process_single_author( string $author_name, WP_Post $post ): void {
-		$author_args = [];
+	private function process_single_author( string $author_name, WP_Post $post ): int {
+		$guest_author_id = 0;
+		$author_args     = [];
 		// Remove "by" prefix on author name.
 		$author_args['display_name'] = preg_replace( '/^by /i', '', trim( $author_name ) );
+
+		$file_logger = FileLog::get_logger( 'import-post-authors', 'import-post-authors.log' );
 
 		if ( empty( $author_args['display_name'] ) ) {
 			$guest_author_id = $this->default_author_id;
@@ -160,11 +141,14 @@ class ZocaloMigrator implements InterfaceCommand {
 				$author_args['description'] = trim( wp_strip_all_tags( $author_credit ) );
 			}
 			$guest_author_id = $this->coauthorsplus_logic->create_guest_author( $author_args );
+			if ( is_wp_error( $guest_author_id ) ) {
+				$guest_author_id = 0;
+				$file_logger->error(
+					sprintf( 'Could not create guest author with display name "%s" for post ID %d', $author_args['display_name'], $post->ID ) );
+			}
 		}
-		if ( ! is_wp_error( $guest_author_id ) ) {
-			$this->coauthorsplus_logic->assign_guest_authors_to_post( [ $guest_author_id ], $post->ID, true );
-			$this->logger->log( 'post_authors.log', sprintf( 'Assigned author: "%s" on post "%s"', $author_args['display_name'], get_permalink( $post->ID ) ), Logger::SUCCESS );
-		}
+
+		return $guest_author_id;
 	}
 
 	private function parse_author_string( string $authors ): array {

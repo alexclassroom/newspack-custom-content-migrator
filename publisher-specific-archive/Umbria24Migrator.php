@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Symfony\Component\DomCrawler\Crawler as Crawler;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Washington Monthly.

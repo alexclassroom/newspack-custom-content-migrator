@@ -6,7 +6,7 @@ use DateTime;
 use DateTimeZone;
 use Exception;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * EnergeticCityMigrator.

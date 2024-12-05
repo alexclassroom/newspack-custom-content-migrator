@@ -2,13 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use Symfony\Component\DomCrawler\Crawler as Crawler;
-use \WP_CLI;
-use \WP_Query;
+use WP_CLI;
+use WP_Query;
 
 /**
  * Custom migration scripts for Thepavlovictoday.

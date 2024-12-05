@@ -9,18 +9,18 @@
   "repositories": [
     {
       "url": "https://github.com/Automattic/newspack-scraper-migrator.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
       "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
       "url": "https://github.com/Automattic/newspack-content-converter.git",
-      "type": "git"
+      "type": "vcs"
     },
     {
-        "type": "git",
+        "type": "vcs",
         "url": "https://github.com/Automattic/newspack-migration-tools.git"
     }
   ],
@@ -30,8 +30,6 @@
     "symfony/css-selector": "^5.2",
     "automattic/newspack-post-image-downloader": "dev-master",
     "automattic/newspack-content-converter": "dev-master",
-    "halaxa/json-machine": "^1.1",
-    "mustache/mustache": "^2.14",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
     "automattic/newspack-scraper-migrator": "dev-trunk",
     "automattic/newspack-migration-tools": "dev-trunk"
@@ -43,7 +41,8 @@
     "composer/installers": "^1.7",
     "dealerdirect/phpcodesniffer-composer-installer": "^0.7.0",
     "yoast/phpunit-polyfills": "^1.0",
-    "phpunit/phpunit": "9.*"
+    "phpunit/phpunit": "9.*",
+    "sirbrillig/phpcs-changed": "^2.11"
   },
   "config": {
     "vendor-dir": "vendor",
@@ -77,6 +76,7 @@
   },
   "scripts": {
     "phpcs": "./vendor/bin/phpcs",
+    "phpcs-unstaged-diff": "./vendor/bin/phpcs-changed --git --git-unstaged $(git diff --diff-filter=d  --name-only | grep '\\.php$' | tr '\\n' ' ') || true",
     "phpcbf": "./vendor/bin/phpcbf",
     "release": [
       "composer install --no-dev --optimize-autoloader",

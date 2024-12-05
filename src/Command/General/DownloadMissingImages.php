@@ -2,28 +2,22 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 
-class DownloadMissingImages implements InterfaceCommand {
+class DownloadMissingImages implements RegisterCommandInterface {
 
-	/**
-	 * @var null|self
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	private $command_meta_key = 'download_missing_images';
 	private $command_meta_version;
 	private $log_file;
 
-	/**
-	 * @var Attachments
-	 */
-	private $attachmentsLogic;
 
 	/**
 	 * @var Posts
@@ -39,7 +33,6 @@ class DownloadMissingImages implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachmentsLogic = new Attachments();
 		$this->postsLogic       = new Posts();
 		$this->logger           = new Logger();
 
@@ -47,24 +40,9 @@ class DownloadMissingImages implements InterfaceCommand {
 		$this->log_file             = "{$this->command_meta_key}_{$this->command_meta_version}.log";
 	}
 
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class;
-		}
-
-		return self::$instance;
-	}
-
-
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command( 'newspack-content-migrator download-missing-images',
-			[ $this, 'cmd_download_missing_images' ],
+			self::get_command_closure( 'cmd_download_missing_images' ),
 			[
 				'shortdesc' => 'Try to find and download missing images',
 				'synopsis'  => [
@@ -209,7 +187,7 @@ class DownloadMissingImages implements InterfaceCommand {
 		// Is it in the media_folder?
 		$media_import_path = $this->get_media_import_path_if_file_exists( $url_path, $media_location );
 		if ( $media_import_path ) {
-			$attachment_id = $this->attachmentsLogic->import_external_file( $media_import_path, false, false, false,
+			$attachment_id = Attachments::import_external_file( $media_import_path, false, false, false,
 				false, $post->ID );
 			if ( ! is_wp_error( $attachment_id ) ) {
 				return $attachment_id;
@@ -233,7 +211,7 @@ class DownloadMissingImages implements InterfaceCommand {
 
 		if ( in_array( $url_host, array_keys( $path_translations['hosts'] ) ) ) {
 			$url           = $path_translations['hosts'][ $url_host ] . $url_path;
-			$attachment_id = $this->attachmentsLogic->import_external_file( $url, false, false, false, false,
+			$attachment_id = Attachments::import_external_file( $url, false, false, false, false,
 				$post->ID );
 			if ( ! is_wp_error( $attachment_id ) ) {
 				return $attachment_id;
@@ -275,7 +253,7 @@ class DownloadMissingImages implements InterfaceCommand {
 		if ( file_exists( $path_in_uploads_dir ) ) {
 			$local_path = untrailingslashit( ABSPATH ) . $url_path;
 			// The file is where it should be, but the DB does not know about it. Let's import it.
-			$attachment_id = $this->attachmentsLogic->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$local_path,
 				false,
 				false,
@@ -294,7 +272,7 @@ class DownloadMissingImages implements InterfaceCommand {
 		if ( file_exists( trailingslashit( $media_location) . $url_path ) ) {
 			$local_path = trailingslashit( $media_location) . $url_path;
 			// The file is where it should be, but the DB does not know about it. Let's import it.
-			$attachment_id = $this->attachmentsLogic->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$local_path,
 				false,
 				false,
@@ -381,7 +359,7 @@ class DownloadMissingImages implements InterfaceCommand {
 			}
 
 			$post       = get_post( $post_id );
-			$image_urls = array_unique( $this->attachmentsLogic->get_images_sources_from_content( $post->post_content ) );
+			$image_urls = array_unique( Attachments::get_images_sources_from_content( $post->post_content ) );
 			if ( empty( $image_urls ) ) {
 				continue;
 			}

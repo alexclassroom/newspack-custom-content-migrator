@@ -7,25 +7,21 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Posts;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 
 /**
  * Migrates Molongui plugin autorship to CAP.
  */
-class MolonguiAutorship implements InterfaceCommand {
+class MolonguiAutorship implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	const POSTMETA_ORIGINAL_MOLOGUI_USER = 'newspack_molongui_original_user';
-
-	/**
-	 * Instance.
-	 *
-	 * @var null|self
-	 */
-	private static $instance = null;
 
 	/**
 	 * Posts instance.
@@ -58,26 +54,12 @@ class MolonguiAutorship implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator molongui-to-cap',
-			[ $this, 'cmd_molongui_to_cap' ],
+			self::get_command_closure('cmd_molongui_to_cap' ),
 			[
 				'shortdesc' => 'Converts Molongui authorship to CAP.',
 			]

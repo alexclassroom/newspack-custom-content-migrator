@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 use WP_Query;
 
 /**

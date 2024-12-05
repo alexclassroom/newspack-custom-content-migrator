@@ -2,15 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \Newspack_WXR_Exporter;
-use \PDO, \PDOException;
-use \stdClass;
-use stringEncode\Encode;
-use \WP_CLI;
-use \WP_Query;
+use Newspack\MigrationTools\Util\Log\Logger;
+use Newspack_WXR_Exporter;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus;
+use PDO;
+use PDOException;
+use stdClass;
+use WP_CLI;
+use WP_Query;
 
 /**
  * Custom migration scripts for Latin Finance (Umbraco / .NET / MSSQL / SQLServer).

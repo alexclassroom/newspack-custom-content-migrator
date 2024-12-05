@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use stdClass;
 use WP_CLI;
 use WP_User;
@@ -25,11 +25,6 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	 * @var SimpleLocalAvatars Simple Local Avatars logic.
 	 */
 	protected $simple_local_avatar_logic;
-
-	/**
-	 * @var Attachments Attachments logic.
-	 */
-	protected $attachments;
 
 	/**
 	 * @var resource FTP connection.
@@ -63,7 +58,6 @@ class EfectoCocuyoContentMigrator implements InterfaceCommand {
 	private function __construct() {
 		$this->coauthorsplus_logic = new CoAuthorsPlusHelper();
 		$this->simple_local_avatar_logic = new SimpleLocalAvatars();
-		$this->attachments = new Attachments();
 		$this->logger = new Logger();
 		$this->posts = new Posts();
 	}
@@ -1317,7 +1311,7 @@ EOT;
 				WP_CLI::log( 'No attachment record found' );
 				if ( file_exists( $full_file_path ) ) {
 					echo WP_CLI::colorize( "%CFound file locally, creating attachment record for file%n\n" );
-					$attachment_id = $this->attachments->import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
+					$attachment_id = Attachments::import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
 				} else {
 					$remote_path = '/public_html' . parse_url( $data['full'], PHP_URL_PATH );
 
@@ -1336,7 +1330,7 @@ EOT;
 
 					if ( $downloaded && file_exists( $full_file_path ) ) {
 						echo WP_CLI::colorize( "%GFound file on remote server, creating attachment record for file%n\n" );
-						$attachment_id = $this->attachments->import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
+						$attachment_id = Attachments::import_external_file( $full_file_path, "Programmatic avatar upload for User ID $user->ID" );
 					} else {
 						echo WP_CLI::colorize( "%RUnable to download file from remote server.%n\n");
 					}

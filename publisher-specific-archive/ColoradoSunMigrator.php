@@ -2,14 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \WP_CLI;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\HtmlElementManipulator;
 use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Colorado Sun.

@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Charleston City Paper.

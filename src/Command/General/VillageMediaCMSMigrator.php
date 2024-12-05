@@ -7,15 +7,16 @@ use DateTimeZone;
 use DOMDocument;
 use DOMElement;
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use stdClass;
-use WP_User;
 use WP_CLI;
+use WP_User;
 
 /**
  * Class VillageMediaCMSMigrator.
@@ -23,21 +24,10 @@ use WP_CLI;
  *
  * @package NewspackCustomContentMigrator\Command\General
  */
-class VillageMediaCMSMigrator implements InterfaceCommand {
+class VillageMediaCMSMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Singleton instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static ?InterfaceCommand $instance = null;
+	use WpCliCommandTrait;
 
-	/**
-	 * Attachments instance.
-	 *
-	 * @var Attachments|null Attachments instance.
-	 */
-	protected ?Attachments $attachments;
 
 	/**
 	 * Gutenberg block generator.
@@ -68,25 +58,9 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	protected Logger $logger;
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
 	 * Singleton constructor.
 	 */
 	private function __construct() {
-		$this->attachments     = new Attachments();
 		$this->block_generator = new GutenbergBlockGenerator();
 		$this->cap             = new CoAuthorsPlusHelper();
 		$this->posts           = new Posts();
@@ -94,14 +68,12 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Register commands.
-	 *
-	 * @inheritDoc
+	 * {@inheritDoc}
 	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-migrate-xmls',
-			[ $this, 'cmd_migrate_xmls' ],
+			self::get_command_closure( 'cmd_migrate_xmls' ),
 			[
 				'shortdesc' => 'Migrates XML files from Chula Vista.',
 				'synopsis'  => [
@@ -132,14 +104,14 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-dev-helper-get-consolidated-users',
-			[ $this, 'cmd_dev_helper_get_consolidated_users' ],
+			self::get_command_closure( 'cmd_dev_helper_get_consolidated_users' ),
 			[
 				'shortdesc' => 'Composes a usable data file for VillageMedia consolidated users based on a spreadsheet.',
 			]
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-dev-helper-get-consolidated-data-file',
-			[ $this, 'cmd_dev_helper_get_consolidated_data_file' ],
+			self::get_command_closure( 'cmd_dev_helper_get_consolidated_data_file' ),
 			[
 				'shortdesc' => 'Composes a custom data file for VillageMedia which contains all relevant XML and WP post data to update authorships. As opposed to feeding an XML file, this file can be run directly on Atomic (XML memory overflows).',
 				'synopsis'  => [
@@ -170,7 +142,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 			);
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-dev-helper-fix-consolidated-users',
-			[ $this, 'cmd_dev_helper_fix_consolidated_users' ],
+			self::get_command_closure( 'cmd_dev_helper_fix_consolidated_users' ),
 			[
 				'shortdesc' => 'Fixes Post authors on all already imported posts according to this rule: if <attributes> byline exists use that for author, otherwise if <byline> node exists use that, and lastly if previous do not exist use <author> node for author. Run command village-cms-dev-helper-get-consolidated-data-file first which produces a compact authorship data file which can run directly on Atomic.',
 				'synopsis'  => [
@@ -193,7 +165,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator village-cms-dev-helper-validate-all-authorship',
-			[ $this, 'cmd_dev_helper_validate_all_authorship' ],
+			self::get_command_closure( 'cmd_dev_helper_validate_all_authorship' ),
 			[
 				'synopsis'  => [
 					[
@@ -1231,7 +1203,7 @@ class VillageMediaCMSMigrator implements InterfaceCommand {
 		$is_featured_image = (bool) intval( $media->getElementsByTagName( 'isfeatured' )->item( 0 )->nodeValue );
 		$is_gallery_item   = (bool) intval( $media->getElementsByTagName( 'isgalleryitem' )->item( 0 )->nodeValue );
 
-		$attachment_id = $this->attachments->import_external_file(
+		$attachment_id = Attachments::import_external_file(
 			$url,
 			sanitize_title( $name ),
 			$attribution,

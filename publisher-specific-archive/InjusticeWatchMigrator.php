@@ -3,12 +3,12 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Util\CsvIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\Redirection;
 use NewspackCustomContentMigrator\Utils\BatchLogic;
-use NewspackCustomContentMigrator\Utils\CsvIterator;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_Post;
 

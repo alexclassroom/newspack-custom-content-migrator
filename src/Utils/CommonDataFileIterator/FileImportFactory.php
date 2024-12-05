@@ -2,8 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Utils\CommonDataFileIterator;
 
-use \Exception;
-use \IteratorAggregate;
+use Exception;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\Contracts\IterableFile;
 
 class FileImportFactory {

@@ -2,11 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
-use \WP_Error;
-use \CoAuthors_Guest_Authors;
-use \CoAuthors_Plus;
+use CoAuthors_Guest_Authors;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
+use WP_Error;
 
 /**
  * Custom migration scripts for Sahan Journal.

@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use PHPHtmlParser\Dom;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Hong Kong Free Press.

@@ -2,19 +2,23 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Medium;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Medium;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
 
 /**
  * Migrates Medium archive.
  */
-class MediumMigrator implements InterfaceCommand {
+class MediumMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
+
 	const ORIGINAL_ID_META_KEY = '_medium_original_id';
 
 	/**
@@ -25,25 +29,11 @@ class MediumMigrator implements InterfaceCommand {
 	private static $log_file = 'medium-migrator.log';
 
 	/**
-	 * Migrator instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Medium logic instance.
 	 *
 	 * @var Medium
 	 */
 	private $medium_logic = null;
-
-	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * Instance of SimpleLocalAvatars.
@@ -71,33 +61,18 @@ class MediumMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->medium_logic               = new Medium();
-		$this->attachments                = new Attachments();
 		$this->simple_local_avatars_logic = new SimpleLocalAvatars();
 		$this->logger                     = new Logger();
 		$this->block_generator            = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator migrate-medium-archive',
-			array( $this, 'cmd_medium_archive' ),
+			self::get_command_closure( 'cmd_medium_archive' ),
 			[
 				'shortdesc' => 'Migrates Medium archive.',
 				'synopsis'  => [
@@ -198,7 +173,7 @@ class MediumMigrator implements InterfaceCommand {
 			}
 
 			if ( ! empty( $author['avatar'] ) ) {
-				$avatar_id = $this->attachments->import_external_file( $author['avatar'], $author['display_name'] );
+				$avatar_id = Attachments::import_external_file( $author['avatar'], $author['display_name'] );
 				if ( is_wp_error( $avatar_id ) ) {
 					$this->logger->log( self::$log_file, ' -- Error importing author avatar: ' . $avatar_id->get_error_message(), Logger::WARNING );
 				} else {
@@ -261,7 +236,7 @@ class MediumMigrator implements InterfaceCommand {
 
 				// Download or import the image file.
 				WP_CLI::line( sprintf( '✓ importing %s ...', $src ) );
-				$attachment_id = $this->attachments->import_external_file( $src, $title, $caption, null, $alt, $post_id );
+				$attachment_id = Attachments::import_external_file( $src, $title, $caption, null, $alt, $post_id );
 			
 				if ( $figure->count() > 0 ) {
 					$image_block = $this->block_generator->get_image( get_post( $attachment_id ), 'full', false );
@@ -350,7 +325,7 @@ class MediumMigrator implements InterfaceCommand {
 
 		// Set the featured image.
 		if ( ! empty( $article['featured_image'] ) ) {
-			$featured_image_id = $this->attachments->import_external_file(
+			$featured_image_id = Attachments::import_external_file(
 				$article['featured_image']['url'],
 				$article['title'],
 				$article['featured_image']['caption'],

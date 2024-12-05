@@ -2,15 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use DOMDocument;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
 use NewspackCustomContentMigrator\Command\General\SubtitleMigrator;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
-use \WP_Error;
-use \DOMDocument;
+use WP_CLI;
+use WP_Error;
 
 /**
  * Custom migration scripts for Noozhawk.

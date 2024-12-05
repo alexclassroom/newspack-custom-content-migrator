@@ -2,12 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \WP_CLI;
-use \WP_User;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use Symfony\Component\DomCrawler\Crawler;
+use WP_CLI;
+use WP_User;
 
 /**
  * Custom migration scripts for Prison Journalism Project.

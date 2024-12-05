@@ -5,18 +5,18 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateTime;
 use DateTimeZone;
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockManipulator;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
-use NewspackCustomContentMigrator\Utils\BatchLogic;
-use NewspackCustomContentMigrator\Utils\JsonIterator;
-use NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\GutenbergBlockManipulator;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\BatchLogic;
+use Newspack\MigrationTools\Util\JsonIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\MigrationMeta;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_CLI\ExitException;
@@ -54,11 +54,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 	 * @var Posts
 	 */
 	private Posts $posts_logic;
-
-	/**
-	 * @var Attachments
-	 */
-	private Attachments $attachments;
 
 	/**
 	 * @var Taxonomy
@@ -137,7 +132,6 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 		$this->redirection               = new Redirection();
 		$this->logger                    = new Logger();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
-		$this->attachments               = new Attachments();
 		$this->json_iterator             = new JsonIterator();
 		$this->site_timezone             = new DateTimeZone( 'America/Denver' );
 		$this->posts_logic               = new Posts();
@@ -944,7 +938,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$path = $blobs_folder . $issue->image->blob_path;
 				}
 
-				$image_attachment_id = $this->attachments->import_attachment_for_post(
+				$image_attachment_id = Attachments::import_attachment_for_post(
 					$post_id,
 					$path,
 					'Magazine cover: ' . $issue_name,
@@ -1107,7 +1101,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 				$filename = basename( $path );
 			}
 
-			$attachment_id = $this->attachments->import_external_file(
+			$attachment_id = Attachments::import_external_file(
 				$path,
 				$filename,
 				$row->description ?? '',
@@ -1261,7 +1255,7 @@ class HighCountryNewsMigrator2 implements InterfaceCommand {
 					$filename_without_extension = str_replace( '-thumb', '', $path_info['filename'] );
 					$filename                   = $filename_without_extension . '.' . $path_info['extension'];
 				}
-				$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+				$attachment_id = Attachments::get_attachment_by_filename( $filename );
 
 				// For "normal" featured images we can use the file name.
 				if ( $attachment_id && 'above' !== $featured_image_position ) {
@@ -1723,7 +1717,7 @@ QUERY;
 	private function get_issue_pdf_attachment_id( int $post_id, object $issue, array $pdfurls ): int {
 		if ( array_key_exists( $issue->UID ?? '', $pdfurls ) ) {
 			$pdf_url           = 'https://s3.amazonaws.com/hcn-media/archive-pdf/' . $pdfurls[ $issue->UID ];
-			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+			$pdf_attachment_id = Attachments::import_attachment_for_post(
 				$post_id,
 				$pdf_url,
 			);
@@ -1740,7 +1734,7 @@ QUERY;
 				$effective_date = new DateTime( $issue->effective, $this->site_timezone );
 				$filename       = 'issue-' . $effective_date->format( 'Y_m_d' ) . '.pdf';
 			}
-			$pdf_attachment_id = $this->attachments->import_attachment_for_post(
+			$pdf_attachment_id = Attachments::import_attachment_for_post(
 				$post_id,
 				$issue->digitalEditionURL,
 				'',

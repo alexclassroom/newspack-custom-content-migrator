@@ -2,13 +2,13 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
-use \NewspackCustomContentMigrator\Logic\Redirection as RedirectionLogic;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Logic\Redirection as RedirectionLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackCustomContentMigrator\Logic\CoAuthorPlus as CoAuthorPlusLogic;
 use Symfony\Component\DomCrawler\Crawler;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Michigan Daily.

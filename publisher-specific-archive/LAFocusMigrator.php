@@ -8,8 +8,8 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Exception;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 
 /**

@@ -3,18 +3,19 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 /* Internal dependencies */
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \NewspackCustomContentMigrator\Logic\Attachments;
+
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-/* External dependencies */
-use Symfony\Component\DomCrawler\Crawler;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use stdClass;
+use Symfony\Component\DomCrawler\Crawler;
 use WP_CLI;
-use WP_Query;
 use WP_User;
+
+/* External dependencies */
 
 /**
  * Custom migration scripts for Retro Report.
@@ -35,17 +36,11 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 */
 	private $logger;
 
-	/**
-	 * Attachments logic.
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * Co-Authors Plys logic.
 	 *
-	 * @var null|CoAuthorsPlus
+	 * @var CoAuthorsPlus
 	 */
 	private $coauthorsplus;
 
@@ -124,7 +119,6 @@ class NewsroomNZMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger = new Logger();
-		$this->attachments = new Attachments();
 		$this->coauthorsplus = new CoAuthorsPlusHelper();
 		$this->simple_local_avatars = new SimpleLocalAvatars();
 		$this->posts_logic = new Posts();
@@ -981,7 +975,7 @@ class NewsroomNZMigrator implements InterfaceCommand {
 			WP_CLI::line( sprintf( '%d/%d', $i, count( $emails_avatars ) ) );
 
 			// Download attachment.
-			$att_id = $this->attachments->import_external_file( $avatar_url );
+			$att_id = Attachments::import_external_file( $avatar_url );
 			if ( is_wp_error( $att_id ) ) {
 				$this->logger->log( 'newsroom-nz-fix-authors2-get-avatars-and-emails__errorDownloadingAvatars.log', sprintf( "%s,%s,error:%s", $email, $avatar_url, $att_id->get_error_message() ), $this->logger::WARNING );
 				continue;
@@ -1064,10 +1058,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 				$filename_wo_extension = substr( $basename, 0, strrpos( $basename, '.' ) );
 
 				// Get the attachment if it already exists or download it.
-				$attachment_id = $this->attachments->get_attachment_by_filename( $filename_wo_extension );
+				$attachment_id = Attachments::get_attachment_by_filename( $filename_wo_extension );
 				if ( ! $attachment_id ) {
 					WP_CLI::line( sprintf( 'Downloading %s ...', $avatar_url ) );
-					$attachment_id = $this->attachments->import_external_file( $avatar_url );
+					$attachment_id = Attachments::import_external_file( $avatar_url );
 					// Log error if failed to download.
 					if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 						$err = is_wp_error( $attachment_id ) ? $attachment_id->get_error_message() : '0';
@@ -2043,10 +2037,10 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		}
 
 		// Get the attachment if it already exists.
-		$attachment_id = $this->attachments->get_attachment_by_filename( basename( $avatar_url ) );
+		$attachment_id = Attachments::get_attachment_by_filename( basename( $avatar_url ) );
 		if ( ! $attachment_id ) {
 			// Download the image.
-			$attachment_id = ( $this->dryrun ) ? 1 : $this->attachments->import_external_file( $avatar_url );
+			$attachment_id = ( $this->dryrun ) ? 1 : Attachments::import_external_file( $avatar_url );
 			if ( ! $attachment_id || is_wp_error( $attachment_id ) ) {
 				$this->log( sprintf( 'Failed to sideload image %s', $avatar_url ), $this->log_warning );
 				return;
@@ -2276,12 +2270,12 @@ class NewsroomNZMigrator implements InterfaceCommand {
 		// Get the filename to check if we've already imported this image.
 		$filename      = explode( '/', $value['url'] );
 		$filename      = end( $filename );
-		$attachment_id = $this->attachments->get_attachment_by_filename( $filename );
+		$attachment_id = Attachments::get_attachment_by_filename( $filename );
 		$caption       = ( isset( $value['caption'] ) && ! empty( $value['caption'] ) ) ? $value['caption'] : '';
 
 		// If it doesn't already exist, import it.
 		if ( is_null( $attachment_id ) ) {
-			$attachment_id = ( $this->dryrun ) ? null : $this->attachments->import_external_file(
+			$attachment_id = ( $this->dryrun ) ? null : Attachments::import_external_file(
 				trim( $value['url'] ),     // Image URL.
 				$caption, // Title.
 				$caption, // Caption.

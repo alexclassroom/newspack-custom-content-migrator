@@ -8,8 +8,24 @@ This Plugin consists of various Migrators (which perform reusable or publisher-s
 
 Run `composer install`.
 
-## Pulling the latest from the NMT (newspack-migration-tools)
-If you have just merged stuff to `trunk` in the NMT, you should update the lockfile in this repository. We point to the `dev-trunk` branch in this repo's composer file so run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT. If nothing happens when you update, then run `composer clear-cache` and try again.
+### Running PHPCS
+* Run `composer run-script phpcs` to check for coding standards issues on all files. If you pass `-- path/to/file(s)` it will only run on that.
+* Run `composer run-script phpcbf` to automatically fix coding standards issues on all files. If you pass `-- path/to/file(s)` it will only run on that.
+* Run `composer run-script phpcs-unstaged-diff` to check the lines in files that have changes that are not staged yet.
+
+## Working with the NMT (newspack-migration-tools)
+We are aiming to have all re-usable logic in the NMT. We pull in the NMT with composer, so that means that you need to keep your branch updated. Whenever code has been merged to trunk in the NMT, do a `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT into this repository. We point to the `dev-trunk` branch in this repo's composer file so run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT. If nothing happens when you update, then run `composer clear-cache` and try again.
+
+Here is a oneliner (well – there are three lines for readability) that is safe to use even if you have the NMT symlinked into the `vendor` directory:
+
+```bash
+rm -rf vendor/automattic/newspack-migration-tools && git checkout trunk && composer update automattic/newspack-migration-tools && git add composer.lock 
+git commit -m 'Updating NMT composer pointer'
+git push 
+```
+
+### Working on the NMT and this repository at the same time
+It's likely that you'll have changes to both the NMT and the branch you are working in on the NCCM (this repo) too. To avoid working in the `vendor` directory, an easy way is to create a directory called `dev` in the root of this repository, go into that directory and then clone the NMT so you end up with a structure like: `dev/newspack-migration-tools`. Once you have that checked out into the `dev` directory, then (from the root of this repo) run `composer run-script update-with-nmt-symlinked`. This will symlink the NMT into the `vendor` directory so you can work on both at the same time. If you need to update the NMT, then go into the `dev/newspack-migration-tools` directory and do your work there. Once you have merged your changes to `trunk` in the NMT, then come back to this repo and run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT.
 
 ## Usage
 

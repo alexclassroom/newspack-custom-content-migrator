@@ -7,18 +7,21 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Utils\BatchLogic;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\BatchLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use simplehtmldom\HtmlDocument;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Attachments general Migrator command class.
  */
-class AttachmentsMigrator implements InterfaceCommand {
+class AttachmentsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	// Logs.
 	const S3_ATTACHMENTS_URLS_LOG = 'S3_AHTTACHMENTS_URLS.log';
 	const DELETING_MEDIA_LOGS     = 'DELETING_MEDIA_LOGS.log';
@@ -26,11 +29,6 @@ class AttachmentsMigrator implements InterfaceCommand {
 	const ATTACHMENT_POST_TO_DELETE = '_newspack_attachment_to_delete';
 	const ATTACHMENT_FILE_OLD_PATH  = '_newspack_attachment_old_path';
 	const ATTACHMENT_TRASH_FOLDER   = 'newspack_media_trash';
-
-	/**
-	 * @var AttachmentsLogic.
-	 */
-	private $attachment_logic;
 
 	/**
 	 * Logger.
@@ -48,44 +46,22 @@ class AttachmentsMigrator implements InterfaceCommand {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->attachment_logic = new AttachmentsLogic();
 		$this->logger           = new Logger();
 		$this->block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
+	 * {@inheritDoc}
 	 */
-	private static $instance = null;
-
-	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
-	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-ids-by-years',
-			[ $this, 'cmd_get_atts_by_years' ],
+			self::get_command_closure( 'cmd_get_atts_by_years' ),
 		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-switch-local-images-urls-to-s3-urls',
-			[ $this, 'cmd_switch_local_images_urls_to_s3_urls' ],
+			self::get_command_closure( 'cmd_switch_local_images_urls_to_s3_urls' ),
 			[
 				'shortdesc' => 'In all post_content it updates images URLs from local URLs to S3 bucket based URLs.',
 				'synopsis'  => [
@@ -109,7 +85,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-delete-posts-attachments',
-			[ $this, 'cmd_attachment_delete_posts_attachments' ],
+			self::get_command_closure( 'cmd_attachment_delete_posts_attachments' ),
 			[
 				'shortdesc' => "This command deletes only posts' attachments (just those attachments which belong to posts), and it works in two steps. "
 					. 'First we should run this command without the --confirm-deletion flag, and it will move the attachment files to a temporary folder. This is to double check and make sure we are not about to delete attachments that are still in use, and lets us QA the results first. '
@@ -157,7 +133,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-check-broken-images',
-			[ $this, 'cmd_check_broken_images' ],
+			self::get_command_closure( 'cmd_check_broken_images' ),
 			[
 				'shortdesc' => 'Check images with broken URLs in-story.',
 				'synopsis'  => [
@@ -198,7 +174,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-regenerate-media-thumbnails',
-			[ $this, 'cmd_regenerate_media_thumbnails' ],
+			self::get_command_closure( 'cmd_regenerate_media_thumbnails' ),
 			[
 				'shortdesc' => 'Regenerate media thumbnails in batches.',
 				'synopsis'  => [
@@ -224,7 +200,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-get-hosts-from-post-content',
-			[ $this, 'cmd_get_hosts_post_content' ],
+			self::get_command_closure( 'cmd_get_hosts_post_content' ),
 			[
 				'shortdesc' => 'Check images with broken URLs in-story.',
 				'synopsis'  => [],
@@ -232,7 +208,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator attachments-repair-img-blocks-w-no-id',
-			[ $this, 'cmd_repair_img_blocks_w_no_id' ],
+			self::get_command_closure( 'cmd_repair_img_blocks_w_no_id' ),
 			[
 				'shortdesc' => 'Repair image blocks with local images that have no ID and therefore are harder to edit for the user.',
 				'synopsis'  => [
@@ -281,7 +257,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 				$attachment_id = attachment_url_to_postid( $url );
 				if ( ! $attachment_id ) {
 					// If the attachment doesn't exist, import it.
-					$attachment_id = $this->attachment_logic->import_attachment_for_post( $post->ID, $src );
+					$attachment_id = Attachments::import_attachment_for_post( $post->ID, $src );
 
 					if ( is_wp_error( $attachment_id ) ) {
 						$this->logger->log( $logfile, sprintf( 'Failed to import attachment for post %d: %s', $post->ID, $attachment_id->get_error_message() ), Logger::ERROR );
@@ -619,16 +595,16 @@ class AttachmentsMigrator implements InterfaceCommand {
 		$posts_per_batch = $assoc_args['posts_per_batch'] ?? null;
 		$batch           = $assoc_args['batch'] ?? null;
 		$index           = $assoc_args['index'] ?? null;
-		$log_file_prefix = $assoc_args['log-file-prefix'] ?? 'broken_media_urls_batch';
+		$log_file = 'broken_media_urls_batch.log';
 
-		$this->attachment_logic->get_broken_attachment_urls_from_posts(
+		Attachments::get_broken_attachment_urls_from_posts(
 			[],
 			$is_using_s3,
 			$posts_per_batch,
 			$batch,
 			$index,
-			function( $post_id, $broken_url ) use ( $batch, $log_file_prefix ) {
-				$this->log( sprintf( '%s_%s.log', $log_file_prefix, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
+			function( $post_id, $broken_url ) use ( $batch, $log_file ) {
+				$this->log( sprintf( '%s_%s.log', $log_file, $batch ), sprintf( '%d,%s', $post_id, $broken_url ) );
 			}
 		);
 	}
@@ -642,7 +618,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 	public function cmd_regenerate_media_thumbnails( $args, $assoc_args ) {
 		$posts_per_batch = $assoc_args['posts-per-batch'] ?? -1;
 		$batch           = $assoc_args['batch'] ?? 1;
-		$log_file_prefix = 'regenerated_media_thumnails.sql';
+		$log_file        = 'regenerated_media_thumbnails.log';
 
 		$meta_query = [
 			[
@@ -686,7 +662,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 				$metadata = wp_generate_attachment_metadata( $post_id, $fullsizepath );
 				wp_update_attachment_metadata( $post_id, $metadata );
 
-				$this->logger->log( $log_file_prefix, sprintf( '(%d/%d) Thumnails regenerated for media %d', $index, $posts_per_batch, $post_id ) );
+				$this->logger->log( $log_file, sprintf( '(%d/%d) Thumnails regenerated for media %d', $index, $posts_per_batch, $post_id ) );
 			}
 
 			update_post_meta( $post_id, '_newspack_regenerated_thumnails', true );
@@ -704,7 +680,6 @@ class AttachmentsMigrator implements InterfaceCommand {
 	public function cmd_get_hosts_post_content( $args, $assoc_args ) {
 		$posts_per_batch = $assoc_args['posts-per-batch'] ?? 10000;
 		$batch           = $assoc_args['batch'] ?? 1;
-		$log_file_prefix = 'broken_media_urls_batch';
 
 		$posts = get_posts(
 			[
@@ -747,7 +722,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 			array_reduce(
 				$non_posts,
 				function( $carry, $post ) {
-					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $post->post_content ) );
+					return array_merge( $carry, Attachments::get_images_sources_from_content( $post->post_content ) );
 				},
 				[]
 			)
@@ -774,7 +749,7 @@ class AttachmentsMigrator implements InterfaceCommand {
 						return $carry;
 					}
 
-					return array_merge( $carry, $this->attachment_logic->get_images_sources_from_content( $widget['text'] ) );
+					return array_merge( $carry, Attachments::get_images_sources_from_content( $widget['text'] ) );
 				},
 				[]
 			)

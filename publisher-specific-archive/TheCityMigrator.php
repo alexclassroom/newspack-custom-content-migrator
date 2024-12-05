@@ -2,15 +2,15 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Command\General\ChorusCmsMigrator;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \NewspackCustomContentMigrator\Utils\Logger;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
+use NewspackCustomContentMigrator\Command\General\ChorusCmsMigrator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\WpBlockManipulator;
-use \WP_CLI;
+use WP_CLI;
 
 /**
  * Custom migration scripts for The City.

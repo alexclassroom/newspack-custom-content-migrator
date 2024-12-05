@@ -7,10 +7,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\SimpleLocalAvatars;
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use WP_CLI;
 
 /**
  * Custom migration scripts for BaltimoreFishBowl.
@@ -77,7 +77,6 @@ class BaltimoreMigrator implements InterfaceCommand {
 
 		$dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 
-		$attachments_logic = new Attachments();
 		$site_upload_dir   = wp_upload_dir();
 
 		// Starbox stores the uploaded avatars in wp-content/uploads/gravatar/.
@@ -114,7 +113,7 @@ class BaltimoreMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$new_avatar_id = $attachments_logic->import_external_file(
+			$new_avatar_id = Attachments::import_external_file(
 				$author_gravatar_path,
 				sprintf( 'User #%s Avatar', $author_id ),
 			);

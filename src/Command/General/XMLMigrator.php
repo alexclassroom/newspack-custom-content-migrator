@@ -2,21 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
+use DOMDocument;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 use XMLReader;
-use DOMDocument;
 
 /**
  * Custom migration scripts for Posts' content.
  */
-class XMLMigrator implements InterfaceCommand {
+class XMLMigrator implements RegisterCommandInterface {
 
-	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
     /**
 	 * Constructor.
@@ -26,23 +24,9 @@ class XMLMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 	}
 
 	/**

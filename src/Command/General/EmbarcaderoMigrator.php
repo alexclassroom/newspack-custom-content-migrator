@@ -5,19 +5,21 @@ namespace NewspackCustomContentMigrator\Command\General;
 use DateTimeZone;
 use DOMDocument;
 use Exception;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\Log\Logger;
+use Newspack\MigrationTools\Util\WordPressXMLHandler;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users as UserConsoleOutput;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use NewspackCustomContentMigrator\Utils\ConsoleTable;
-use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use NewspackCustomContentMigrator\Logic\CoAuthorPlusDataFixer;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
-use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use WP;
 use WP_CLI;
 use WP_User;
@@ -70,7 +72,10 @@ use WP_User;
  *
  * @package NewspackCustomContentMigrator
  */
-class EmbarcaderoMigrator implements InterfaceCommand {
+class EmbarcaderoMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
+
 	const LOG_FILE                                  = 'embarcadero_importer.log';
 	const TAGS_LOG_FILE                             = 'embarcadero_tags_migrator.log';
 	const FEATURED_IMAGES_LOG_FILE                  = 'embarcadero_featured_images_migrator.log';
@@ -289,25 +294,11 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	];
 
 	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Logger instance.
 	 *
 	 * @var Logger.
 	 */
 	private $logger;
-
-	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * CoAuthorsPlus instance.
@@ -345,7 +336,6 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger                    = new Logger();
-		$this->attachments               = new Attachments();
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
@@ -355,26 +345,12 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-import-posts-content',
-			array( $this, 'cmd_embarcadero_import_posts_content' ),
+			self::get_command_closure( 'cmd_embarcadero_import_posts_content' ),
 			[
 				'shortdesc' => 'Import Embarcadero\'s post content.',
 				'synopsis'  => [
@@ -475,7 +451,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-import-missing-posts',
-			array( $this, 'cmd_embarcadero_import_missing_posts' ),
+			self::get_command_closure( 'cmd_embarcadero_import_missing_posts' ),
 			[
 				'shortdesc' => 'Import Embarcadero\'s post content.',
 				'synopsis'  => [
@@ -562,7 +538,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-post-tags',
-			array( $this, 'cmd_embarcadero_migrate_post_tags' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_post_tags' ),
 			[
 				'shortdesc' => 'Import Embarcadero\s post tags.',
 				'synopsis'  => [
@@ -579,7 +555,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-posts-featured-image',
-			array( $this, 'cmd_embarcadero_migrate_posts_featured_image' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_posts_featured_image' ),
 			[
 				'shortdesc' => 'Import Embarcadero\s post featured image.',
 				'synopsis'  => [
@@ -603,7 +579,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-list-posts-from-blog',
-			array( $this, 'cmd_embarcadero_list_posts_from_blog' ),
+			self::get_command_closure( 'cmd_embarcadero_list_posts_from_blog' ),
 			[
 				'shortdesc' => "Helper dev command. Lists post IDs imported from blog CSV. Does content validation and logs debugging info.",
 				'synopsis'  => [
@@ -631,7 +607,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-more-posts-block',
-			array( $this, 'cmd_embarcadero_migrate_more_posts_block' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_more_posts_block' ),
 			[
 				'shortdesc' => 'Import Embarcadero\s post "more posts" block.',
 				'synopsis'  => [
@@ -662,7 +638,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-timeline-block',
-			array( $this, 'cmd_embarcadero_migrate_timeline_block' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_timeline_block' ),
 			[
 				'shortdesc' => 'Import Embarcadero\s post "timeline" block.',
 				'synopsis'  => [
@@ -686,7 +662,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-more-posts-block',
-			array( $this, 'cmd_embarcadero_fix_more_posts_block' ),
+			self::get_command_closure( 'cmd_embarcadero_fix_more_posts_block' ),
 			[
 				'shortdesc' => 'Fix Embarcadero\s post "more posts" block.',
 				'synopsis'  => [
@@ -710,7 +686,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-images',
-			array( $this, 'cmd_embarcadero_migrate_images' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_images' ),
 			[
 				'shortdesc' => 'Migrate images that we missed by the import-posts-content command.',
 				'synopsis'  => [
@@ -741,7 +717,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-comments',
-			array( $this, 'cmd_embarcadero_migrate_comments' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_comments' ),
 			[
 				'shortdesc' => 'Migrate comments that we missed by the import-posts-content command.',
 				'synopsis'  => [
@@ -772,7 +748,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-print-issues',
-			array( $this, 'cmd_embarcadero_migrate_print_issues' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_print_issues' ),
 			[
 				'shortdesc' => 'Migrate print issues that we missed by the import-posts-content command.',
 				'synopsis'  => [
@@ -824,7 +800,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-post-slugs',
-			array( $this, 'cmd_embarcadero_migrate_post_slugs' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_post_slugs' ),
 			[
 				'shortdesc' => 'Migrate Embarcadero\'s post slugs.',
 				'synopsis'  => [
@@ -841,7 +817,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-tsv-file',
-			array( $this, 'cmd_embarcadero_helper_fix_tsv_file' ),
+			self::get_command_closure( 'cmd_embarcadero_helper_fix_tsv_file' ),
 			[
 				'shortdesc' => 'A helper command which takes a TSV file and tries to fix the ambiguous \"" and \" escaping.',
 				'synopsis'  => [
@@ -865,7 +841,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-validate-csv-file',
-			array( $this, 'cmd_embarcadero_helper_validate_csv_file' ),
+			self::get_command_closure( 'cmd_embarcadero_helper_validate_csv_file' ),
 			[
 				'shortdesc' => 'A helper command which validates a CSV file and outputs rows with issues.',
 				'synopsis'  => [
@@ -882,7 +858,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-dates',
-			array( $this, 'cmd_fix_post_times' ),
+			self::get_command_closure( 'cmd_fix_post_times' ),
 			[
 				'shortdesc' => 'Fix post dates to match timezone.',
 				'synopsis'  => [
@@ -912,7 +888,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-helper-fix-dates-for-blogs-topics',
-			array( $this, 'cmd_fix_post_times_for_blogs_topics' ),
+			self::get_command_closure( 'cmd_fix_post_times_for_blogs_topics' ),
 			[
 				'shortdesc' => 'Fix post dates on separate blogs/topic CSV to match timezone.',
 				'synopsis'  => [
@@ -928,7 +904,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-rearrange-categories',
-			array( $this, 'cmd_embarcadero_rearrange_categories' ),
+			self::get_command_closure( 'cmd_embarcadero_rearrange_categories' ),
 			[
 				'shortdesc' => 'Import Embarcadero\'s post content.',
 				'synopsis'  => [
@@ -966,7 +942,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-import-six-fifty-content',
-			[ $this, 'cmd_migrate_six_fifty_content' ],
+			self::get_command_closure( 'cmd_migrate_six_fifty_content' ),
 			[
 				'shortdesc' => 'Six Fifty content needs to be merged into Embarcadero sites.',
 				'synopsis'  => [
@@ -990,7 +966,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-six-fifty-missing-authors',
-			[ $this, 'cmd_fix_six_fifty_missing_authors' ],
+			self::get_command_closure( 'cmd_fix_six_fifty_missing_authors' ),
 			[
 				'shortdesc' => 'Fixes missing authors for Six Fifty content.',
 				'synopsis'  => [
@@ -1014,7 +990,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-content-styling',
-			array( $this, 'cmd_embarcadero_fix_content_styling' ),
+			self::get_command_closure( 'cmd_embarcadero_fix_content_styling' ),
 			[
 				'shortdesc' => 'Import Embarcadero\'s post content.',
 				'synopsis'  => [
@@ -1037,7 +1013,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-post-launch-qa',
-			array( $this, 'cmd_embarcadero_post_launch_qa' ),
+			self::get_command_closure( 'cmd_embarcadero_post_launch_qa' ),
 			[
 				'shortdesc' => 'Check for migration issues after the launch.',
 				'synopsis'  => [
@@ -1082,7 +1058,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-migrate-pdfs',
-			array( $this, 'cmd_embarcadero_migrate_pdfs' ),
+			self::get_command_closure( 'cmd_embarcadero_migrate_pdfs' ),
 			[
 				'shortdesc' => 'Check for migration issues after the launch.',
 				'synopsis'  => [
@@ -1099,7 +1075,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-dupe-sanctioned-list-cats-tags',
-			[ $this, 'cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags' ],
+			self::get_command_closure( 'cmd_embarcadero_fix_dupe_sanctioned_list_cats_tags' ),
 			[
 				'shortdesc' => 'Merges duplicate categories and tags based on sanctioned list provided by Embarcadero.',
 				'synopsis'  => [],
@@ -1108,7 +1084,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-tags-on-posts',
-			[ $this, 'cmd_embarcadero_fix_tags_on_posts' ],
+			self::get_command_closure( 'cmd_embarcadero_fix_tags_on_posts' ),
 			[
 				'shortdesc' => 'Fixes category-tag relationships for migrated (initial and refreshed) posts.',
 				'synopsis'  => [
@@ -1132,7 +1108,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-delete-disallowed-tags',
-			[ $this, 'cmd_embarcadero_delete_disallowed_tags' ],
+			self::get_command_closure( 'cmd_embarcadero_delete_disallowed_tags' ),
 			[
 				'shortdesc' => 'Deletes disallowed tags from the database.',
 				'synopsis'  => [],
@@ -1141,7 +1117,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-establish-primary-categories',
-			[ $this, 'cmd_embarcadero_establish_primary_categories' ],
+			self::get_command_closure( 'cmd_embarcadero_establish_primary_categories' ),
 			[
 				'shortdesc' => 'Establishes primary categories for migrated posts that don\'t already have them.',
 				'synopsis'  => [],
@@ -1150,7 +1126,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-create-missing-categories',
-			[ $this, 'cmd_embarcadero_create_missing_categories' ],
+			self::get_command_closure( 'cmd_embarcadero_create_missing_categories' ),
 			[
 				'shortdesc' => 'Creates missing categories based from a single curated list.',
 				'synopsis'  => [
@@ -1167,7 +1143,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-users-on-comments',
-			[ $this, 'cmd_embarcadero_fix_users_on_comments' ],
+			self::get_command_closure( 'cmd_embarcadero_fix_users_on_comments' ),
 			[
 				'shortdesc' => 'Corrects user and comment associations for comments',
 				'synopsis'  => [
@@ -1199,7 +1175,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-cleanup-author-terms',
-			[ $this, 'cmd_cleanup_author_terms' ],
+			self::get_command_closure( 'cmd_cleanup_author_terms' ),
 			[
 				'shortdesc' => 'Looks through `author` record in the DB and ensures they\'re valid',
 				'synopsis'  => [],
@@ -1208,7 +1184,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-validate-post-authors',
-			[ $this, 'cmd_validate_authors_on_posts' ],
+			self::get_command_closure( 'cmd_validate_authors_on_posts' ),
 			[
 				'shortdesc' => 'Validates authors on posts.',
 				'synopsis'  => [
@@ -1225,7 +1201,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-qa-cap-validation',
-			[ $this, 'cmd_qa_cap_validation' ],
+			self::get_command_closure( 'cmd_qa_cap_validation' ),
 			[
 				'shortdesc' => 'QA File generator.',
 				'synopsis'  => [
@@ -1242,7 +1218,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-match-original-byline-to-post',
-			[ $this, 'cmd_match_original_byline_to_post' ],
+			self::get_command_closure( 'cmd_match_original_byline_to_post' ),
 			[
 				'shortdesc' => 'With a QA file in hand, we can tell which posts have the incorrect authors assigned. This command will attempt to remedy the discrepancies.',
 				'synopsis'  => [
@@ -3231,7 +3207,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			$post_content_blocks = [];
 			foreach ( $pdf_files_paths as $pdf_file_path ) {
 				// Upload file.
-				$file_post_id = $this->attachments->import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
+				$file_post_id = Attachments::import_external_file( $pdf_file_path, null, null, null, null, $wp_issue_post_id );
 				$filename     = basename( $pdf_file_path );
 
 				if ( is_wp_error( $file_post_id ) ) {
@@ -3261,7 +3237,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			if ( ! is_file( $cover_file_path ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find cover file %s', $cover_file_path ), Logger::WARNING );
 			} else {
-				$cover_file_post_id = $this->attachments->import_external_file( $cover_file_path, null, null, null, null, $wp_issue_post_id );
+				$cover_file_post_id = Attachments::import_external_file( $cover_file_path, null, null, null, null, $wp_issue_post_id );
 
 				if ( is_wp_error( $cover_file_post_id ) ) {
 					$this->logger->log( self::LOG_FILE, sprintf( 'Could not upload cover file %s: %s', $cover_file_path, $cover_file_post_id->get_error_message() ), Logger::WARNING );
@@ -4046,7 +4022,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function cmd_embarcadero_delete_disallowed_tags(): void {
+	public function cmd_embarcadero_delete_disallowed_tags( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -4144,7 +4120,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 	 *
 	 * @return void
 	 */
-	public function cmd_embarcadero_establish_primary_categories(): void {
+	public function cmd_embarcadero_establish_primary_categories( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -6499,7 +6475,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		foreach ( $filenames as $filename ) {
 			$media_path = $media_dir . '/' . $filename;
 			if ( file_exists( $media_path ) ) {
-				$attachment_id = $this->attachments->import_attachment_for_post(
+				$attachment_id = Attachments::import_attachment_for_post(
 					$wp_post_id,
 					$media_path,
 					$media['caption'],

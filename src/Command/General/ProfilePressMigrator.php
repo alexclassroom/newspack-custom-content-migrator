@@ -2,23 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use WP_CLI;
 
 /**
  * Profile Press reusable commands.
  */
-class ProfilePress implements InterfaceCommand {
+class ProfilePressMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * CoAuthorsPlusHelper logic.
@@ -37,7 +33,7 @@ class ProfilePress implements InterfaceCommand {
 	/**
 	 * Logger.
 	 *
-	 * @var Logger $logger.
+	 * @var Logger $logger .
 	 */
 	private $logger;
 
@@ -51,27 +47,12 @@ class ProfilePress implements InterfaceCommand {
 	}
 
 	/**
-	 * Sets up Co-Authors Plus plugin dependencies.
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator profilepress-authors-to-guest-authors',
-			[ $this, 'cmd_pp_authors_to_gas' ],
+			self::get_command_closure( 'cmd_pp_authors_to_gas' ),
 			[
 				'shortdesc' => 'Converts Profile Press authors to CAP GAs.',
 			]

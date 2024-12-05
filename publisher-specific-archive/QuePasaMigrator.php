@@ -2,10 +2,10 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Attachments as AttachmentsLogic;
-use \Symfony\Component\DomCrawler\Crawler;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Attachments as AttachmentsLogic;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use Symfony\Component\DomCrawler\Crawler;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Que Pasa.

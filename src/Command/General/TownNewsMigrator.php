@@ -2,36 +2,27 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Utils\Logger;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use DirectoryIterator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
-use \NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use \DirectoryIterator;
-use \SimpleXMLElement;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use SimpleXMLElement;
+use WP_CLI;
 
-class TownNewsMigrator implements InterfaceCommand {
+class TownNewsMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 	const LOG_FILE                       = 'townnews_importer.log';
 	const TOWN_NEWS_ORIGINAL_ID_META_KEY = '_newspack_import_id';
 	const DEFAULT_CO_AUTHOR_DISPLAY_NAME = 'Staff';
 
 	/**
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * @var Logger.
 	 */
 	private $logger;
-
-	/**
-	 * Instance of Attachments Login
-	 *
-	 * @var null|Attachments
-	 */
-	private $attachments;
 
 	/**
 	 * @var CoAuthorsPlusHelper $coauthorsplus_logic
@@ -48,32 +39,17 @@ class TownNewsMigrator implements InterfaceCommand {
 	 */
 	private function __construct() {
 		$this->logger                    = new Logger();
-		$this->attachments               = new Attachments();
 		$this->coauthorsplus_logic       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-content',
-			array( $this, 'cmd_migrate_content' ),
+			self::get_command_closure( 'cmd_migrate_content' ),
 			[
 				'shortdesc' => 'Migrate TownNews content. It is recommended to run this command by feeding it one yyyy/ folder at a time.',
 				'synopsis'  => [
@@ -97,7 +73,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-migrate-featured-tag',
-			array( $this, 'cmd_migrate_featured_tag' ),
+			self::get_command_closure( 'cmd_migrate_featured_tag' ),
 			[
 				'shortdesc' => 'Migrate TownNews post featured tag.',
 				'synopsis'  => [
@@ -114,7 +90,7 @@ class TownNewsMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator town-news-fix-tags',
-			array( $this, 'cmd_fix_tags' ),
+			self::get_command_closure( 'cmd_fix_tags' ),
 			[
 				'shortdesc' => 'Fix tags.',
 				'synopsis'  => [
@@ -721,7 +697,7 @@ class TownNewsMigrator implements InterfaceCommand {
 			} else {
 				$avatar_id = null;
 				if ( ! empty( $avatar ) ) {
-					$avatar_id = $this->attachments->import_external_file( $avatar, $display_name );
+					$avatar_id = Attachments::import_external_file( $avatar, $display_name );
 
 					if ( is_wp_error( $avatar_id ) ) {
 						$this->logger->log( self::LOG_FILE, sprintf( "Can't download user avatar for the post %d: %s", $post_id, $avatar_id->get_error_message() ), Logger::WARNING );
@@ -914,7 +890,7 @@ class TownNewsMigrator implements InterfaceCommand {
 		}
 
 		$media_file_path = "$dir_path/$media_source";
-		$attachment_id   = $this->attachments->import_external_file( $media_file_path, $media_title, $media_caption, null, $media_title, $parent_id );
+		$attachment_id   = Attachments::import_external_file( $media_file_path, $media_title, $media_caption, null, $media_title, $parent_id );
 
 		if ( is_wp_error( $attachment_id ) ) {
 			$this->logger->log( self::LOG_FILE, sprintf( "Couldn't import the media '%s' as a featured image for the post %d.", $media_file_path, $parent_id ), Logger::WARNING );

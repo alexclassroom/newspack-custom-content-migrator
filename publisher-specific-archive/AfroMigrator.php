@@ -2,9 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Migrator\PublisherSpecific;
 
-use WP_CLI;
-use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
 use NewspackCustomContentMigrator\MigrationLogic\Posts as PostsLogic;
+use NewspackCustomContentMigrator\Migrator\InterfaceMigrator;
+use WP_CLI;
 
 /**
  * Custom migration scripts for Afro.

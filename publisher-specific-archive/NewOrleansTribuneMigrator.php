@@ -2,11 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
-use \NewspackPostImageDownloader\Downloader;
-use \WP_CLI;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use NewspackContentConverter\ContentPatcher\ElementManipulators\SquareBracketsElementManipulator;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
+use NewspackPostImageDownloader\Downloader;
+use WP_CLI;
 
 /**
  * Custom migration scripts for New Orleans Tribune.

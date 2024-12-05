@@ -4,14 +4,13 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DOMDocument;
 use DOMNode;
-use DOMNodeList;
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Util\WordPressXMLHandler;
+use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use NewspackCustomContentMigrator\Utils\WordPressXMLHandler;
 use stdClass;
 use WP_CLI;
 use WP_Error;
@@ -49,13 +48,6 @@ class TheParkRecordMigrator implements InterfaceCommand {
 	private DOMDocument $dom;
 
 	/**
-	 * Attachments instance.
-	 *
-	 * @var Attachments $attachments
-	 */
-	private Attachments $attachments;
-
-	/**
 	 * TheParkRecordMigrator constructor.
 	 */
 	private function __construct() {
@@ -73,8 +65,6 @@ class TheParkRecordMigrator implements InterfaceCommand {
 			self::$instance->co_author_plus = new CoAuthorsPlusHelper();
 			self::$instance->dom            = new DOMDocument();
 			libxml_use_internal_errors( true );
-
-			self::$instance->attachments = new Attachments();
 		}
 
 		return self::$instance;
@@ -760,7 +750,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 			ConsoleColor::bright_blue( 'Near Exact Match' )->output();
 			$search_file_path    = $this->convert_to_local_path( $decoded_image_url );
 			$search_console      = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $decoded_filename );
-			$maybe_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $this->convert_to_local_path( $decoded_image_url ), $decoded_filename );
+			$maybe_attachment_id = Attachments::maybe_get_existing_attachment_id( $this->convert_to_local_path( $decoded_image_url ), $decoded_filename );
 
 			if ( null === $maybe_attachment_id ) {
 				$search_console->white( '❌' )->output();
@@ -770,7 +760,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 				$size_suffix_removed_image_url = preg_replace( '/-\d+x\d+\./', '.', $decoded_image_url );
 				$search_file_path              = $this->convert_to_local_path( $size_suffix_removed_image_url );
 				$search_console                = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $size_suffix_removed_filename );
-				$maybe_attachment_id           = $this->attachments->maybe_get_existing_attachment_id( $search_file_path, $size_suffix_removed_filename );
+				$maybe_attachment_id           = Attachments::maybe_get_existing_attachment_id( $search_file_path, $size_suffix_removed_filename );
 			}
 
 			if ( null === $maybe_attachment_id ) {
@@ -783,7 +773,7 @@ class TheParkRecordMigrator implements InterfaceCommand {
 				$scaled_image_url    = str_replace( $decoded_filename, $scaled_filename, $decoded_image_url );
 				$search_file_path    = $this->convert_to_local_path( $scaled_image_url );
 				$search_console      = ConsoleColor::white( 'Path:' )->bright_white( $search_file_path )->white( 'Filename:' )->bright_white( $scaled_filename );
-				$maybe_attachment_id = $this->attachments->maybe_get_existing_attachment_id( $search_file_path, $scaled_filename );
+				$maybe_attachment_id = Attachments::maybe_get_existing_attachment_id( $search_file_path, $scaled_filename );
 			}
 
 			if ( null === $maybe_attachment_id ) {

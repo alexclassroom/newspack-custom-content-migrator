@@ -4,15 +4,15 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use DateTimeImmutable;
 use DateTimeZone;
+use Newspack\MigrationTools\Logic\Attachments;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\BatchLogic;
+use Newspack\MigrationTools\Util\CsvIterator;
+use Newspack\MigrationTools\Util\Log\Logger;
 use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
-use NewspackCustomContentMigrator\Logic\GutenbergBlockGenerator;
-use NewspackCustomContentMigrator\Logic\Posts;
-use NewspackCustomContentMigrator\Logic\Redirection;
-use NewspackCustomContentMigrator\Logic\Taxonomy;
-use NewspackCustomContentMigrator\Utils\BatchLogic;
-use NewspackCustomContentMigrator\Utils\CsvIterator;
-use NewspackCustomContentMigrator\Utils\Logger;
 use WP_CLI;
 use WP_CLI\ExitException;
 use WP_Post;
@@ -49,11 +49,6 @@ class WindyCityMigrator implements InterfaceCommand {
 		'description' => 'Will refresh existing content rather than create new',
 		'optional'    => true,
 	];
-
-	/**
-	 * @var Attachments.
-	 */
-	private $attachments_logic;
 
 	/**
 	 * @var GutenbergBlockGenerator.
@@ -116,7 +111,6 @@ class WindyCityMigrator implements InterfaceCommand {
 			return;
 		}
 
-		$this->attachments_logic         = new Attachments();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 		$this->logger                    = new Logger();
 		$this->csv_iterator              = new CsvIterator();
@@ -530,7 +524,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				WP_CLI::error( sprintf( 'Failed to %s post for row %d', $verb, $num_item_processing ) );
 			}
 
-			$featured_img_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['image'], $listing_title );
+			$featured_img_id = Attachments::import_attachment_for_post( $listing_id, $row['image'], $listing_title );
 			if ( ! is_wp_error( $featured_img_id ) ) {
 				set_post_thumbnail( $listing_id, $featured_img_id );
 			}
@@ -619,12 +613,12 @@ class WindyCityMigrator implements InterfaceCommand {
 				WP_CLI::error( sprintf( 'Failed to create/update post for row %d', $num_item_prcoessing ) );
 			}
 
-			$featured_img_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['IIMAGE'], $listing_title );
+			$featured_img_id = Attachments::import_attachment_for_post( $listing_id, $row['IIMAGE'], $listing_title );
 			if ( ! is_wp_error( $featured_img_id ) ) {
 				set_post_thumbnail( $listing_id, $featured_img_id );
 			}
 
-			$pdf_id = $this->attachments_logic->import_attachment_for_post( $listing_id, $row['IPDF'], $listing_title );
+			$pdf_id = Attachments::import_attachment_for_post( $listing_id, $row['IPDF'], $listing_title );
 			if ( ! is_wp_error( $pdf_id ) ) {
 				$pdf_post = get_post( $pdf_id );
 				$block    = $this->gutenberg_block_generator->get_file_pdf( $pdf_post, $listing_title, false, 800 );
@@ -918,7 +912,7 @@ class WindyCityMigrator implements InterfaceCommand {
 
 			// Featured Image.
 			if ( ! empty( $entry['FEATURED'] ) && 'NULL' !== $entry['FEATURED'] ) {
-				$attachment_id = $this->attachments_logic->import_external_file( $entry['FEATURED'], $entry['TITLE'], $entry['FEATURED_CAPTION'], null, null, $post_id );
+				$attachment_id = Attachments::import_external_file( $entry['FEATURED'], $entry['TITLE'], $entry['FEATURED_CAPTION'], null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
 					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $entry['FEATURED'] . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
@@ -931,7 +925,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				$first_image    = trim( current( $gallery_images ) );
 				$first_image    = current( explode( '|', $first_image ) );
 
-				$attachment_id = $this->attachments_logic->import_external_file( $first_image, $entry['TITLE'], null, null, null, $post_id );
+				$attachment_id = Attachments::import_external_file( $first_image, $entry['TITLE'], null, null, null, $post_id );
 
 				if ( is_wp_error( $attachment_id ) ) {
 					$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $first_image . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
@@ -1092,7 +1086,7 @@ class WindyCityMigrator implements InterfaceCommand {
 			$gallery_image = array_map( 'trim', $gallery_image );
 			$image_url     = $gallery_image[0];
 			$caption       = $gallery_image[1] ?? null;
-			$attachment_id = $this->attachments_logic->import_external_file( $image_url, null, $caption, null, null, $post_id );
+			$attachment_id = Attachments::import_external_file( $image_url, null, $caption, null, null, $post_id );
 
 			if ( is_wp_error( $attachment_id ) ) {
 				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $image_url . '): ' . $attachment_id->get_error_message(), Logger::WARNING );
@@ -1190,7 +1184,7 @@ class WindyCityMigrator implements InterfaceCommand {
 				continue;
 			}
 
-			$attachment_id = $this->attachments_logic->import_external_file( $pdf_file_path, null, null, null, null, $post_id );
+			$attachment_id = Attachments::import_external_file( $pdf_file_path, null, null, null, null, $post_id );
 
 			if ( is_wp_error( $attachment_id ) ) {
 				$this->logger->log( self::LOG_FILE, ' -- Error importing attachment (' . $pdf_file_path . '): ' . $attachment_id->get_error_message(), Logger::WARNING );

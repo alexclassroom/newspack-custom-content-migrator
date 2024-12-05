@@ -2,16 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Command\General\PostsMigrator;
-use \NewspackCustomContentMigrator\Logic\Posts as PostsLogic;
-use \NewspackCustomContentMigrator\Utils\Logger as Logger;
-use \WP_CLI;
+use Newspack\MigrationTools\Command\PostsMigrator;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use WP_CLI;
 
 /**
  * Reusable Blocks Migrator.
  */
-class ReusableBlocksMigrator implements InterfaceCommand {
+class ReusableBlocksMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * Reusable Blocks export file.
@@ -47,13 +50,6 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	private $logger;
 
 	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
-
-	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -62,26 +58,12 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator export-reusable-blocks',
-			array( $this, 'cmd_export_reusable_blocks' ),
+			self::get_command_closure( 'cmd_export_reusable_blocks' ),
 			[
 				'shortdesc' => 'Exports Reusable Blocks. Exits with code 0 on success or 1 otherwise.',
 				'synopsis'  => [
@@ -98,7 +80,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator import-reusable-blocks',
-			array( $this, 'cmd_import_reusable_blocks_file' ),
+			self::get_command_closure( 'cmd_import_reusable_blocks_file' ),
 			[
 				'shortdesc' => 'Imports Reusable Blocks which were exported from the Staging site.',
 				'synopsis'  => [
@@ -115,7 +97,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator update-reusable-blocks-id',
-			array( $this, 'cmd_update_reusable_blocks_id' ),
+			self::get_command_closure( 'cmd_update_reusable_blocks_id' ),
 			[
 				'shortdesc' => 'Updates a Reusable Block ID in content.',
 				'synopsis'  => [
@@ -139,7 +121,7 @@ class ReusableBlocksMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator delete-reusable-blocks-from-content',
-			array( $this, 'cmd_delete_reusable_blocks_from_content' ),
+			self::get_command_closure( 'cmd_delete_reusable_blocks_from_content' ),
 			[
 				'shortdesc' => 'Goes through all --post-types-csv and searches for reusable blocks with given IDs --reusable-block-ids-csv and removes their usage from post_content.',
 				'synopsis'  => [
