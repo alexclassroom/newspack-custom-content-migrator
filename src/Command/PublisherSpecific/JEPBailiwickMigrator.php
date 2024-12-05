@@ -10,6 +10,8 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use DateInterval;
 use DateTime;
 use Exception;
+use RuntimeException;
+use Newspack\Guest_Contributor_Role;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
@@ -51,14 +53,22 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @var Taxonomy $taxonomy Taxonomy logic.
 	 */
 	private Taxonomy $taxonomy;
+	
+	/**
+	 * Gutenberg block generator.
+	 * 
+	 * @var GutenbergBlockGenerator $gutenberg_blocks Gutenberg block generator.
+	 */
+	private GutenbergBlockGenerator $gutenberg_blocks;
 
 	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->cli_logger  = CliLog::get_logger( 'bw' );
-		$this->file_logger = FileLog::get_logger( 'bw' );
-		$this->taxonomy    = new Taxonomy();
+		$this->cli_logger       = CliLog::get_logger( 'bw' );
+		$this->file_logger      = FileLog::get_logger( 'bw' );
+		$this->taxonomy         = new Taxonomy();
+		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		if ( ! defined( 'NP_LIVE' ) ) {
 			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
 		}
@@ -354,13 +364,23 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$post['post_content'] = $article['description'] . $article['content'];
 
 			// Set author.
+			// TODO CHECK
 			$post['post_author'] = $this->get_author( $article['author'] );
 
 			// Set categories.
 			$category_name = $article['category'];
-			$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+			// TODO CHECK
+			$cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 			if ( ! is_wp_error( $cat_id ) ) {
 				$post['post_category'] = [ $cat_id ];
+			} else {
+				$this->cli_logger->error(
+					'ERROR: Failed to get or create category',
+					[
+						'error'         => $cat_id,
+						'category_name' => $category_name,
+					] 
+				);
 			}
 			
 			// Set tags.
@@ -384,13 +404,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				);
 				continue;
 			}
-
-			// TODO: Create redirect.
-			$post_link = get_permalink( $post_id );
-			if ( $post_link != $original_url ) {
-			}
-
-			// Logging.
 			$this->cli_logger->notice(
 				'Imported article',
 				[
@@ -406,6 +419,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				]
 			);
 
+			// Create redirect.
+			$post_link = get_permalink( $post_id );
+			if ( $post_link != $original_url ) {
+				// Compare URL paths (without hostname and protocol).
+				$original_url_parts = parse_url( $original_url );
+				$original_url_path  = $original_url_parts['path'];
+				$post_link_parts    = parse_url( $post_link );
+				$post_link_path     = $post_link_parts['path'];
+				if ( strtolower( $post_link_path ) != strtolower( $original_url_path ) ) {
+					// TODO CREATE REDIRECT ...
+				}
+			}
+			
 			// Custom updates to content.
 			$content = get_post_field( 'post_content', $post_id );
 			
@@ -413,6 +439,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$replacers = [];
 			if ( str_contains( $content, '<h1>' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
+			}
+			if ( str_contains( $content, '<img ' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->get_full_sized_images( $html_doc, $post_id );
 			}
 			if ( str_contains( $content, '<img ' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
@@ -456,46 +485,132 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Some <img>s have cached (smaller sized) `src` (the `src` URL path contains '.../cache/...').
+	 * Such a cached (smaller sized) <img> is wrapped in an <a> tag which contain the full sized image URL in its `href`.
+	 * This `href` should be used for image sources.
+	 * E.g.:
+	 * ```
+	 * <a href="https://www.bailiwickexpress.com/files/5117/3202/4104/kate.jpg" target="_blank">
+	 *      <img src="https://www.bailiwickexpress.com/files/cache/0bce94c80a6c63f1e32ddbed148c7921_f1416263.jpg" alt="kate.jpg" width="500" height="1382" />
+	 *      <br />
+	 * </a>
+	 * ```
+	 * 
+	 * This medhod replaces such <a>s with just the <img> with the correct full-sized `src` takend from the <a>'s `href`.
+	 *
+	 * @param HtmlDocument $html_doc The HTML document to replace in.
+	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 *
+	 * @return void
+	 */
+	private function get_full_sized_images( HtmlDocument $html_doc, int $post_id ): void {
+		
+		// Get all the <a> tags.
+		$as = $html_doc->find( 'a' );
+		if ( empty( $as ) ) {
+			$this->cli_logger->info( 'No <a> tags found in post content', [ 'post_id' => $post_id ] );
+			return;
+		}
+
+		foreach ( $as as $a ) {
+			$a_html_debug = $a->outertext;
+
+			/**
+			 * Validate if this <a> contains an <img> with the cached (smaller sized) image.
+			 * There can be one more extra child, a <br> element.
+			 */
+			$children = $a?->children();
+			if ( empty( $children ) ) {
+				// <a> tag has no children.
+				continue;
+			}
+			if ( 'img' !== $a->children[0]?->tag ) {
+				// <a> tag 1st child is not <img>.
+				continue;
+			}
+			// There can be a second child, but it must be a <br> element.
+			if ( ( 2 == count( $children ) ) && ( 'br' !== $children[1]->tag ) ) {
+				// <a> tag 2nd child is not <br>.
+				continue;
+			}
+			// There should not be more than 2 children.
+			if ( count( $children ) > 2 ) {
+				// <a> tag has more than 2 children.
+				continue;
+			}
+
+			// Get the first child <img>.
+			$img = $a->children[0];
+			if ( 'img' !== $img->tag ) {
+				// Not an <img> element.
+				continue;
+			}
+			
+			// Check that img's `src` contains `/cache/` in its URL path.
+			$src = $img?->getAttribute( 'src' );
+			if ( ! $img || ! $src || ! str_contains( $src, '/cache/' ) ) {
+				// This is not a cached image.
+				continue;
+			}
+
+			// It's expected that this `src` is fully qualified. Just in case we run into some that are not, throw an exception to handle if needed.
+			if ( ! str_starts_with( $src, 'http' ) ) {
+				throw new RuntimeException( sprintf( 'Cached image URL `%s` is not fully qualified -- add support for relative ones.', $src ) );
+			}
+
+			// Get `href` -- the full-sized image URL.
+			$href = $a?->getAttribute( 'href' );
+			if ( ! $href ) {
+				continue;
+			}
+			
+			// Create a new <img> element. Cloning the existing $img object is an efficient way to keep all the existing attributes.
+			$new_img = clone $img;
+			// Set $href as the correct src.
+			$new_img->setAttribute( 'src', $href );
+
+			// Replace <a> in $html_doc with the $new_img.
+			$html_doc->load( str_replace( $a->outertext, $new_img->outertext, $html_doc->save() ) );
+			
+			// Replace all cached image URLs with the full sized URLs in entire HTML.
+			$html_doc->load( str_replace( $src, $href, $html_doc->save() ) );
+		}
+	}
+
+	/**
 	 * Find images in HTMLDocument content and download them and replace with image blocks.
 	 *
 	 * @param HtmlDocument $html_doc The HTML document to replace in.
-	 * @param int          $post_id  The post ID.
+	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 *
 	 * @return void
 	 */
 	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
-		$gb_blocks = new GutenbergBlockGenerator();
-		$images    = $html_doc->find( 'img' );
+		$images = $html_doc->find( 'img' );
 		if ( empty( $images ) ) {
 			$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $post_id ] );
 
 			return;
 		}
 		
-		/**
-		 * Some images are small sized (.../cache/...) and wrapped in links like this:
-		 * ```
-		 * <a href="https://www.bailiwickexpress.com/files/5117/3202/4104/kate.jpg" target="_blank">
-		 *      <img src="https://www.bailiwickexpress.com/files/cache/0bce94c80a6c63f1e32ddbed148c7921_f1416263.jpg" alt="kate.jpg" width="500" height="1382" />
-		 *      <br />
-		 * </a>
-		 * ```
-		 * For such images we need to use the <a>'s href as the image source.
-		 */
-		$a = 1;
-
-		// TODO Some images have alt texts in the content and we should just make the code parses them too and put them on the attachments.
-
 		foreach ( $images as $img ) {
-			$src = $img?->getAttribute( 'src' );
-			if ( ! $src ) {
+			$src_attr = $img?->getAttribute( 'src' );
+			if ( ! $src_attr ) {
 				// Not much we can do without that.
 				continue;
 			}
-			if ( ! str_starts_with( $src, 'http' ) ) {
-				$src = NP_LIVE . $src;
+
+			// $src_attr might be relative, so get the absolute URL.
+			if ( str_starts_with( $src_attr, 'http' ) ) {
+				$src = $src_attr;
+			} else {
+				$src = NP_LIVE . $src_attr;
 			}
-			$att_id = $this->get_image_from_url( $src, $post_id );
+
+			// alt text.
+			$alt_text = $img?->getAttribute( 'alt' ) ?: '';
+
+			$att_id = $this->get_image_from_url( $src, $post_id, $alt_text );
 			if ( is_wp_error( $att_id ) ) {
 				$this->cli_logger->error(
 					'ERROR: Failed to import inline image',
@@ -515,13 +630,23 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				]
 			);
 
-			$img->outertext = serialize_block(
-				$gb_blocks->get_image(
+			$img_block      = serialize_block(
+				$this->gutenberg_blocks->get_image(
 					get_post( $att_id ),
 					'full',
 					false
 				)
 			);
+			$img->outertext = $img_block;
+			
+			
+			// Replace original URL with new URL in entire HTML; there are some "click here" links added manually for additional direct view of the images.
+			$new_url = wp_get_attachment_url( $att_id );
+			if ( $new_url ) {
+				// Both relative and fully qualified URLs are used in the content.
+				$html_doc->load( str_replace( $src_attr, $new_url, $html_doc->save() ) );
+				$html_doc->load( str_replace( $src, $new_url, $html_doc->save() ) );
+			}       
 		}
 	}
 
@@ -530,10 +655,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 *
 	 * @param int    $post_id   Post ID.
 	 * @param string $image_url Image URL to download image from.
+	 * @param string $alt       Alt text for the image.
 	 *
 	 * @return void
 	 */
-	private function set_featured_image_on_post( int $post_id, string $image_url ): void {
+	private function set_featured_image_on_post( int $post_id, string $image_url, string $alt = '' ): void {
 		$image_url = trim( $image_url );
 		if ( empty( $image_url ) ) {
 			return;
@@ -543,7 +669,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$image_url = trailingslashit( NP_LIVE ) . trim( $image_url, '/' );
 		}
 
-		$attachment_id = $this->get_image_from_url( $image_url, $post_id );
+		$attachment_id = $this->get_image_from_url( $image_url, $post_id, $alt );
 		if ( ! is_wp_error( $attachment_id ) ) {
 			$data['_thumbnail_id'] = $attachment_id;
 			FileLog::get_logger( 'bw-images' )->notice(
@@ -578,16 +704,21 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @return int The author ID or 0 if not found.
 	 */
 	private function get_author( string $author_name ): int {
-		$default_author = 1; // TODO. There is some default author logic that we need to implement.
+		$default_author_id = 1; // TODO. There is some default author logic that we need to implement.
 		if ( empty( $author_name ) ) {
-			return $default_author;
+			return $default_author_id;
 		}
+
+		// TODO Set proper user role and email.
+		$role       = Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME;
+		$user_email = null;
 
 		try {
 			$user = UsersHelper::create_or_get_user(
 				[
 					'user_login' => $author_name,
-					'role'       => 'contributor_no_edit',
+					'role'       => $role,
+					'user_email' => $user_email,
 				],
 				$author_name
 			);
@@ -598,35 +729,31 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$this->cli_logger->error( $message, [ 'error' => $e ] );
 			$this->file_logger->critical( $message, [ 'error' => $e ] );
 
-			return $default_author;
+			return $default_author_id;
 		}
 	}
-
 
 	/**
 	 * Get image from URL and return the attachment ID.
 	 *
-	 * @param string $url     The URL to the image.
-	 * @param int    $post_id The post ID.
+	 * @param string $url      The URL to the image.
+	 * @param int    $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param string $alt_text The alt text for the image.
 	 *
 	 * @return int|WP_Error
 	 */
-	private function get_image_from_url( string $url, int $post_id ): int|WP_Error {
+	private function get_image_from_url( string $url, int $post_id, string $alt_text = '' ): int|WP_Error {
 		if ( empty( $url ) ) {
 			return new WP_Error( '', 'No image URL provided' );
 		}
-		// TODO. Should this be optional? The predict?
-		$path = self::get_predicted_file_path( $post_id, $url );
-		if ( ! file_exists( $path ) ) {
-			$featured_image_id = Attachments::import_attachment_for_post( $post_id, $url );
-		} else {
-			$featured_image_id = Attachments::maybe_get_existing_attachment_id( $path );
-			if ( empty( $featured_image_id ) ) {
-				$featured_image_id = Attachments::import_attachment_for_post( $post_id, $url );
-			}
-		}
 
-		return $featured_image_id;
+		// Download the image and import it (will return existing attachment ID if already imported).
+		$attachment_id = Attachments::import_attachment_for_post( $post_id, $url, $alt_text );
+
+		// Save original URL as custom meta to $attachment_id.
+		update_post_meta( $attachment_id, self::META_ORIGINAL_URL, $url );
+
+		return $attachment_id;
 	}
 
 	/**
@@ -651,7 +778,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Probably delete this if it makes no sense.
 	 *
-	 * @param int    $post_id  Post ID.
+	 * @param int    $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 * @param string $filename The filename.
 	 *
 	 * @return string The path.
