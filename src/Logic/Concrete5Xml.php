@@ -74,6 +74,21 @@ class Concrete5Xml {
 	}
 
 	/**
+	 * Get the count of articles in the XML file.
+	 * 
+	 * @throws \Exception If the file could not be opened by XMLReader.
+	 * @return int The count of articles in the XML file.
+	 */
+	public function get_count(): int {
+		$reader = XMLReader::open( $this->xml_file_path );
+		if ( ! $reader ) {
+			throw new Exception( 'Failed to open XML file: ' . esc_html( $this->xml_file_path ) );
+		}
+
+		return iterator_count( $this->get_articles() );
+	}
+
+	/**
 	 * Sanitize an article element from the XML file into an array with the available fields.
 	 *
 	 * @param SimpleXMLElement $article A single article element from the XML file.
