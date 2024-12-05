@@ -13,7 +13,6 @@ use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Util\Log\Logger;
 use Newspack\MigrationTools\Util\WordPressXMLHandler;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use NewspackCustomContentMigrator\Logic\ConsoleOutput\Users as UserConsoleOutput;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\CSVFile;
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
@@ -5706,7 +5705,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					'user_email'   => $sanitized_byline . '@example.com',
 					'user_pass'    => wp_generate_password(),
 					'display_name' => $row['original_byline'],
-					'role'         => 'Contributor',
+					'role'         => 'contributor',
 				]
 			);
 
