@@ -31,13 +31,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const META_ORIGINAL_URL = '_original_url';
-	const META_ORIGINAL_AUTHOR = '_original_author';
+	const META_ORIGINAL_URL          = 'newspackmigration_original_url';
+	const META_ORIGINAL_AUTHOR       = 'newspackmigration_original_author';
+	const META_DEFAULT_AUTHOR_REASON = 'newspackmigration_default_author_reason';
 
 	/**
 	 * Header images used to determine authors. Can be one or single such images, all either fully qualified URLs, or relative paths, or just file names.
 	 */
-	const AUTHOR__NEWS_TEAM__HEADER_IMAGES = [
+	const AUTHOR__NEWS_TEAM__HEADER_IMAGES       = [
 		// 'https://www.bailiwickexpress.com/files/2616/3638/1625/News-Team-By-Line.png',
 		// 'https://www.bailiwickexpress.com/files/5417/2546/0302/News-Team-By-Line.png',
 		'News-Team-By-Line.png',
@@ -47,7 +48,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// 'https://www.bailiwickexpress.com/files/8216/5287/9043/jersey_heritage.png',
 		'jersey_heritage.png',
 	];
-	const AUTHOR__OPINION__HEADER_IMAGES = [
+	const AUTHOR__OPINION__HEADER_IMAGES         = [
 		// 'https://www.bailiwickexpress.com/files/2516/7965/5634/Opinion-By-Line.jpg',
 		'Opinion-By-Line.jpg',
 	];
@@ -334,7 +335,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( ! in_array( $publication, [ 'jersey', 'guernsey' ], true ) ) {
 			NMT::exit_with_message( 'Invalid publication. Allowed values are "jersey" or "guernsey"', [ $this->cli_logger ] );
 		}
-		$xml_fetcher   = null;
+		$xml_fetcher = null;
 		try {
 			$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file_path ] );
 			$xml_fetcher = new Concrete5Xml( $xml_file_path );
@@ -392,12 +393,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// Set content.
 			$post['post_content'] = $article['description'] . $article['content'];
 
+			// Get author name based on custom reasons, and the reason (custom rule) why this author name was set.
+			$author_arr    = $this->get_author_name_based_on_custom_rules( $article, $publication );
+			$author_name   = $author_arr['author_name'];
+			$author_reason = $author_arr['author_reason'] ?? null;
+			
 			// Set author.
-			$post['post_author'] = $this->get_author( $article['author'], $original_url, $publication, $article['description'], $article['content'] );
+			$post['post_author'] = $this->get_user_id( $author_name );
 
 			// Set categories.
 			$category_name = $article['category'];
-			$cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+			$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 			if ( ! is_wp_error( $cat_id ) ) {
 				$post['post_category'] = [ $cat_id ];
 			} else {
@@ -419,6 +425,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// Save custom postmetas.
 			$post['meta_input'][ self::META_ORIGINAL_URL ]    = $original_url;
 			$post['meta_input'][ self::META_ORIGINAL_AUTHOR ] = $article['author'];
+			if ( $author_reason ) {
+				$post['meta_input'][ self::META_DEFAULT_AUTHOR_REASON ] = $author_reason;
+			}
 
 			// Insert or update post if it already exists.
 			$post_id = wp_insert_post( $post );
@@ -456,7 +465,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$post_link_parts    = parse_url( $post_link );
 				$post_link_path     = $post_link_parts['path'];
 				if ( strtolower( $post_link_path ) != strtolower( $original_url_path ) ) {
-					// TODO CREATE REDIRECT ...
+					// TODO -- CREATE REDIRECTS.
 				}
 			}
 			
@@ -529,6 +538,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @param HtmlDocument $html_doc The HTML document to replace in.
 	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 *
+	 * @throws RuntimeException If a cached image URL is not fully qualified.
+	 * 
 	 * @return void
 	 */
 	private function get_full_sized_images( HtmlDocument $html_doc, int $post_id ): void {
@@ -583,7 +594,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// It's expected that this `src` is fully qualified. Just in case we run into some that are not, throw an exception to handle if needed.
 			if ( ! str_starts_with( $src, 'http' ) ) {
-				throw new RuntimeException( sprintf( 'Cached image URL `%s` is not fully qualified -- add support for relative ones.', $src ) );
+				throw new RuntimeException( sprintf( 'Cached image URL `%s` is not fully qualified -- add support for relative ones.', wp_kses( $src ) ) );
 			}
 
 			// Get `href` -- the full-sized image URL.
@@ -725,104 +736,189 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Get author name based on custom rules.
+	 *
+	 * @param array  $article      Article XML data.
+	 * @param string $publication 'jersey' or 'guernsey'.
+	 *
+	 * @return array An array with two keys {
+	 *     string @author_name    The name of the author.
+	 *     ?string @author_reason The reason for the action. If null, not special rule was applied and $article['author'] was used.
+	 * }
+	 */
+	private function get_author_name_based_on_custom_rules( array $article, string $publication ): int {
+		
+		/**
+		 * BEJ only.
+		 */
+		if ( 'jersey' == $publication ) {
+			/**
+			 * Petty Debts.
+			 */
+			if ( false !== stripos( $article['title'], 'the latest in petty debts' ) ) {
+				return [
+					'author_name'   = 'Bailiwick Express News Team',
+					'author_reason' = "'The latest in Petty Debts' in title",
+				]
+			}
+			/**
+			 * Petty Debts.
+			 * Additional rule -- all articles uploaded by Maddy Pereira get 'Bailiwick Express News Team'.
+			 */
+			if ( 'Maddy Pereira' == $article['author'] ) {
+				return [
+					'author_name'   = 'Bailiwick Express News Team',
+					'author_reason' = 'Maddy Pereira is original author so setting Bailiwick Express News Team',
+				];
+			}
+			/**
+			 * Property Lists.
+			 */
+			if ( false !== stripos( $article['title'], 'the latest property sales' ) ) {
+				return [
+					'author_name'   = 'Bailiwick Express News Team',
+					'author_reason' = "'The latest property sales' in title",
+				]
+			}
+		}
+
+		/**
+		 * "Jersey Heritage" author.
+		 * 
+		 * !! PROBLEM -- XML is missing headline image
+		 */
+		// Rule 1 -- if header image is present in content.
+		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
+			$parsed_url            = parse_url( $header_image );
+			$header_image_relative = $parsed_url['path'];
+			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+				return [
+					'author_name'   = 'Jersey Heritage',
+					'author_reason' = 'Jersey Heritage header image in content',
+				]
+			}
+		}
+		
+		// Rule 2 -- if title contains 'LOOKING BACK:' and article pre-dates 18 May 2022.
+		$article_predates_18_may_2022 = strtotime( $article['datePublic'] ) < strtotime( '2022-05-18' );
+		if ( ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) && $article_predates_18_may_2022 ) {
+			return [
+				'author_name'   = 'Jersey Heritage',
+				'author_reason' = "'LOOKING BACK:' is in title and article pre-dates 18 May 2022",
+			]
+		}
+
+		// Rule 3 -- if title contains 'What's your home's story?' and article pre-dates 18 May 2022.
+		if ( ( false !== stripos( $article['title'], "What's your home's story?" ) ) && $article_predates_18_may_2022 ) {
+			return [
+				'author_name'   = 'Jersey Heritage',
+				'author_reason' = "'What's your home's story?' is in title and article pre-dates 18 May 2022",
+			]
+		}
+
+		// Rule 4 -- if title contains 'What's your town's story?' and article pre-dates 18 May 2022.
+		if ( ( false !== stripos( $article['title'], "What's your town's story?" ) ) && $article_predates_18_may_2022 ) {
+			return [
+				'author_name'   = 'Jersey Heritage',
+				'author_reason' = "'What's your town's story?' is in title and article pre-dates 18 May 2022",
+			]
+		}
+
+		/**
+		 * "News Team" author.
+		 * 
+		 * !! PROBLEM -- XML is missing headline image
+		 */
+		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
+			$parsed_url            = parse_url( $header_image );
+			$header_image_relative = $parsed_url['path'];
+			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+				return [
+					'author_name'   = 'Bailiwick Express News Team',
+					'author_reason' = 'News Team header image present in content',
+				]
+			}
+		}
+
+		/**
+		 * Opinion author -- should use "Bailiwick Express Community" as the author.
+		 * 
+		 * !! PROBLEM -- XML is missing headline image
+		 */
+		foreach ( self::AUTHOR__OPINION__HEADER_IMAGES as $header_image ) {
+			$parsed_url            = parse_url( $header_image );
+			$header_image_relative = $parsed_url['path'];
+			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+				return [
+					'author_name'   = 'Bailiwick Express News Team',
+					'author_reason' = 'Opinion header image present in content',
+				]
+			}
+		}
+		// We might be able also determine Opinions by category, but need the Publisher's approval to use this criteria.
+		// if ( 'Opinion' == $article['category'] ) {
+		// return [
+		// 'author_name'   = 'Bailiwick Express News Team',
+		// 'author_reason' = 'Article is in Opinion category',
+		// ]
+		// }
+
+		/**
+		 * Community author.
+		 */
+		if ( 'Community' == $article['category'] ) {
+			return [
+				'author_name'   = 'Bailiwick Express Community',
+				'author_reason' = 'Article is in Community category',
+			]
+		}
+		
+		/**
+		 * Sponsored Content.
+		 * Will also be imported as normal posts under the 'Sponsor Content' category.
+		 * 
+		 * !! PROBLEM -- waiting for their custom sheet,
+		 *               these articles will use different bylines.
+		 */
+		// We can't determine by category alone, will use different bylines.
+		// if ( 'Sponsored Content' == $article['category'] ) {
+		// return [
+		// 'author_name'   = 'Sponsored Content',
+		// 'author_reason' = 'Article is in Sponsored Content',
+		// ]
+		// }
+
+		// If author is empty.
+		if ( empty( $article['author'] ) ) {
+			return [
+				'author_name'   = 'Bailiwick Express News Team',
+				'author_reason' = 'Article author is empty',
+			]
+		}
+
+		/**
+		 * Manual individual fixes.
+		 */
+		if ( 'James.Jeune' == $article['author'] ) {
+			return [
+				'author_name'   = 'James Jeune',
+				'author_reason' = null,
+			]
+		} else {
+			// Debug, other authors contain a dot?
+			$debug = 1;
+			// TODO log.
+		}
+	}
+
+	/**
 	 * Create or get author from the name.
 	 *
-	 * @param string $author_name         The author name.
-	 * @param string $original_url        The original article URL.
-	 * @param string $publication         'jersey' or 'guernsey'.
-	 * @param string $article_description Article description.
-	 * @param string $article_content     Article content.
+	 * @param string $author_name The author name.
 	 *
 	 * @return int The author ID or 0 if not found.
 	 */
-	private function get_author(
-		string $author_name,
-		string $original_url,
-		string $publication,
-		$article_description,
-		$article_content
-	): int {
-		
-		
-		$default_author = null;
-
-
-		// "News Team" author.
-		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
-			$parsed_url = parse_url( $header_image );
-			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article_description, $header_image_relative ) || str_contains( $article_content, $header_image_relative ) ) {
-				// $default_author = 'News Team';
-				$default_author = 'Bailiwick Express News Team';
-			}
-		}
-		
-
-		// "Jersey Heritage" author.
-		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
-			$parsed_url = parse_url( $header_image );
-			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article_description, $header_image_relative ) || str_contains( $article_content, $header_image_relative ) ) {
-				$default_author = 'Jersey Heritage';
-			}
-		}
-		// ISSUE -- https://a8c.slack.com/archives/C07UT1REAGJ/p1733422857630239
-
-		// We only created a Jersey Heritage byline on 18 May 2022
-		// so content that pre-dates this may either have a News byline or no byline at all.
-		// rule: any content that pre-dates 18 May 2022 with
-		// 		- 'LOOKING BACK:'
-		// 		- 'What's your home's story?'
-		// 		- 'What's your town's story?'
-		// should also carry Heritage byline.
-		$default_author = 'Jersey Heritage';
-
-
-		// "Opinion" author.
-		// self::AUTHOR__OPINION__HEADER_IMAGES
-		/**
-		 * determine all Opinions by the .../jsy/opinion/... URL segment,
-		 * 		e.g. https://www.bailiwickexpress.com/jsy/opinion/opinion-jerseys-nonsensical-two-tiered-policing-electric-transportation/
-		 * OR by the "Opinion" category ???
-		 */
-		$default_author = "Opinion";
-
-
-		// "Community" author.
-		// https://www.bailiwickexpress.com/jsy/community/
-		$default_author = "Community";
-
-
-		// "Sponsored Content" author.
-		// https://www.bailiwickexpress.com/sponsored-content
-		$default_author = "Sponsored Content";
-		// ===>>> "import these as normal posts under the 'Sponsor Content' category"
-		
-		/**
-		 * BEJ only
-		 */
-		// Petty Debts and Property Lists are NOT normal article content and do not require a byline. They are uploaded by Maddy Pereira. 
-		// Please can we apply a rule for ALL content uploaded by Maddy Pereira to have NO byline? If it is not possible to remove the byline, please apply a generic Bailiwick Express News Team byline.
-		// - The latest in Petty Debts (e.g. https://www.bailiwickexpress.com/jsy/business/latest-petty-debts107/)
-		// - The latest property sales (e.g. https://www.bailiwickexpress.com/jsy/business/latest-property-sales91/)
-		$default_author = "Bailiwick Express News Team";
-		
-		
-		// "Opinion" author
-		// Please can we apply a rule that all content that appears on the Community page carries a generic ‘Bailiwick Express Community’ byline? 
-		// ??? :
-		$default_author = "Bailiwick Express Community";
-		// https://docs.google.com/document/d/1E70Iy7UyPleJe1dIW929WA8sx07iWP0g/edit?disco=AAABZ2DZNKk
-
-
-
-		if ( 'jersey' == $publication ) {
-
-		} else {
-			// Guernsey.
-			
-		}
-
+	private function get_user_id( string $author_name ): int {
 		// TODO. Default author logic.
 		$default_author_id = 1;
 		if ( empty( $author_name ) ) {
@@ -837,19 +933,18 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$user = UsersHelper::create_or_get_user(
 				[
 					'user_login' => $author_name,
-					'role'       => $role,
-					'user_email' => $user_email,
+					'role'       => 'contributor_no_edit',
 				],
 				$author_name
 			);
 
 			return $user->ID;
 		} catch ( Exception $e ) {
-			$message = sprintf( 'ERROR: Could not create user with name %s', $author_name );
+			$message = sprintf( 'Could not create user with name %s', $author_name );
 			$this->cli_logger->error( $message, [ 'error' => $e ] );
 			$this->file_logger->critical( $message, [ 'error' => $e ] );
 
-			return $default_author_id;
+			return $default_author;
 		}
 	}
 
