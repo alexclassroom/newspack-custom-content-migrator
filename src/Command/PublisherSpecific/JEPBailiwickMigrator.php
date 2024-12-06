@@ -179,6 +179,28 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
+			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
+			[
+				'shortdesc' => 'Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dir',
+						'description' => 'Will scan all XML files in this dir.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'xml-file',
+						'description' => 'Path to a single XML file.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -507,6 +529,44 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Count the number of articles in all XML files in a directory.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_helper_xml_syntax_check_count_articles( array $pos_args, array $assoc_args ): void {
+		$dir      = $assoc_args['dir'] ?? null;
+		$xml_file = $assoc_args['xml-file'] ?? null;
+
+		if ( is_null( $dir ) && is_null( $xml_file ) ) {
+			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			return;
+		}
+
+		// Get .xml files.
+		if ( is_null( $dir ) ) {
+			$files = [ $xml_file ];
+		} else {
+			glob( "$dir/*.xml" );
+			if ( empty( $files ) ) {
+				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				return;
+			}
+		}
+
+		$total_count = 0;
+		foreach ( $files as $file ) {
+			$xml_fetcher  = new Concrete5Xml( $file );
+			$count        = $xml_fetcher->get_count();
+			$total_count += $count;
+			$this->cli_logger->info( sprintf( 'File %s has %s articles', $file, $count ) );
+		}
+
+		$this->cli_logger->info( sprintf( 'Total articles in all XML files: %s', $total_count ) );
+	}
+
+	/**
 	 * Replace all h1 tags with h2 tags.
 	 *
 	 * @param HtmlDocument $html_doc The HTML document to replace in.
@@ -757,9 +817,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			 */
 			if ( false !== stripos( $article['title'], 'the latest in petty debts' ) ) {
 				return [
-					'author_name'   = 'Bailiwick Express News Team',
-					'author_reason' = "'The latest in Petty Debts' in title",
-				]
+					'author_name'   => 'Bailiwick Express News Team',
+					'author_reason' => "'The latest in Petty Debts' in title",
+				];
 			}
 			/**
 			 * Petty Debts.
@@ -767,8 +827,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			 */
 			if ( 'Maddy Pereira' == $article['author'] ) {
 				return [
-					'author_name'   = 'Bailiwick Express News Team',
-					'author_reason' = 'Maddy Pereira is original author so setting Bailiwick Express News Team',
+					'author_name'   => 'Bailiwick Express News Team',
+					'author_reason' => 'Maddy Pereira is original author so setting Bailiwick Express News Team',
 				];
 			}
 			/**
@@ -776,9 +836,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			 */
 			if ( false !== stripos( $article['title'], 'the latest property sales' ) ) {
 				return [
-					'author_name'   = 'Bailiwick Express News Team',
-					'author_reason' = "'The latest property sales' in title",
-				]
+					'author_name'   => 'Bailiwick Express News Team',
+					'author_reason' => "'The latest property sales' in title",
+				];
 			}
 		}
 
@@ -793,9 +853,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
 				return [
-					'author_name'   = 'Jersey Heritage',
-					'author_reason' = 'Jersey Heritage header image in content',
-				]
+					'author_name'   => 'Jersey Heritage',
+					'author_reason' => 'Jersey Heritage header image in content',
+				];
 			}
 		}
 		
@@ -803,25 +863,25 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$article_predates_18_may_2022 = strtotime( $article['datePublic'] ) < strtotime( '2022-05-18' );
 		if ( ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) && $article_predates_18_may_2022 ) {
 			return [
-				'author_name'   = 'Jersey Heritage',
-				'author_reason' = "'LOOKING BACK:' is in title and article pre-dates 18 May 2022",
-			]
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'LOOKING BACK:' is in title and article pre-dates 18 May 2022",
+			];
 		}
 
 		// Rule 3 -- if title contains 'What's your home's story?' and article pre-dates 18 May 2022.
 		if ( ( false !== stripos( $article['title'], "What's your home's story?" ) ) && $article_predates_18_may_2022 ) {
 			return [
-				'author_name'   = 'Jersey Heritage',
-				'author_reason' = "'What's your home's story?' is in title and article pre-dates 18 May 2022",
-			]
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'What's your home's story?' is in title and article pre-dates 18 May 2022",
+			];
 		}
 
 		// Rule 4 -- if title contains 'What's your town's story?' and article pre-dates 18 May 2022.
 		if ( ( false !== stripos( $article['title'], "What's your town's story?" ) ) && $article_predates_18_may_2022 ) {
 			return [
-				'author_name'   = 'Jersey Heritage',
-				'author_reason' = "'What's your town's story?' is in title and article pre-dates 18 May 2022",
-			]
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'What's your town's story?' is in title and article pre-dates 18 May 2022",
+			];
 		}
 
 		/**
@@ -834,9 +894,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
 				return [
-					'author_name'   = 'Bailiwick Express News Team',
-					'author_reason' = 'News Team header image present in content',
-				]
+					'author_name'   => 'Bailiwick Express News Team',
+					'author_reason' => 'News Team header image present in content',
+				];
 			}
 		}
 
@@ -850,16 +910,16 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
 				return [
-					'author_name'   = 'Bailiwick Express News Team',
-					'author_reason' = 'Opinion header image present in content',
-				]
+					'author_name'   => 'Bailiwick Express News Team',
+					'author_reason' => 'Opinion header image present in content',
+				];
 			}
 		}
 		// We might be able also determine Opinions by category, but need the Publisher's approval to use this criteria.
 		// if ( 'Opinion' == $article['category'] ) {
 		// return [
-		// 'author_name'   = 'Bailiwick Express News Team',
-		// 'author_reason' = 'Article is in Opinion category',
+		// 'author_name'   => 'Bailiwick Express News Team',
+		// 'author_reason' => 'Article is in Opinion category',
 		// ]
 		// }
 
@@ -868,9 +928,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 */
 		if ( 'Community' == $article['category'] ) {
 			return [
-				'author_name'   = 'Bailiwick Express Community',
-				'author_reason' = 'Article is in Community category',
-			]
+				'author_name'   => 'Bailiwick Express Community',
+				'author_reason' => 'Article is in Community category',
+			];
 		}
 		
 		/**
@@ -883,17 +943,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// We can't determine by category alone, will use different bylines.
 		// if ( 'Sponsored Content' == $article['category'] ) {
 		// return [
-		// 'author_name'   = 'Sponsored Content',
-		// 'author_reason' = 'Article is in Sponsored Content',
+		// 'author_name'   => 'Sponsored Content',
+		// 'author_reason' => 'Article is in Sponsored Content',
 		// ]
 		// }
 
 		// If author is empty.
 		if ( empty( $article['author'] ) ) {
 			return [
-				'author_name'   = 'Bailiwick Express News Team',
-				'author_reason' = 'Article author is empty',
-			]
+				'author_name'   => 'Bailiwick Express News Team',
+				'author_reason' => 'Article author is empty',
+			];
 		}
 
 		/**
@@ -901,9 +961,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 */
 		if ( 'James.Jeune' == $article['author'] ) {
 			return [
-				'author_name'   = 'James Jeune',
-				'author_reason' = null,
-			]
+				'author_name'   => 'James Jeune',
+				'author_reason' => null,
+			];
 		} else {
 			// Debug, other authors contain a dot?
 			$debug = 1;
