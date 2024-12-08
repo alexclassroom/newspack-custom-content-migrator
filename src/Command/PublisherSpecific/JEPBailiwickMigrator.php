@@ -661,7 +661,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * 
+	 * Callable for `newspack-content-migrator bw-list-redirects`.
 	 *
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
@@ -676,9 +676,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		// CSV log.
+		// phpcs:disable
 		// $logger_plainfile = PlainFileLog::get_logger( 'plainfile-demo2' );
 		// $logger_plainfile->info( 'url,category,datePublic' );
 		// $logger_plainfile->info( 'sdf' );
+		// phpcs:enable
 
 		// Get .xml files.
 		if ( is_null( $dir ) ) {
@@ -922,7 +924,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 
 			// alt text.
-			$alt_text = $img?->getAttribute( 'alt' ) ?: '';
+			$alt_text = $img?->getAttribute( 'alt' ) ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
 
 			$att_id = $this->get_image_from_url( $src, $post_id, $alt_text );
 			if ( is_wp_error( $att_id ) ) {
@@ -1197,9 +1199,16 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @return int The author ID or 0 if not found.
 	 */
 	private function get_user_id( string $author_name ): int {
-		// TODO. Default author logic.
+		// This case won't happen, but we'll leave it be since it's a good practice, and posts authored by user ID 1 == adminnewspack are easy to review and update.
 		$default_author_id = 1;
 		if ( empty( $author_name ) ) {
+			$this->cli_logger->notice(
+				'WARNING Using default user adminnewspack.',
+				[
+					'url' => $article['url'],
+				]
+			);
+
 			return $default_author_id;
 		}
 
