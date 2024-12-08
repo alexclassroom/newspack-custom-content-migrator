@@ -108,11 +108,23 @@ class Concrete5Xml {
 			'lead',
 			'description',
 			'content',
+			'gallery',
 		];
-		// Sanitize the fields by trimming and casting them to strings.
+		
 		$sanitized_article = [];
 		foreach ( $fields as $field ) {
-			$sanitized_article[ $field ] = trim( (string) ( $article->{$field} ?? '' ) );
+			if ( 'gallery' === $field ) {
+				// For gallery, convert <image> nodes to array.
+				$gallery = [];
+				foreach ( $article->gallery->image as $image ) {
+					$gallery[] = (string) $image;
+				}
+				$sanitized_article[ $field ] = $gallery;
+				continue;
+			} else {
+				// Sanitize fields by trimming and casting them to strings.
+				$sanitized_article[ $field ] = trim( (string) ( $article->{$field} ?? '' ) );
+			}
 		}
 
 		return $sanitized_article;

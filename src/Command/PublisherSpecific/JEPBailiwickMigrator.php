@@ -501,22 +501,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'from_url' => $original_url,
 				]
 			);
-
-			// Create redirect.
-			$post_link = get_permalink( $post_id );
-			if ( $post_link != $original_url ) {
-				// Compare URL paths (without hostname and protocol).
-				$original_url_parts = parse_url( $original_url );
-				$original_url_path  = $original_url_parts['path'];
-				$post_link_parts    = parse_url( $post_link );
-				$post_link_path     = $post_link_parts['path'];
-				if ( strtolower( $post_link_path ) != strtolower( $original_url_path ) ) {
-					// TODO -- CREATE REDIRECTS.
-				}
-			}
 			
 			// Custom updates to content.
 			$content = get_post_field( 'post_content', $post_id );
+			$content_updated = $content;
 			
 			// Define content replacers -- $replacers holds callbacks to be applied to the content.
 			$replacers = [];
@@ -532,17 +520,53 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Run the replacers.
 			if ( ! empty( $replacers ) ) {
-				$html_doc = new HtmlDocument( $content );
+				$html_doc = new HtmlDocument( $content_updated );
 				// Run the replacers on the same HTMLDocument so we don't have to parse the content multiple times.
 				foreach ( $replacers as $replacer ) {
 					$replacer( $html_doc, $post_id );
 				}
-				$content = $html_doc->save();
+				$content_updated = $html_doc->save();
+			}
 
+			// Import galleries -- after replacers which replace images.
+			$gallery_images = $article['gallery'] ?? null;
+			if ( $gallery_images ) {
+				// Download the gallery images.
+				$this->cli_logger->info( sprintf( 'Downloading %d gallery images', count( $gallery_images ) ) );
+				$gallery_image_att_ids = [];
+				foreach ( $gallery_images as $gallery_image ) {
+					$gallery_image_att_id = Attachments::import_external_file( $gallery_image, null, null, null, null, $post_id, [], '' );
+					if ( is_wp_error( $gallery_image_att_id ) ) {
+						$this->cli_logger->error(
+							'ERROR: Failed to import gallery image.',
+							[
+								'error'         => $gallery_image_att_id,
+								'gallery_image' => $gallery_image,
+								'url'           => $original_url,
+								'post_id'       => $post_id,
+							] 
+						);
+						continue;
+					}
+
+					$gallery_image_att_ids[] = $gallery_image_att_id;
+				}
+				
+				// Append gallery block to post_content.
+				if ( ! empty( $gallery_image_att_ids ) ) {
+					$gallery_block = serialize_block(
+						$this->gutenberg_blocks->get_jetpack_slideshow( $gallery_image_att_ids )
+					);
+					$content_updated .= "\n\n" . $gallery_block;
+				}
+			}
+
+			// Update post content.
+			if ( $content !== $content_updated ) {
 				wp_update_post(
 					[
 						'ID'           => $post_id,
-						'post_content' => $content,
+						'post_content' => $content_updated,
 					]
 				);
 			}
@@ -951,7 +975,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 *     ?string @author_reason The reason for the action. If null, not special rule was applied and $article['author'] was used.
 	 * }
 	 */
-	private function get_author_name_based_on_custom_rules( array $article, string $publication ): int {
+	private function get_author_name_based_on_custom_rules( array $article, string $publication ): array {
 		
 		/**
 		 * BEJ only.
@@ -1116,6 +1140,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$debug = 1;
 			// TODO log.
 		}
+
+		return [
+			'author_name'   => $article['author'],
+			'author_reason' => null,
+		];
 	}
 
 	/**
