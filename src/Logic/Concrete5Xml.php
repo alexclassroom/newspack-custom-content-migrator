@@ -108,6 +108,7 @@ class Concrete5Xml {
 			'lead',
 			'description',
 			'content',
+			'byline',
 			'gallery',
 		];
 		
