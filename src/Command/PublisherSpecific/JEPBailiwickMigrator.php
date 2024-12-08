@@ -183,10 +183,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
-			self::get_command_closure( 'bw-helper-list-url-structure' ),
+			'newspack-content-migrator bw-list-redirects',
+			self::get_command_closure( 'cmd_list_necessary_redirect_rules' ),
 			[
-				'shortdesc' => 'Helper dev command. Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
+				'shortdesc' => 'Discovers and lists all required redirect rules. WP posts will have /{category}/{slug} URL structure. This command compares all original URLs to that, and says which minimal set of redirect rules needs to be created.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -205,10 +205,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator bw-helper-list-redirects',
-			self::get_command_closure( 'cmd_helper_list_necessary_redirect_rules' ),
+			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
+			self::get_command_closure( 'bw-helper-list-url-structure' ),
 			[
-				'shortdesc' => 'Helper dev command. Checks all articles and provides a compacted list of redirect rules to create.',
+				'shortdesc' => 'Helper dev command. Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -591,14 +591,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Used to check whether we can use their exact same URLs and save 36k redirects (just for Jersey).
-	 * Lists articles' URLs and their categories, to examine if we can reuse full URLs.
+	 * 
 	 *
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 * @return void
 	 */
-	public function cmd_helper_list_necessary_redirect_rules( array $pos_args, array $assoc_args ): void {
+	public function cmd_list_necessary_redirect_rules( array $pos_args, array $assoc_args ): void {
 		$dir      = $assoc_args['dir'] ?? null;
 		$xml_file = $assoc_args['xml-file'] ?? null;
 		if ( is_null( $dir ) && is_null( $xml_file ) ) {
