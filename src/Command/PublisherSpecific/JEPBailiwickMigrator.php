@@ -171,6 +171,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'Import articles from an XML file.',
 				'synopsis'  => [
 					$xml_file,
+					[
+						'type'        => 'assoc',
+						'name'        => 'sponsors-bylines-csv-file',
+						'description' => "CSV containing original article URL and the sponsor byline it should get. Expected header columns 'sponsor_byline','url'.",
+						'optional'    => true,
+					],
 					$refresh,
 					[
 						'type'        => 'assoc',
@@ -375,9 +381,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @throws Exception If things go wrong.
 	 */
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
-		$xml_file_path = $assoc_args['xml-file'];
-		$refresh       = $assoc_args['refresh-existing'] ?? false;
-		$publication   = $assoc_args['publication'];
+		$xml_file_path             = $assoc_args['xml-file'];
+		$sponsors_urls_bylines_csv = $assoc_args['sponsors-bylines-csv-file'] ?? null;
+		$refresh                   = $assoc_args['refresh-existing'] ?? false;
+		$publication               = $assoc_args['publication'];
 		if ( ! in_array( $publication, [ 'jersey', 'guernsey' ], true ) ) {
 			NMT::exit_with_message( 'Invalid publication. Allowed values are "jersey" or "guernsey"', [ $this->cli_logger ] );
 		}
@@ -393,6 +400,34 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		$file_logger = FileLog::get_logger( 'bw-article-import' );
 
+		// Get sponsors data -- keys are original URLs, values are bylines these articles should get.
+		$sponsors_urls_to_bylines = [];
+		if ( $sponsors_urls_bylines_csv ) {
+			$csv_file = fopen( $sponsors_urls_bylines_csv, 'r' );
+			if ( false === $csv_file ) {
+				NMT::exit_with_message( 'Failed to open CSV file', [ $this->cli_logger ] );
+			}
+			$header = fgetcsv( $csv_file );
+			if ( false === $header ) {
+				NMT::exit_with_message( 'Failed to read CSV header', [ $this->cli_logger ] );
+			}
+			// Get indexes of columns.
+			$byline_index = array_search( 'sponsor_byline', $header, true );
+			if ( false === $byline_index ) {
+				NMT::exit_with_message( 'Failed to find `sponsor_byline` column in CSV header', [ $this->cli_logger ] );
+			}
+			$url_index = array_search( 'url', $header, true );
+			if ( false === $url_index ) {
+				NMT::exit_with_message( 'Failed to find URL column in CSV header', [ $this->cli_logger ] );
+			}
+
+			// Get data.
+			while ( $row = fgetcsv( $csv_file ) ) {
+				$sponsors_urls_to_bylines[ $row[ $url_index ] ] = $row[ $byline_index ];
+			}
+			fclose( $csv_file );
+		}
+
 		$articles    = $xml_fetcher->get_articles();
 		$total_count = $xml_fetcher->get_count();
 		$counter     = 0;
@@ -400,6 +435,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			++$counter;
 			if ( 0 === $counter % 10 ) {
 				$this->cli_logger->info( sprintf( 'Processed %s articles', $counter ) );
+			}
+
+			// A couple of articles need not be imported, which is custom defined in their sponsors-bylines-csv-file.csv file.
+			if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) && ( '<POST CAN BE DELETED>' == $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
+				$this->cli_logger->notice(
+					'WARNING Skipping article because it is defined in sponsors-bylines-csv-file.csv to be deleted.',
+					[
+						'url' => $article['url'],
+					]
+				);
+				continue;
 			}
 
 			// New post data (or update if already imported).
@@ -440,7 +486,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$post['post_content'] = $article['description'] . $article['content'];
 
 			// Get author name based on custom reasons, and the reason (custom rule) why this author name was set.
-			$author_arr    = $this->get_author_name_based_on_custom_rules( $article, $publication );
+			$author_arr    = $this->get_author_name_based_on_custom_rules( $article, $publication, $sponsors_urls_to_bylines );
 			$author_name   = $author_arr['author_name'];
 			$author_reason = $author_arr['author_reason'] ?? null;
 			
@@ -503,7 +549,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			);
 			
 			// Custom updates to content.
-			$content = get_post_field( 'post_content', $post_id );
+			$content         = get_post_field( 'post_content', $post_id );
 			$content_updated = $content;
 			
 			// Define content replacers -- $replacers holds callbacks to be applied to the content.
@@ -554,7 +600,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				
 				// Append gallery block to post_content.
 				if ( ! empty( $gallery_image_att_ids ) ) {
-					$gallery_block = serialize_block(
+					$gallery_block    = serialize_block(
 						$this->gutenberg_blocks->get_jetpack_slideshow( $gallery_image_att_ids )
 					);
 					$content_updated .= "\n\n" . $gallery_block;
@@ -967,16 +1013,29 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Get author name based on custom rules.
 	 *
-	 * @param array  $article      Article XML data.
-	 * @param string $publication 'jersey' or 'guernsey'.
+	 * @param array  $article                  Article XML data.
+	 * @param string $publication              'jersey' or 'guernsey'.
+	 * @param array  $sponsors_urls_to_bylines Custom sponsors URLs to bylines mapping. Keys are URLs, values are bylines.
 	 *
 	 * @return array An array with two keys {
 	 *     string @author_name    The name of the author.
 	 *     ?string @author_reason The reason for the action. If null, not special rule was applied and $article['author'] was used.
 	 * }
 	 */
-	private function get_author_name_based_on_custom_rules( array $article, string $publication ): array {
+	private function get_author_name_based_on_custom_rules( array $article, string $publication, array $sponsors_urls_to_bylines ): array {
 		
+		/**
+		 * Sponsored Content.
+		 * Will also be imported as normal posts under the 'Sponsor Content' category.
+		 */
+		// Check if URL is in sponsors list, and assign it the custom byline.
+		if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
+			return [
+				'author_name'   => $sponsors_urls_to_bylines[ $article['url'] ],
+				'author_reason' => 'Custom Sponsor byline in CSV',
+			];
+		}
+
 		/**
 		 * BEJ only.
 		 */
@@ -997,7 +1056,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( 'Maddy Pereira' == $article['author'] ) {
 				return [
 					'author_name'   => 'Bailiwick Express News Team',
-					'author_reason' => 'Maddy Pereira is original author so setting Bailiwick Express News Team',
+					'author_reason' => 'Maddy Pereira is original author',
 				];
 			}
 			/**
@@ -1013,14 +1072,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		/**
 		 * "Jersey Heritage" author.
-		 * 
-		 * !! PROBLEM -- XML is missing headline image
 		 */
 		// Rule 1 -- if header image is present in content.
 		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
 			$parsed_url            = parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
 					'author_name'   => 'Jersey Heritage',
 					'author_reason' => 'Jersey Heritage header image in content',
@@ -1028,42 +1085,37 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 		}
 		
-		// Previously it was discussed whether articles predating 18 May 2022 should be attributed to Jersey Heritage, that has presently been decided against.
-		$article_predates_18_may_2022 = strtotime( $article['datePublic'] ) < strtotime( '2022-05-18' );
-
-		// Rule 2 -- if title contains 'LOOKING BACK:' and article pre-dates 18 May 2022.
+		// Rule 2 -- if title contains 'LOOKING BACK:'.
 		if ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'LOOKING BACK:' is in title and article pre-dates 18 May 2022",
+				'author_reason' => "'LOOKING BACK:' in title",
 			];
 		}
 
-		// Rule 3 -- if title contains 'What's your home's story?' and article pre-dates 18 May 2022.
+		// Rule 3 -- if title contains 'What's your home's story?'.
 		if ( false !== stripos( $article['title'], "What's your home's story?" ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'What's your home's story?' is in title and article pre-dates 18 May 2022",
+				'author_reason' => "'What's your home's story?' in title",
 			];
 		}
 
-		// Rule 4 -- if title contains 'What's your town's story?' and article pre-dates 18 May 2022.
+		// Rule 4 -- if title contains 'What's your town's story?'.
 		if ( false !== stripos( $article['title'], "What's your town's story?" ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'What's your town's story?' is in title and article pre-dates 18 May 2022",
+				'author_reason' => "'What's your town's story?' in title",
 			];
 		}
 
 		/**
 		 * "News Team" author.
-		 * 
-		 * !! PROBLEM -- XML is missing headline image
 		 */
 		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
 			$parsed_url            = parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
 					'author_name'   => 'Bailiwick Express News Team',
 					'author_reason' => 'News Team header image present in content',
@@ -1073,26 +1125,24 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		/**
 		 * Opinion author -- should use "Bailiwick Express Community" as the author.
-		 * 
-		 * !! PROBLEM -- XML is missing headline image
 		 */
 		foreach ( self::AUTHOR__OPINION__HEADER_IMAGES as $header_image ) {
 			$parsed_url            = parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['description'], $header_image_relative ) || str_contains( $article['content'], $header_image_relative ) ) {
+			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
 					'author_name'   => 'Bailiwick Express News Team',
 					'author_reason' => 'Opinion header image present in content',
 				];
 			}
 		}
-		// We might be able also determine Opinions by category, but need the Publisher's approval to use this criteria.
-		// if ( 'Opinion' == $article['category'] ) {
-		// return [
-		// 'author_name'   => 'Bailiwick Express News Team',
-		// 'author_reason' => 'Article is in Opinion category',
-		// ]
-		// }
+		// Additionally Publisher confirmed that all content in Opinion category can be assigned to 'Bailiwick Express News Team'.
+		if ( 'Opinion' == $article['category'] ) {
+			return [
+				'author_name'   => 'Bailiwick Express News Team',
+				'author_reason' => 'Article in Opinion category',
+			];
+		}
 
 		/**
 		 * Community author.
@@ -1100,25 +1150,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( 'Community' == $article['category'] ) {
 			return [
 				'author_name'   => 'Bailiwick Express Community',
-				'author_reason' => 'Article is in Community category',
+				'author_reason' => 'Article in Community category',
 			];
 		}
 		
-		/**
-		 * Sponsored Content.
-		 * Will also be imported as normal posts under the 'Sponsor Content' category.
-		 * 
-		 * !! PROBLEM -- waiting for their custom sheet,
-		 *               these articles will use different bylines.
-		 */
-		// We can't determine by category alone, will use different bylines.
-		// if ( 'Sponsored Content' == $article['category'] ) {
-		// return [
-		// 'author_name'   => 'Sponsored Content',
-		// 'author_reason' => 'Article is in Sponsored Content',
-		// ]
-		// }
-
 		// If author is empty.
 		if ( empty( $article['author'] ) ) {
 			return [
@@ -1133,10 +1168,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( 'James.Jeune' == $article['author'] ) {
 			return [
 				'author_name'   => 'James Jeune',
-				'author_reason' => null,
+				'author_reason' => 'Manually removed dot from author name',
 			];
-		} else {
+		} elseif ( false !== strpos( $article['author'], '.' ) ) {
 			// Debug, other authors contain a dot?
+			$this->cli_logger->info(
+				'WARNING: Author contains a dot',
+				[
+					'author' => $article['author'],
+					'url'    => $article['url'],
+				] 
+			);
 			$debug = 1;
 			// TODO log.
 		}
