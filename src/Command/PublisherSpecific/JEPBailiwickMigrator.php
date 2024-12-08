@@ -682,8 +682,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			return;
 		}
 
-		// CSV log.
 		// phpcs:disable
+		// CSV log.
 		// $logger_plainfile = PlainFileLog::get_logger( 'plainfile-demo2' );
 		// $logger_plainfile->info( 'url,category,datePublic' );
 		// $logger_plainfile->info( 'sdf' );
