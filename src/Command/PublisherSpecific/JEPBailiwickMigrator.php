@@ -39,19 +39,26 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Header images used to determine authors. Can be one or single such images, all either fully qualified URLs, or relative paths, or just file names.
+	 * Some examples
+	 * 		https://www.bailiwickexpress.com/files/2616/3638/1625/News-Team-By-Line.png
+	 * 		https://www.bailiwickexpress.com/files/5417/2546/0302/News-Team-By-Line.png
 	 */
 	const AUTHOR__NEWS_TEAM__HEADER_IMAGES       = [
-		// 'https://www.bailiwickexpress.com/files/2616/3638/1625/News-Team-By-Line.png',
-		// 'https://www.bailiwickexpress.com/files/5417/2546/0302/News-Team-By-Line.png',
 		'News-Team-By-Line.png',
 	];
+	/**
+	 * Some examples
+	 * 		https://www.bailiwickexpress.com/files/5216/8511/8070/jersey_heritage.png
+	 * 		https://www.bailiwickexpress.com/files/8216/5287/9043/jersey_heritage.png
+	 */
 	const AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES = [
-		// 'https://www.bailiwickexpress.com/files/5216/8511/8070/jersey_heritage.png',
-		// 'https://www.bailiwickexpress.com/files/8216/5287/9043/jersey_heritage.png',
 		'jersey_heritage.png',
 	];
+	/**
+	 * Some examples
+	 * 		https://www.bailiwickexpress.com/files/2516/7965/5634/Opinion-By-Line.jpg
+	 */
 	const AUTHOR__OPINION__HEADER_IMAGES         = [
-		// 'https://www.bailiwickexpress.com/files/2516/7965/5634/Opinion-By-Line.jpg',
 		'Opinion-By-Line.jpg',
 	];
 
@@ -403,7 +410,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// Get sponsors data -- keys are original URLs, values are bylines these articles should get.
 		$sponsors_urls_to_bylines = [];
 		if ( $sponsors_urls_bylines_csv ) {
-			$csv_file = fopen( $sponsors_urls_bylines_csv, 'r' );
+			$csv_file = fopen( $sponsors_urls_bylines_csv, 'r' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 			if ( false === $csv_file ) {
 				NMT::exit_with_message( 'Failed to open CSV file', [ $this->cli_logger ] );
 			}
@@ -763,9 +770,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'category' => $article['category'],
 					'url'      => $url,
 				];
-
-				// $this->cli_logger->error( 'ERROR: URL has more than 2 parts', [ 'xml_file' => $xml_file, 'category' => $article['category'], 'url' => $url ] );
-				// $logger_plainfile->info( sprintf( '%s,%s,%s', $article['url'], $article['category'], $article['datePublic'] ) );
 			}
 		}
 
@@ -1077,7 +1081,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 */
 		// Rule 1 -- if header image is present in content.
 		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = parse_url( $header_image );
+			$parsed_url            = wp_parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
@@ -1115,7 +1119,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 * "News Team" author.
 		 */
 		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = parse_url( $header_image );
+			$parsed_url            = wp_parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
@@ -1129,7 +1133,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 * Opinion author -- should use "Bailiwick Express Community" as the author.
 		 */
 		foreach ( self::AUTHOR__OPINION__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = parse_url( $header_image );
+			$parsed_url            = wp_parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
 			if ( str_contains( $article['byline'], $header_image_relative ) ) {
 				return [
