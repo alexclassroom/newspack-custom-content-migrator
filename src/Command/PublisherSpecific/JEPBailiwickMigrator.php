@@ -20,9 +20,11 @@ use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
+use Newspack\MigrationTools\Util\Log\PlainFileLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\Concrete5Xml;
 use Psr\Log\LoggerInterface;
+use Bramus\Monolog\Formatter\ColoredLineFormatter;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_Error;
@@ -85,7 +87,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->cli_logger       = CliLog::get_logger( 'bw' );
+		$this->cli_logger       = CliLog::get_logger( 'bw', new ColoredLineFormatter( null, "%level_name%: %message% %context%\n", null, true ) );
 		$this->file_logger      = FileLog::get_logger( 'bw' );
 		$this->taxonomy         = new Taxonomy();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
@@ -184,7 +186,29 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
 			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
 			[
-				'shortdesc' => 'Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
+				'shortdesc' => 'Helper dev command. Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dir',
+						'description' => 'Will scan all XML files in this dir.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'xml-file',
+						'description' => 'Path to a single XML file.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-helper-list-url-structure',
+			self::get_command_closure( 'cmd_helper_list_url_structure' ),
+			[
+				'shortdesc' => 'Helper dev command. To check whether we can use their exact same URLs and save 36k redirects (just for Jersey). Lists URLs and categories.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -259,7 +283,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			);
 
 			// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.wp_remote_get_wp_remote_get, WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- all good comes to those that wait.
-			$response = wp_remote_get( $url, [ 'timeout' => 10 ] );
+			$response = wp_remote_get( $url, [ 'timeout' => 20 ] );
 
 			if ( is_wp_error( $response ) ) {
 				NMT::exit_with_message( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
@@ -567,6 +591,83 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Used to check whether we can use their exact same URLs and save 36k redirects (just for Jersey).
+	 * Lists articles' URLs and their categories, to examine if we can reuse full URLs.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_helper_list_url_structure( array $pos_args, array $assoc_args ): void {
+		$dir      = $assoc_args['dir'] ?? null;
+		$xml_file = $assoc_args['xml-file'] ?? null;
+		if ( is_null( $dir ) && is_null( $xml_file ) ) {
+			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			return;
+		}
+
+		// CSV log.
+		// $logger_plainfile = PlainFileLog::get_logger( 'plainfile-demo2' );
+		// $logger_plainfile->info( 'url,category,datePublic' );
+		// $logger_plainfile->info( 'sdf' );
+
+		// Get .xml files.
+		if ( is_null( $dir ) ) {
+			$xml_files = [ $xml_file ];
+		} else {
+			glob( "$dir/*.xml" );
+			if ( empty( $xml_files ) ) {
+				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				return;
+			}
+		}
+
+		// Go through files.
+		$total_count = 0;
+		foreach ( $xml_files as $xml_file ) {
+			$xml_fetcher = null;
+			try {
+				$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file ] );
+				$xml_fetcher = new Concrete5Xml( $xml_file );
+			} catch ( Exception $o_0 ) {
+				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+			}
+	
+			// Go through articles in a file.
+			$articles    = $xml_fetcher->get_articles();
+			$total_count = $xml_fetcher->get_count();
+			$counter     = 0;
+			foreach ( $articles as $article ) {
+				++$counter;
+	
+				// example URL 'https://www.bailiwickexpress.com/jsy/business/crestbridge-collects-weathbriefing-accolade'.
+				$url = $article['url'];
+				// Example category 'Business'.
+				$article['category'];
+
+				// By excluding the first part of the URL 'https://www.bailiwickexpress.com/jsy/', check if there's just two other remaining URL segments -- the lowercase $category followed by a single slug.
+				$parts = explode( '/', str_replace( 'https://www.bailiwickexpress.com/jsy/', '', $url ) );
+				if ( 2 !== count( $parts ) ) {
+					$this->cli_logger->error( sprintf( 'ERROR: URL has more than 2 parts: %s', $url ) );
+				}
+				// Check if 1st part is the category in lowercase.
+				if ( strtolower( $article['category'] ) !== $parts[0] ) {
+					$this->cli_logger->error( sprintf( 'ERROR: Category does not match URL: %s', $url ) );
+				}
+
+				$d=1;
+				
+				// $logger_plainfile->info( sprintf( '%s,%s,%s', $article['url'], $article['category'], $article['datePublic'] ) );
+			}
+			
+		}
+
+		$this->cli_logger->error( sprintf( 'ERROR: Category does not match URL: %s', $url ) );
+
+		$this->cli_logger->info( sprintf( 'Done.' ) );
+	}
+
+	/**
 	 * Replace all h1 tags with h2 tags.
 	 *
 	 * @param HtmlDocument $html_doc The HTML document to replace in.
@@ -859,9 +960,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 		}
 		
-		// Rule 2 -- if title contains 'LOOKING BACK:' and article pre-dates 18 May 2022.
+		// Previously it was discussed whether articles predating 18 May 2022 should be attributed to Jersey Heritage, that has presently been decided against.
 		$article_predates_18_may_2022 = strtotime( $article['datePublic'] ) < strtotime( '2022-05-18' );
-		if ( ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) && $article_predates_18_may_2022 ) {
+
+		// Rule 2 -- if title contains 'LOOKING BACK:' and article pre-dates 18 May 2022.
+		if ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
 				'author_reason' => "'LOOKING BACK:' is in title and article pre-dates 18 May 2022",
@@ -869,7 +972,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		// Rule 3 -- if title contains 'What's your home's story?' and article pre-dates 18 May 2022.
-		if ( ( false !== stripos( $article['title'], "What's your home's story?" ) ) && $article_predates_18_may_2022 ) {
+		if ( false !== stripos( $article['title'], "What's your home's story?" ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
 				'author_reason' => "'What's your home's story?' is in title and article pre-dates 18 May 2022",
@@ -877,7 +980,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		// Rule 4 -- if title contains 'What's your town's story?' and article pre-dates 18 May 2022.
-		if ( ( false !== stripos( $article['title'], "What's your town's story?" ) ) && $article_predates_18_may_2022 ) {
+		if ( false !== stripos( $article['title'], "What's your town's story?" ) ) {
 			return [
 				'author_name'   => 'Jersey Heritage',
 				'author_reason' => "'What's your town's story?' is in title and article pre-dates 18 May 2022",
