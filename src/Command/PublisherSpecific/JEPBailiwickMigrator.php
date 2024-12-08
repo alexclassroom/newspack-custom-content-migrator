@@ -184,7 +184,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
-			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
+			self::get_command_closure( 'bw-helper-list-url-structure' ),
 			[
 				'shortdesc' => 'Helper dev command. Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
 				'synopsis'  => [
@@ -205,10 +205,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator bw-helper-list-url-structure',
-			self::get_command_closure( 'cmd_helper_list_url_structure' ),
+			'newspack-content-migrator bw-helper-list-redirects',
+			self::get_command_closure( 'cmd_helper_list_necessary_redirect_rules' ),
 			[
-				'shortdesc' => 'Helper dev command. To check whether we can use their exact same URLs and save 36k redirects (just for Jersey). Lists URLs and categories.',
+				'shortdesc' => 'Helper dev command. Checks all articles and provides a compacted list of redirect rules to create.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -572,7 +572,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( is_null( $dir ) ) {
 			$files = [ $xml_file ];
 		} else {
-			glob( "$dir/*.xml" );
+			$files = glob( "$dir/*.xml" );
 			if ( empty( $files ) ) {
 				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
@@ -598,7 +598,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 * @return void
 	 */
-	public function cmd_helper_list_url_structure( array $pos_args, array $assoc_args ): void {
+	public function cmd_helper_list_necessary_redirect_rules( array $pos_args, array $assoc_args ): void {
 		$dir      = $assoc_args['dir'] ?? null;
 		$xml_file = $assoc_args['xml-file'] ?? null;
 		if ( is_null( $dir ) && is_null( $xml_file ) ) {
@@ -615,12 +615,16 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( is_null( $dir ) ) {
 			$xml_files = [ $xml_file ];
 		} else {
-			glob( "$dir/*.xml" );
+			$xml_files = glob( "$dir/*.xml" );
 			if ( empty( $xml_files ) ) {
 				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
 			}
 		}
+
+		// Create redirect rules and exceptions catalogue.
+		$redirect_rules      = [];
+		$redirect_exceptions = [];
 
 		// Go through files.
 		$total_count = 0;
@@ -639,32 +643,73 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$counter     = 0;
 			foreach ( $articles as $article ) {
 				++$counter;
+				if ( empty( $article['url'] ) && empty( $article['title'] ) ) {
+					continue;
+				}
 	
 				// example URL 'https://www.bailiwickexpress.com/jsy/business/crestbridge-collects-weathbriefing-accolade'.
 				$url = $article['url'];
-				// Example category 'Business'.
-				$article['category'];
 
-				// By excluding the first part of the URL 'https://www.bailiwickexpress.com/jsy/', check if there's just two other remaining URL segments -- the lowercase $category followed by a single slug.
-				$parts = explode( '/', str_replace( 'https://www.bailiwickexpress.com/jsy/', '', $url ) );
-				if ( 2 !== count( $parts ) ) {
-					$this->cli_logger->error( sprintf( 'ERROR: URL has more than 2 parts: %s', $url ) );
-				}
-				// Check if 1st part is the category in lowercase.
-				if ( strtolower( $article['category'] ) !== $parts[0] ) {
-					$this->cli_logger->error( sprintf( 'ERROR: Category does not match URL: %s', $url ) );
-				}
+				// Get the path part of the URL.
+				$url_path      = str_replace( 'https://www.bailiwickexpress.com/', '', $url );
+				$url_path      = rtrim( $url_path, '/' );
+				$exploded_path = explode( '/', $url_path );
 
-				$d=1;
+				// The last part of the URL is the slug 👍.
 				
+				// Get category slug.
+				$category_slugs_specific = [
+					'COVID-19 Virus Notices' => 'corona-updates',
+				];
+				if ( array_key_exists( $article['category'], $category_slugs_specific ) ) {
+					$category_slug = $category_slugs_specific[ $article['category'] ];
+				} else {
+					$category_slug = str_replace( ' ', '-', strtolower( $article['category'] ) );
+				}
+
+				// Check if one before the last part is lowercase category.
+				$one_before_slug_is_category = $category_slug == $exploded_path[ count( $exploded_path ) - 2 ];
+
+				// If there's only two parts in the URL, they're {category}/{slug} so there's no need for a redirect.
+				if ( 2 === count( $exploded_path ) ) {
+					continue;
+				}
+
+				// Track exceptions for category slugs.
+				if ( false === $one_before_slug_is_category ) {
+					$redirect_exceptions[] = [
+						'category' => $article['category'],
+						'url'      => $url,
+					];
+					continue;
+				}
+				
+				// Implode all $exploded_path except the last two {category}/{slug}.
+				$imploded_path = implode( '/', array_slice( $exploded_path, 0, count( $exploded_path ) - 2 ) );
+
+				// Track redirect rules -- array key -- with examples -- values.
+				$redirect_rules[ $imploded_path ][] = [
+					'category' => $article['category'],
+					'url'      => $url,
+				];
+
+				// $this->cli_logger->error( 'ERROR: URL has more than 2 parts', [ 'xml_file' => $xml_file, 'category' => $article['category'], 'url' => $url ] );
 				// $logger_plainfile->info( sprintf( '%s,%s,%s', $article['url'], $article['category'], $article['datePublic'] ) );
 			}
-			
 		}
 
-		$this->cli_logger->error( sprintf( 'ERROR: Category does not match URL: %s', $url ) );
+		$this->cli_logger->info( sprintf( '---' ) );
 
-		$this->cli_logger->info( sprintf( 'Done.' ) );
+		// For further debugging pruposes, see $redirect_rules array values for the URLs covered by its key/rule.
+		$this->cli_logger->info( sprintf( '%d general regex rules to create:', count( $redirect_rules ) ) ); 
+		foreach ( array_keys( $redirect_rules ) as $redirect_path ) {
+			$this->cli_logger->info( sprintf( "- FROM '/%s/*' TO '/*'", $redirect_path ) ); 
+		}
+		
+		$this->cli_logger->info( sprintf( '%d specific regex rules to create:', count( $redirect_exceptions ) ) ); 
+		foreach ( $redirect_exceptions as $redirect_exception ) {
+			$this->cli_logger->info( sprintf( "- CATEGORY:'%s' URL:'%s'", $redirect_exception['category'], $redirect_exception['url'] ) ); 
+		}
 	}
 
 	/**
