@@ -197,6 +197,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						// Make it mandatory so as not to forget to use it.
 						'optional'    => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'header-images-bylines-csv-file',
+						'description' => "CSV containing original article URL and the sponsor byline it should get. Expected header columns 'author_name','byline_image_url'.",
+						// Make it mandatory so as not to forget to use it.
+						'optional'    => false,
+					],
 					$refresh,
 					[
 						'type'        => 'assoc',
@@ -232,7 +239,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
-			self::get_command_closure( 'bw-helper-list-url-structure' ),
+			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
 			[
 				'shortdesc' => 'Helper dev command. Performs an XML syntax check by running a simple counts of all articles in all the XMLs in a dir, or in a specific XML. If errors exist, they will be displayed in output.',
 				'synopsis'  => [
@@ -403,6 +410,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
 		$xml_file_path             = $assoc_args['xml-file'];
 		$sponsors_urls_bylines_csv = $assoc_args['sponsors-bylines-csv-file'] ?? null;
+		$header_images_bylines_csv = $assoc_args['header-images-bylines-csv-file'] ?? null;
 		$refresh                   = $assoc_args['refresh-existing'] ?? false;
 		$brand_name                = $assoc_args['brand-name'];
 		$brand_id                  = $this->multibranded->get_brand_id_from_brand_name( $brand_name );
@@ -421,7 +429,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
 		$file_logger = PlainFileLog::get_logger( 'bw-article-import' );
 		$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
-		$sponsors_urls_to_bylines = $this->get_sponsors_urls_to_bylines( $sponsors_urls_bylines_csv );
+		// Get CSV data into 2D arrays.
+		$sponsors_urls_to_bylines     = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
+		$header_image_urls_to_bylines = $this->get_csv_data_to_2d_array( $header_images_bylines_csv, 'byline_image_url', 'author_name' );
 
 		// Load XML file.
 		$xml_fetcher = null;
@@ -626,8 +636,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		$timestamp = gmdate( 'Y-m-d H:i:s' );
 		$this->cli_logger->info( sprintf( '[%s] Done %s', $timestamp, $xml_file_path ) );
-		
-		$this->cli_logger->warning( 'Make sure to set the permalink structure back to "Post name" after this import.' );
 	}
 
 	/**
@@ -641,42 +649,42 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get sponsors bylines from a custom CSV file.
-	 * CSV contains original article URL and the sponsor byline.
+	 * Takes a CSV file and produces a two dimensional array of key-value pairs from the CSV file.
+	 * The CSV value to be used as array key is specified the $column_for_key, and the CSV value to be used as array value is specified the $column_for_value.
 	 * 
-	 * @param string $sponsors_urls_bylines_csv Path to the CSV file.
-	 * @return array Array of sponsors URLs to bylines.
+	 * @param string $csv_filename     Path to the CSV file.
+	 * @param string $column_for_key   CSV data column name to be used as array key.
+	 * @param string $column_for_value CSV data column name to be used as array value.
+	 * 
+	 * @return array Array of key-value pairs from CSV file.
 	 */
-	private function get_sponsors_urls_to_bylines( string $sponsors_urls_bylines_csv ) {
-		$sponsors_urls_to_bylines = [];
-		if ( $sponsors_urls_bylines_csv ) {
-			$csv_file = fopen( $sponsors_urls_bylines_csv, 'r' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
-			if ( false === $csv_file ) {
-				NMT::exit_with_message( 'Failed to open CSV file', [ $this->cli_logger ] );
+	private function get_csv_data_to_2d_array( string $csv_filename, string $column_for_key, string $column_for_value ) {
+		$csv_data = [];
+		
+		$row    = 0;
+		$handle = fopen( $csv_filename, 'r' );
+		if ( false !== $handle ) {
+			while ( ( $data = fgetcsv( $handle, 1000, ',' ) ) !== false ) {
+				// Get indexes of columns from header row.
+				if ( 0 == $row ) {
+					$key_index = array_search( $column_for_key, $data );
+					if ( false === $key_index ) {
+						NMT::exit_with_message( sprintf( 'Failed to find column for array key `%s` in header of CSV file %s', $column_for_key, $csv_filename ), [ $this->cli_logger ] );
+					}
+					$value_index = array_search( $column_for_value, $data );
+					if ( false === $value_index ) {
+						NMT::exit_with_message( sprintf( 'Failed to find column for array value `%s` in header of CSV file %s', $column_for_value, $csv_filename ), [ $this->cli_logger ] );
+					}
+				} else {
+					// Combine data into key-value pairs.
+					$csv_data[ $data[ $key_index ] ] = $data[ $value_index ];
+				}
+				++$row;
 			}
-			$header = fgetcsv( $csv_file );
-			if ( false === $header ) {
-				NMT::exit_with_message( 'Failed to read CSV header', [ $this->cli_logger ] );
-			}
-			// Get indexes of columns.
-			$byline_index = array_search( 'sponsor_byline', $header, true );
-			if ( false === $byline_index ) {
-				NMT::exit_with_message( 'Failed to find `sponsor_byline` column in CSV header', [ $this->cli_logger ] );
-			}
-			$url_index = array_search( 'url', $header, true );
-			if ( false === $url_index ) {
-				NMT::exit_with_message( 'Failed to find URL column in CSV header', [ $this->cli_logger ] );
-			}
-
-			// Get data.
-			while ( $row = fgetcsv( $csv_file ) ) {
-				// Right strip possible trailing '/' from URL.
-				$sponsors_urls_to_bylines[ rtrim( $row[ $url_index ], '/' ) ] = $row[ $byline_index ];
-			}
-			fclose( $csv_file );
+			fclose( $handle );
 		}
 
-		return $sponsors_urls_to_bylines;
+		return $csv_data;
 	}
 
 	/**
