@@ -42,31 +42,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	const META_DEFAULT_AUTHOR_RULE = 'newspackmigration_default_author_rule';
 
 	/**
-	 * Header images used to determine authors. Can be one or single such images, all either fully qualified URLs, or relative paths, or just file names.
-	 * Some examples
-	 *      https://www.bailiwickexpress.com/files/2616/3638/1625/News-Team-By-Line.png
-	 *      https://www.bailiwickexpress.com/files/5417/2546/0302/News-Team-By-Line.png
-	 */
-	const AUTHOR__NEWS_TEAM__HEADER_IMAGES = [
-		'News-Team-By-Line.png',
-	];
-	/**
-	 * Some examples
-	 *      https://www.bailiwickexpress.com/files/5216/8511/8070/jersey_heritage.png
-	 *      https://www.bailiwickexpress.com/files/8216/5287/9043/jersey_heritage.png
-	 */
-	const AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES = [
-		'jersey_heritage.png',
-	];
-	/**
-	 * Some examples
-	 *      https://www.bailiwickexpress.com/files/2516/7965/5634/Opinion-By-Line.jpg
-	 */
-	const AUTHOR__OPINION__HEADER_IMAGES = [
-		'Opinion-By-Line.jpg',
-	];
-
-	/**
 	 * Logger for CLI output.
 	 *
 	 * @var LoggerInterface Logger instance.
@@ -499,7 +474,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$post['post_content'] = $article['description'] . $article['content'];
 
 			// Get author name based on custom rules, and the rule itself (for easier QA).
-			$author_arr  = $this->get_author_name_based_on_custom_rules( $article, $brand_name, $sponsors_urls_to_bylines );
+			$author_arr  = $this->get_author_name_based_on_custom_rules( $article, $brand_name, $sponsors_urls_to_bylines, $header_image_urls_to_bylines );
 			$author_name = $author_arr['author_name'];
 			$author_rule = $author_arr['author_rule'] ?? null;
 			
@@ -662,7 +637,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$csv_data = [];
 		
 		$row    = 0;
-		$handle = fopen( $csv_filename, 'r' );
+		$handle = fopen( $csv_filename, 'r' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
 		if ( false !== $handle ) {
 			while ( ( $data = fgetcsv( $handle, 1000, ',' ) ) !== false ) {
 				// Get indexes of columns from header row.
@@ -1070,16 +1045,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Get author name based on custom rules.
 	 *
-	 * @param array  $article                  Article XML data.
-	 * @param string $brand_name               Brand name.
-	 * @param array  $sponsors_urls_to_bylines Custom sponsors URLs to bylines mapping. Keys are URLs, values are bylines.
+	 * @param array  $article                      Article XML data.
+	 * @param string $brand_name                   Brand name.
+	 * @param array  $sponsors_urls_to_bylines     Custom sponsors URLs to bylines mapping. Keys are URLs, values are bylines.
+	 * @param array  $header_image_urls_to_bylines Custom header author image URLs to bylines mapping. Keys are URLs, values are bylines.
 	 *
 	 * @return array An array with two keys {
 	 *     string @author_name  The name of the author.
 	 *     ?string @author_rule The rule for byline selection. If null, not special rule was applied and $article['author'] was used.
 	 * }
 	 */
-	private function get_author_name_based_on_custom_rules( array $article, string $brand_name, array $sponsors_urls_to_bylines ): array {
+	private function get_author_name_based_on_custom_rules( array $article, string $brand_name, array $sponsors_urls_to_bylines, array $header_image_urls_to_bylines ): array {
 		
 		/**
 		 * Sponsored Content.
@@ -1154,46 +1130,25 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			];
 		}
 
-		// Rule 4 -- if header image is present in content.
-		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = wp_parse_url( $header_image );
-			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['byline'], $header_image_relative ) ) {
-				return [
-					'author_name' => 'Jersey Heritage',
-					'author_rule' => 'Jersey Heritage header image in content',
-				];
-			}
+		/**
+		 * If <byline> author header image URL is present in Publisher's CSV, use that byline.
+		 * 
+		 * For posterity and record, before the publisher shared with us the CSV ($header_image_urls_to_bylines)
+		 * containing all header byline image fully qualified URLs and their corresponding bylines,
+		 * our code used to match the following image filenames to bylines:
+		 *      - 'jersey_heritage.png' => 'Jersey Heritage',
+		 *      - 'News-Team-By-Line.png' => 'Bailiwick Express News Team',
+		 *      - 'News-Team-By-Line.png' => 'Bailiwick Express News Team'.
+		 */
+		$author_name = $header_image_urls_to_bylines[ $article['byline'] ] ?? null;
+		if ( $author_name ) {
+			return [
+				'author_name' => $author_name,
+				'author_rule' => sprintf( "Byline image from CSV -- URL':%s' byline:'%s'", $article['byline'], $header_image_urls_to_bylines[ $article['byline'] ] ),
+			];
 		}
 
-		/**
-		 * "News Team" author.
-		 */
-		foreach ( self::AUTHOR__NEWS_TEAM__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = wp_parse_url( $header_image );
-			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['byline'], $header_image_relative ) ) {
-				return [
-					'author_name' => 'Bailiwick Express News Team',
-					'author_rule' => 'News Team header image present in content',
-				];
-			}
-		}
-
-		/**
-		 * Opinion author -- should use "Bailiwick Express Community" as the author.
-		 */
-		foreach ( self::AUTHOR__OPINION__HEADER_IMAGES as $header_image ) {
-			$parsed_url            = wp_parse_url( $header_image );
-			$header_image_relative = $parsed_url['path'];
-			if ( str_contains( $article['byline'], $header_image_relative ) ) {
-				return [
-					'author_name' => 'Bailiwick Express News Team',
-					'author_rule' => 'Opinion header image present in content',
-				];
-			}
-		}
-		// Additionally Publisher confirmed that all content in Opinion category can be assigned to 'Bailiwick Express News Team'.
+		// Additionally confirmed that all content in Opinion category can be assigned to 'Bailiwick Express News Team'.
 		if ( 'Opinion' == $article['category'] ) {
 			return [
 				'author_name' => 'Bailiwick Express News Team',
