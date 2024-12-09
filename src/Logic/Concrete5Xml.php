@@ -117,8 +117,10 @@ class Concrete5Xml {
 			if ( 'gallery' === $field ) {
 				// For gallery, convert <image> nodes to array.
 				$gallery = [];
-				foreach ( $article->gallery->image as $image ) {
-					$gallery[] = (string) $image;
+				if ( count( $article->gallery ) > 0 ) {
+					foreach ( $article->gallery->image as $image ) {
+						$gallery[] = (string) $image;
+					}
 				}
 				$sanitized_article[ $field ] = $gallery;
 				continue;

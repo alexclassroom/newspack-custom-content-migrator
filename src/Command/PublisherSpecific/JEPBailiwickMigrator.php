@@ -182,7 +182,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'sponsors-bylines-csv-file',
 						'description' => "CSV containing original article URL and the sponsor byline it should get. Expected header columns 'sponsor_byline','url'.",
-						'optional'    => true,
+						// Make it mandatory so as not to forget to use it.
+						'optional'    => false,
 					],
 					$refresh,
 					[
@@ -430,7 +431,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Get data.
 			while ( $row = fgetcsv( $csv_file ) ) {
-				$sponsors_urls_to_bylines[ $row[ $url_index ] ] = $row[ $byline_index ];
+				// Right strip possible trailing '/' from URL.
+				$sponsors_urls_to_bylines[ rtrim( $row[ $url_index ], '/' ) ] = $row[ $byline_index ];
 			}
 			fclose( $csv_file );
 		}
@@ -498,7 +500,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$author_reason = $author_arr['author_reason'] ?? null;
 			
 			// Set author.
-			$post['post_author'] = $this->get_user_id( $author_name );
+			$user_id             = $this->get_user_id( $author_name );
+			$post['post_author'] = $user_id;
 
 			// Set categories.
 			$category_name = $article['category'];
@@ -1035,7 +1038,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 * Will also be imported as normal posts under the 'Sponsor Content' category.
 		 */
 		// Check if URL is in sponsors list, and assign it the custom byline.
-		if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
+		if ( isset( $sponsors_urls_to_bylines[ rtrim( $article['url'], '/' ) ] ) ) {
 			return [
 				'author_name'   => $sponsors_urls_to_bylines[ $article['url'] ],
 				'author_reason' => 'Custom Sponsor byline in CSV',
@@ -1079,7 +1082,31 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		/**
 		 * "Jersey Heritage" author.
 		 */
-		// Rule 1 -- if header image is present in content.
+		// Rule 1 -- if title contains 'LOOKING BACK:'.
+		if ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) {
+			return [
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'LOOKING BACK:' in title",
+			];
+		}
+
+		// Rule 2 -- if title contains 'What's your home's story?'.
+		if ( false !== stripos( $article['title'], "What's your home's story?" ) ) {
+			return [
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'What's your home's story?' in title",
+			];
+		}
+
+		// Rule 3 -- if title contains 'What's your town's story?'.
+		if ( false !== stripos( $article['title'], "What's your town's story?" ) ) {
+			return [
+				'author_name'   => 'Jersey Heritage',
+				'author_reason' => "'What's your town's story?' in title",
+			];
+		}
+
+		// Rule 4 -- if header image is present in content.
 		foreach ( self::AUTHOR__JERSEY_HERITAGE__HEADER_IMAGES as $header_image ) {
 			$parsed_url            = wp_parse_url( $header_image );
 			$header_image_relative = $parsed_url['path'];
@@ -1089,30 +1116,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'author_reason' => 'Jersey Heritage header image in content',
 				];
 			}
-		}
-		
-		// Rule 2 -- if title contains 'LOOKING BACK:'.
-		if ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) {
-			return [
-				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'LOOKING BACK:' in title",
-			];
-		}
-
-		// Rule 3 -- if title contains 'What's your home's story?'.
-		if ( false !== stripos( $article['title'], "What's your home's story?" ) ) {
-			return [
-				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'What's your home's story?' in title",
-			];
-		}
-
-		// Rule 4 -- if title contains 'What's your town's story?'.
-		if ( false !== stripos( $article['title'], "What's your town's story?" ) ) {
-			return [
-				'author_name'   => 'Jersey Heritage',
-				'author_reason' => "'What's your town's story?' in title",
-			];
 		}
 
 		/**
