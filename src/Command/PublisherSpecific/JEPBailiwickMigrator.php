@@ -37,9 +37,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	const BRAND_NAME_BAILIWICK_JERSEY   = 'Bailiwick Express News Jersey';
 	const BRAND_NAME_BAILIWICK_GUERNSEY = 'Bailiwick Express News Guernsey';
 
-	const META_ORIGINAL_URL        = 'newspackmigration_original_url';
-	const META_ORIGINAL_AUTHOR     = 'newspackmigration_original_author';
-	const META_DEFAULT_AUTHOR_RULE = 'newspackmigration_default_author_rule';
+	const META_ORIGINAL_URL         = 'newspackmigration_original_url';
+	const META_ORIGINAL_AUTHOR      = 'newspackmigration_original_author';
+	const META_ORIGINAL_BYLINE_NODE = 'newspackmigration_original_byline_node';
+	const META_DEFAULT_AUTHOR_RULE  = 'newspackmigration_default_author_rule';
 
 	/**
 	 * Logger for CLI output.
@@ -508,6 +509,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$post['meta_input'][ self::META_ORIGINAL_AUTHOR ] = $article['author'];
 			if ( $author_rule ) {
 				$post['meta_input'][ self::META_DEFAULT_AUTHOR_RULE ] = $author_rule;
+			}
+			if ( isset( $article['byline'] ) && ! empty( $article['byline'] ) ) {
+				$post['meta_input'][ self::META_ORIGINAL_BYLINE_NODE ] = $article['byline'];
 			}
 
 			// Insert or update post if it already exists.
@@ -1065,7 +1069,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( isset( $sponsors_urls_to_bylines[ rtrim( $article['url'], '/' ) ] ) ) {
 			return [
 				'author_name' => $sponsors_urls_to_bylines[ $article['url'] ],
-				'author_rule' => 'Custom Sponsor byline in CSV',
+				'author_rule' => sprintf( "Custom Sponsor byline from CSV -- URL':%s' byline:'%s'", $article['url'], $sponsors_urls_to_bylines[ $article['url'] ] ),
 			];
 		}
 
@@ -1079,7 +1083,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( false !== stripos( $article['title'], 'the latest in petty debts' ) ) {
 				return [
 					'author_name' => 'Bailiwick Express News Team',
-					'author_rule' => "'The latest in Petty Debts' in title",
+					'author_rule' => "'The latest in Petty Debts' in title -- byline:'Bailiwick Express News Team'",
 				];
 			}
 			/**
@@ -1089,7 +1093,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( 'Maddy Pereira' == $article['author'] ) {
 				return [
 					'author_name' => 'Bailiwick Express News Team',
-					'author_rule' => 'Maddy Pereira is original author',
+					'author_rule' => "Maddy Pereira is author -- byline:'Bailiwick Express News Team'",
 				];
 			}
 			/**
@@ -1098,7 +1102,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( false !== stripos( $article['title'], 'the latest property sales' ) ) {
 				return [
 					'author_name' => 'Bailiwick Express News Team',
-					'author_rule' => "'The latest property sales' in title",
+					'author_rule' => "'The latest property sales' in title -- byline:'Bailiwick Express News Team'",
 				];
 			}
 		}
@@ -1110,7 +1114,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( false !== stripos( $article['title'], 'LOOKING BACK:' ) ) {
 			return [
 				'author_name' => 'Jersey Heritage',
-				'author_rule' => "'LOOKING BACK:' in title",
+				'author_rule' => "'LOOKING BACK:' in title -- byline:'Jersey Heritage'",
 			];
 		}
 
@@ -1118,7 +1122,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( false !== stripos( $article['title'], "What's your home's story?" ) ) {
 			return [
 				'author_name' => 'Jersey Heritage',
-				'author_rule' => "'What's your home's story?' in title",
+				'author_rule' => "'What's your home's story?' in title -- byline:'Jersey Heritage'",
 			];
 		}
 
@@ -1126,7 +1130,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( false !== stripos( $article['title'], "What's your town's story?" ) ) {
 			return [
 				'author_name' => 'Jersey Heritage',
-				'author_rule' => "'What's your town's story?' in title",
+				'author_rule' => "'What's your town's story?' in title -- byline:'Jersey Heritage'",
 			];
 		}
 
@@ -1152,7 +1156,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( 'Opinion' == $article['category'] ) {
 			return [
 				'author_name' => 'Bailiwick Express News Team',
-				'author_rule' => 'Article in Opinion category',
+				'author_rule' => "Article in Opinion category -- byline:'Bailiwick Express News Team'",
 			];
 		}
 
@@ -1162,7 +1166,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( 'Community' == $article['category'] ) {
 			return [
 				'author_name' => 'Bailiwick Express Community',
-				'author_rule' => 'Article in Community category',
+				'author_rule' => "Article in Community category -- byline:'Bailiwick Express Community'",
 			];
 		}
 		
@@ -1170,7 +1174,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( empty( $article['author'] ) ) {
 			return [
 				'author_name' => 'Bailiwick Express News Team',
-				'author_rule' => 'Article author is empty',
+				'author_rule' => "Article author is empty -- byline:'Bailiwick Express News Team'",
 			];
 		}
 
@@ -1195,7 +1199,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		return [
 			'author_name' => $article['author'],
-			'author_rule' => null,
+			'author_rule' => 'Article author set from XML <author> node',
 		];
 	}
 
