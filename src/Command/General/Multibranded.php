@@ -4,18 +4,24 @@
  *
  * Methods for dealing with multi-branded functionality .
  * 
- * @package NewspackCustomContentMigrator
+ * @package NewspackCustomContentMigrator.
  */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
 use UnexpectedValueException;
+use WP_Term;
+use WP_CLI;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\PlainFileLog;
 use Bramus\Monolog\Formatter\ColoredLineFormatter;
 
-class Multibranded implements WpCliCommandInterface {
+class Multibranded implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	/**
 	 * CLI logger.
@@ -34,7 +40,7 @@ class Multibranded implements WpCliCommandInterface {
 	/**
 	 * Constructor.
 	 */
-	public function __construct() {
+	private function __construct() {
 		// CLI log, just message.
 		$this->logger_cli = CliLog::get_logger( 'cli' );
 		// CLI log, just level and message.
@@ -44,35 +50,33 @@ class Multibranded implements WpCliCommandInterface {
 	/**
 	 * {@inheritDoc}
 	 */
-	public static function get_cli_commands(): array {
+	public static function register_commands(): void {
 
-		return [
+		WP_CLI::add_command(
+			'newspack-content-migrator multi-branded assign-brands-to-all-posts-in-category',
+			self::get_command_closure( 'cmd_assign_brands_to_posts_in_category' ),
 			[
-				'newspack-migration-tools multi-branded assign-brands-to-all-posts-in-category',
-				[ __CLASS__, 'cmd_assign_brands_to_posts_in_category' ],
-				[
-					'shortdesc' => 'Assigns one or more brands to every individual post in a category.',
-					'synopsis'  => [
-						[
-							'category-id' => [
-								'type'        => 'assoc',
-								'name'        => 'category-id',
-								'description' => 'Category with the posts.',
-								'optional'    => false,
-								'repeating'   => false,
-							],
-							'brand-id'    => [
-								'type'        => 'assoc',
-								'name'        => 'brand-ids-csv',
-								'description' => 'CSV IDs of brands to assign to every individual post in category.',
-								'optional'    => false,
-								'repeating'   => false,
-							],
+				'shortdesc' => 'Assigns one or more brands to every individual post in a category.',
+				'synopsis'  => [
+					[
+						'category-id' => [
+							'type'        => 'assoc',
+							'name'        => 'category-id',
+							'description' => 'Category with the posts.',
+							'optional'    => false,
+							'repeating'   => false,
+						],
+						'brand-id'    => [
+							'type'        => 'assoc',
+							'name'        => 'brand-ids-csv',
+							'description' => 'CSV IDs of brands to assign to every individual post in category.',
+							'optional'    => false,
+							'repeating'   => false,
 						],
 					],
 				],
-			],
-		];
+			]
+		);
 	}
 
 	/**
@@ -138,11 +142,39 @@ class Multibranded implements WpCliCommandInterface {
 	 * @param array $brand_ids Brand IDs.
 	 * @return void
 	 */
-	private function set_brands_to_post( int $post_id, array $brand_ids ): void {
+	public function set_brands_to_post( int $post_id, array $brand_ids ): void {
 		// Brand IDs passed to wp_set_object_terms must be strictly integers, otherwise they will be
 		// treated as new brand names and created as new brands/terms.
 		$brand_ids = array_map( 'intval', $brand_ids );
 
 		wp_set_object_terms( $post_id, $brand_ids, 'brand' );
+	}
+
+
+
+	/**
+	 * Gets brand ID from brand name.
+	 * 
+	 * @param string $brand_name Brand name.
+	 * 
+	 * @return ?int Brand term_id or null if not found.
+	 */
+	public function get_brand_id_from_brand_name( string $brand_name ): ?int {
+		$term = $this->get_brand_term_from_brand_name( $brand_name );
+
+		return $term instanceof WP_Term ? $term->term_id : null;
+	}
+
+	/**
+	 * Gets brand term object from brand name.
+	 * 
+	 * @param string $brand_name Brand name.
+	 * 
+	 * @return ?WP_Term Brand WP_Term object or null if not found.
+	 */
+	public function get_brand_term_from_brand_name( string $brand_name ): ?WP_Term {
+		$term = get_term_by( 'name', $brand_name, 'brand' );
+
+		return $term instanceof WP_Term ? $term : null;
 	}
 }
