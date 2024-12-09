@@ -903,15 +903,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-			// It's expected that this `src` is fully qualified. Just in case we run into some that are not, throw an exception to handle if needed.
+			// Check if `src` is fully qualified, and if it's not, expand it.
+			$src_expand_fully_qualified = null;
 			if ( ! str_starts_with( $src, 'http' ) ) {
-				throw new RuntimeException( sprintf( 'Cached image URL `%s` is not fully qualified -- add support for relative ones.', wp_kses( $src ) ) );
+				$src_expand_fully_qualified = NP_LIVE . $src;
 			}
 
 			// Get `href` -- the full-sized image URL.
 			$href = $a?->getAttribute( 'href' );
 			if ( ! $href ) {
 				continue;
+			}
+			if ( ! str_starts_with( $href, 'http' ) ) {
+				$href = NP_LIVE . $src;
 			}
 			
 			// Create a new <img> element. Cloning the existing $img object is an efficient way to keep all the existing attributes.
@@ -923,6 +927,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$html_doc->load( str_replace( $a->outertext, $new_img->outertext, $html_doc->save() ) );
 			
 			// Replace all cached image URLs with the full sized URLs in entire HTML.
+			// If the cached $src URL is relative, first replace the fully qualified version, then this relative afterwards.
+			if ( ! is_null( $src_expand_fully_qualified ) ) {
+				$html_doc->load( str_replace( $src_expand_fully_qualified, $href, $html_doc->save() ) );
+			}
 			$html_doc->load( str_replace( $src, $href, $html_doc->save() ) );
 		}
 	}
