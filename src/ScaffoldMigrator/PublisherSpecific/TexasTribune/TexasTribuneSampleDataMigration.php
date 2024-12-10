@@ -128,7 +128,8 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$post_status_value = $migration_object->metadata->is_published->get_value() ? 'publish' : 'draft';
 		$post_status_value = new MigrationObjectPropertyWrapper(
 			$post_status_value,
-			explode( '.', $migration_object->metadata->is_published->get_path() )
+			explode( '.', $migration_object->metadata->is_published->get_path() ),
+			$migration_object
 		);
 
 		$post_name_value = \WP_CLI\Utils\basename( $migration_object->metadata->article_url->get_value() );
@@ -137,7 +138,8 @@ class TexasTribuneSampleDataMigration implements Migration {
 			$posts_data->set_post_name(
 				new MigrationObjectPropertyWrapper(
 					$post_name_value,
-					explode( '.', $migration_object->metadata->article_url->get_path() )
+					explode( '.', $migration_object->metadata->article_url->get_path() ),
+					$migration_object
 				)
 			);
 		}
