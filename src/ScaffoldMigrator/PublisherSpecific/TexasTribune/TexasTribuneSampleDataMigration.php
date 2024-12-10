@@ -693,11 +693,23 @@ class TexasTribuneSampleDataMigration implements Migration {
 				$component->authors->get_value()
 			);
 
-			if ( ! empty( $authors ) ) {
+			$migration_object = $component->get_migration_object();
+			if ( ! empty( $authors ) && $migration_object instanceof RunAwareMigrationObject ) {
 				$attachment_post = new WordPressPostsData();
-				$attachment_post->set_id( $maybe_attachment_id );
-				$attachment_post->set_authors( $authors );
-				$attachment_post->update();
+				$attachment_post->set_migration_object(
+					new RunAwareMigrationObjectWrapper(
+						new MigrationObject(
+							$component->get_value(),
+							'url',
+							$migration_object->get_container()
+						),
+						$migration_object->get_run_key()
+					)
+				);
+
+				$attachment_post->set_id( $maybe_attachment_id )
+								->set_authors( $authors )
+								->update();
 			}
 
 			$image_size = 'large';
