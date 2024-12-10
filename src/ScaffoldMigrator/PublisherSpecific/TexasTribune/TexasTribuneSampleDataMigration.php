@@ -167,7 +167,28 @@ class TexasTribuneSampleDataMigration implements Migration {
 			return null;
 		}
 
-		$post_content_value = $this->get_post_content_by_handling_components( $migration_object->components, $maybe_post_id );
+		// Let's handle the featured image here.
+		$featured_image                         = $migration_object->metadata->share_image ?? null;
+		$maybe_featured_image_attachment_object = null;
+		if ( $featured_image ) {
+			$maybe_featured_image_attachment_object = $this->handle_image_import(
+				$featured_image->url->get_value(),
+				null,
+				null,
+				$featured_image->photo_description->get_value()
+			);
+
+			// If there was some issue with the image download, this will be a WP_Error. In that case,
+			// let's just set it to null, so that we can simplify the method signatures
+			// and logic that will need this object down the line from here.
+			if ( is_wp_error( $maybe_featured_image_attachment_object ) ) {
+				$maybe_featured_image_attachment_object = null;
+			} else {
+				set_post_thumbnail( $maybe_post_id, $maybe_featured_image_attachment_object->attachment_id );
+			}
+		}
+
+		$post_content_value = $this->get_post_content_by_handling_components( $migration_object->components, $maybe_post_id, $maybe_featured_image_attachment_object );
 		$posts_data->set_migration_object( $migration_object );
 		$maybe_updated = $posts_data->set_id( $maybe_post_id )->set_post_content( $post_content_value )->update();
 
@@ -190,18 +211,19 @@ class TexasTribuneSampleDataMigration implements Migration {
 	/**
 	 * Return fully formed HTML from the supplied migration components.
 	 *
-	 * @param MigrationObjectPropertyWrapper $components Components to process.
-	 * @param int                            $post_id   Post ID.
+	 * @param MigrationObjectPropertyWrapper             $components Components to process.
+	 * @param int                                        $post_id Post ID.
+	 * @param TexasTribuneAttachmentMetadataObject| null $featured_image_object Object representing a featured image.
 	 *
 	 * @return string
 	 */
-	private function get_post_content_by_handling_components( MigrationObjectPropertyWrapper $components, int $post_id ): string {
+	private function get_post_content_by_handling_components( MigrationObjectPropertyWrapper $components, int $post_id, ?TexasTribuneAttachmentMetadataObject $featured_image_object ): string {
 		$content = '';
 
 		$previous = null;
 		foreach ( $components as $key => $component ) {
 			$next     = $components[ $key + 1 ] ?? null;
-			$content .= $this->handle_component( $component, $post_id, $previous, $next );
+			$content .= $this->handle_component( $component, $post_id, $previous, $next, $featured_image_object );
 			$previous = $component;
 		}
 
@@ -211,14 +233,15 @@ class TexasTribuneSampleDataMigration implements Migration {
 	/**
 	 * This function handles specific components and returns the HTML.
 	 *
-	 * @param MigrationObjectPropertyWrapper      $component     Component to process.
-	 * @param int                                 $post_id       Post ID.
-	 * @param MigrationObjectPropertyWrapper|null $previous_sibling Previous sibling component.
-	 * @param MigrationObjectPropertyWrapper|null $next_sibling      Next sibling component.
+	 * @param MigrationObjectPropertyWrapper            $component Component to process.
+	 * @param int                                       $post_id Post ID.
+	 * @param MigrationObjectPropertyWrapper|null       $previous_sibling Previous sibling component.
+	 * @param MigrationObjectPropertyWrapper|null       $next_sibling Next sibling component.
+	 * @param TexasTribuneAttachmentMetadataObject|null $featured_image The featured image set for the post.
 	 *
 	 * @return string
 	 */
-	private function handle_component( MigrationObjectPropertyWrapper $component, int $post_id, ?MigrationObjectPropertyWrapper $previous_sibling, ?MigrationObjectPropertyWrapper $next_sibling ): string {
+	private function handle_component( MigrationObjectPropertyWrapper $component, int $post_id, ?MigrationObjectPropertyWrapper $previous_sibling, ?MigrationObjectPropertyWrapper $next_sibling, ?TexasTribuneAttachmentMetadataObject $featured_image ): string {
 		switch ( strtolower( $component->role->get_value() ) ) {
 			case 'header':
 				return '';
@@ -229,7 +252,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			case 'thumbnail entry':
 			case 'sections':
 			case 'sections container':
-				return $this->get_post_content_by_handling_components( $component->components, $post_id );
+			return $this->get_post_content_by_handling_components( $component->components, $post_id, $featured_image );
 			case 'sections entry container':
 				return $this->handle_sections_entry_container( $component, $post_id );
 			case 'text':
@@ -263,7 +286,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			case 'related link':
 				return $this->handle_related_link_component( $component );
 			case 'photo':
-				return $this->handle_photo_component( $component, $post_id );
+				return $this->handle_photo_component( $component, $post_id, $featured_image );
 			case 'mosaic':
 				return $this->handle_mosaic_component( $component, $post_id );
 			case 'thumbnail':
@@ -276,7 +299,8 @@ class TexasTribuneSampleDataMigration implements Migration {
 					$modded_component             = new MigrationObjectPropertyWrapper( [ $last_key => $modded_component ], $established_path );
 					$thumbnail_block             .= $this->handle_photo_component(
 						$modded_component,
-						$post_id
+						$post_id,
+						$featured_image
 					);
 				}
 
@@ -520,16 +544,64 @@ class TexasTribuneSampleDataMigration implements Migration {
 	/**
 	 * Handles getting a gutenberg image HTML block from a photo component.
 	 *
-	 * @param MigrationObjectPropertyWrapper $component Component to process.
-	 * @param int                            $post_id Post ID.
+	 * @param MigrationObjectPropertyWrapper            $component Component to process.
+	 * @param int                                       $post_id Post ID.
+	 * @param TexasTribuneAttachmentMetadataObject|null $featured_image The featured image set for the post.
 	 *
 	 * @return string
 	 */
-	private function handle_photo_component( MigrationObjectPropertyWrapper $component, int $post_id ): string {
-		$maybe_attachment_id = $this->handle_photo_attachment_creation( $component, $post_id );
+	private function handle_photo_component( MigrationObjectPropertyWrapper $component, int $post_id, ?TexasTribuneAttachmentMetadataObject $featured_image ): string {
+		// If the (photo) component has already been imported as a featured image, we don't want to import it again.
+		if ( null !== $featured_image ) {
+			$photo_attachment_object = new TexasTribuneAttachmentMetadataObject( $component->url->get_value() );
+
+			// Not sure if we'd need to do any additional tests to determine if the photo has already been imported as a featured image.
+			$decoded_download_url = $photo_attachment_object->decoded_download_url === $featured_image->decoded_download_url;
+
+			if ( $decoded_download_url ) {
+				$attachment_data = new WordPressPostsData();
+				$attachment_data->set_id( $featured_image->attachment_id );
+
+				$attachment = get_post( $featured_image->attachment_id );
+
+				if ( $component->caption && $attachment->post_excerpt !== $component->caption->get_value() ) {
+					$attachment_data->set_post_excerpt( $component->caption );
+				}
+
+				if ( $component->file_description ) {
+					$attachment_data->set_post_content( $component->file_description );
+				} elseif ( $component->photo_description ) {
+					$attachment_data->set_post_content( $component->photo_description );
+				}
+
+				$migration_object = $component->get_migration_object();
+				if ( $migration_object instanceof RunAwareMigrationObject ) {
+					$attachment_data->set_migration_object(
+						new RunAwareMigrationObjectWrapper(
+							new MigrationObject(
+								array_merge(
+									$component->get_value(),
+									[
+										'decoded_file_name' => $photo_attachment_object->decoded_file_name,
+									],
+								),
+								'url',
+								$migration_object->get_container()
+							),
+							$migration_object->get_run_key()
+						)
+					);
+
+					$attachment_data->update();
+				}
+
+				return '';
+			}
+		}
+
+		$maybe_attachment_id = $this->handle_image_import_and_import_metadata( $component, $post_id );
 
 		if ( is_wp_error( $maybe_attachment_id ) ) {
-			ConsoleColor::red( 'Error creating attachment (' )->bright_red( $maybe_attachment_id->get_error_code() )->red( '):' )->underlined_bright_red( $maybe_attachment_id->get_error_message() )->output();
 			return '';
 		}
 
@@ -571,10 +643,9 @@ class TexasTribuneSampleDataMigration implements Migration {
 	private function handle_mosaic_component( MigrationObjectPropertyWrapper $component, int $post_id ): string {
 		$attachment_ids = [];
 		foreach ( $component->items as $item ) {
-			$maybe_attachment_id = $this->handle_photo_attachment_creation( $item, $post_id );
+			$maybe_attachment_id = $this->handle_image_import_and_import_metadata( $item, $post_id );
 
 			if ( is_wp_error( $maybe_attachment_id ) ) {
-				ConsoleColor::red( 'Error creating attachment (' )->bright_red( $maybe_attachment_id->get_error_code() )->red( '):' )->underlined_bright_red( $maybe_attachment_id->get_error_message() )->output();
 				return '';
 			}
 
@@ -690,7 +761,14 @@ class TexasTribuneSampleDataMigration implements Migration {
 			default:
 				ConsoleColor::bright_magenta( 'Different video type needs attention!' )->output();
 
-				$maybe_attachment_id = Attachments::import_external_file( $component->url->get_value() );
+				$maybe_attachment_id = Attachments::import_external_file(
+					$component->url->get_value(),
+					null,
+					null,
+					null,
+					null,
+					$post_id
+				);
 
 				if ( is_wp_error( $maybe_attachment_id ) ) {
 					ConsoleColor::red( 'Error creating attachment (' )
@@ -1040,7 +1118,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					$sections_entry .= serialize_block( $this->block_generator->get_heading( $component->text->get_value() ) );
 					break;
 				case 'sections entry content':
-					$sections_entry .= $this->get_post_content_by_handling_components( $component->components, $post_id );
+					$sections_entry .= $this->get_post_content_by_handling_components( $component->components, $post_id, null );
 					break;
 				case 'sections entry timestamp':
 					$timestamp = '<time datetime="' . $component->timestamp->get_value() . '">' . $component->text->get_value() . '</time>';
@@ -1140,6 +1218,38 @@ class TexasTribuneSampleDataMigration implements Migration {
 	}
 
 	/**
+	 * This function the low-level task of URL sanitation, image download, and attachment data creation.
+	 *
+	 * @param string      $image_url The url of the image to be downloaded.
+	 * @param string|null $title The title of the image.
+	 * @param string|null $caption The caption for the image.
+	 * @param string|null $description The description of the image.
+	 * @param string|null $alt Alt text to display for the image.
+	 *
+	 * @return TexasTribuneAttachmentMetadataObject|WP_Error
+	 */
+	private function handle_image_import( string $image_url, ?string $title = null, ?string $caption = null, ?string $description = null, ?string $alt = null ): TexasTribuneAttachmentMetadataObject|WP_Error {
+		$image_object = new TexasTribuneAttachmentMetadataObject( $image_url );
+
+		$maybe_attachment_id = Attachments::import_external_file( $image_url, $title, $caption, $description, $alt );
+
+		if ( is_wp_error( $maybe_attachment_id ) ) {
+			ConsoleColor::bright_magenta( 'Error Importing Image' )
+						->magenta( '(' )
+						->white( $maybe_attachment_id->get_error_code() )
+						->magenta( ')' )
+						->underlined_magenta( $maybe_attachment_id->get_error_message() )
+						->output();
+
+			return $maybe_attachment_id;
+		}
+
+		$image_object->attachment_id = $maybe_attachment_id;
+
+		return $image_object;
+	}
+
+	/**
 	 * Handles creating an attachment from a component which has a photo URL.
 	 *
 	 * @param MigrationObjectPropertyWrapper $component Component to process.
@@ -1147,58 +1257,64 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 *
 	 * @return int|WP_Error
 	 */
-	private function handle_photo_attachment_creation( MigrationObjectPropertyWrapper $component, int $post_id ): int|\WP_Error {
-		$image_url        = $component->url->get_value();
-		$static_image_url = strpos( $image_url, 'static.texastribune.org' );
+	private function handle_image_import_and_import_metadata( MigrationObjectPropertyWrapper $component, int $post_id ): int|WP_Error {
+		$description = '';
+		if ( $component->file_description && $component->file_description->get_value() ) {
+			$description = $component->file_description->get_value();
+		} elseif ( $component->photo_description && $component->photo_description->get_value() ) {
+			$description = $component->photo_description->get_value();
+		}
 
-		if ( false !== $static_image_url ) {
-			$image_url = substr( $image_url, $static_image_url );
+		$maybe_attachment_object = $this->handle_image_import(
+			$component->url->get_value(),
+			null,
+			$component->caption ? $component->caption->get_value() : null,
+			$description
+		);
 
-			if ( ! str_starts_with( $image_url, 'http' ) ) {
-				$image_url = "http://$image_url";
+		if ( is_wp_error( $maybe_attachment_object ) ) {
+			return $maybe_attachment_object;
+		}
+
+		$migration_object = $component->get_migration_object();
+
+		if ( $migration_object instanceof RunAwareMigrationObject ) {
+			$attachment_data = new WordPressPostsData();
+			$attachment_data->set_migration_object(
+				new RunAwareMigrationObjectWrapper(
+					new MigrationObject(
+						array_merge(
+							$component->get_value(),
+							[
+								'attachment_object' => $maybe_attachment_object,
+							],
+							[
+								'decoded_file_name' => $maybe_attachment_object->decoded_file_name,
+							]
+						),
+						'decoded_file_name',
+						$migration_object->get_container()
+					),
+					$migration_object->get_run_key()
+				)
+			);
+
+			$attachment_data->set_post_excerpt( $component->caption ?? '' )
+							->set_post_content( $component->file_description ?? $component->photo_description ?? '' )
+							->set_post_parent( $post_id )
+							->set_id( $maybe_attachment_object->attachment_id );
+
+			try {
+				$attachment_data->update();
+			} catch ( Exception $e ) {
+				ConsoleColor::bright_yellow( 'Error saving some data sources for photos' )
+							->underlined_white( $e->getCode() )
+							->white( $e->getMessage() )
+							->output();
 			}
 		}
 
-		$attachment_metadata = [];
-		$attachment_data     = new WordPressPostsData();
-		// TODO uncomment after $migration_object can be obtained from property wrapper.
-		// $attachment_data->set_migration_object( $component->get_migration_object() );
-
-		if ( $component->caption && $component->caption->get_value() ) {
-			$attachment_metadata['post_excerpt'] = $component->caption->get_value();
-			$attachment_data->set_post_excerpt( $component->caption );
-		}
-
-		if ( $component->file_description && $component->file_description->get_value() ) {
-			$attachment_metadata['post_content'] = $component->file_description->get_value();
-			$attachment_data->set_post_content( $component->file_description );
-		} elseif ( $component->photo_description && $component->photo_description->get_value() ) {
-			$attachment_metadata['post_content'] = $component->photo_description->get_value();
-			$attachment_data->set_post_content( $component->photo_description );
-		}
-
-		$maybe_attachment_id = Attachments::import_attachment_for_post(
-			$post_id,
-			$image_url,
-			$component->file_description ? $component->file_description->get_value() : '',
-			$attachment_metadata
-		);
-
-		if ( is_wp_error( $maybe_attachment_id ) ) {
-			return $maybe_attachment_id;
-		}
-
-		$attachment_data->set_id( $maybe_attachment_id );
-		try {
-			$attachment_data->update();
-		} catch ( Exception $e ) {
-			ConsoleColor::bright_yellow( 'Error saving some data sources for photos' )
-						->underlined_white( $e->getCode() )
-						->white( $e->getMessage() )
-						->output();
-		}
-
-		return $maybe_attachment_id;
+		return $maybe_attachment_object->attachment_id;
 	}
 
 	/**
