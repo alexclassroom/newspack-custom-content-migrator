@@ -296,7 +296,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					$last_key                     = $established_path[ count( $established_path ) - 1 ];
 					$modded_component             = $sub_component->get_value();
 					$modded_component['location'] = $component->location->get_value();
-					$modded_component             = new MigrationObjectPropertyWrapper( [ $last_key => $modded_component ], $established_path );
+					$modded_component             = new MigrationObjectPropertyWrapper( [ $last_key => $modded_component ], $established_path, $component->get_migration_object() );
 					$thumbnail_block             .= $this->handle_photo_component(
 						$modded_component,
 						$post_id,
