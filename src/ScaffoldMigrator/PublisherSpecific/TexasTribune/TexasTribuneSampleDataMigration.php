@@ -142,11 +142,22 @@ class TexasTribuneSampleDataMigration implements Migration {
 			);
 		}
 
-		$maybe_post_id = $posts_data->set_post_date( $migration_object->metadata->date_published )
-					->set_post_modified( $migration_object->metadata->date_modified )
-					->set_post_status( $post_status_value )
-					->set_post_excerpt( $migration_object->metadata->summary )
-					->create();
+		match ( $migration_object->metadata->type->get_value() ) {
+			'article', 'sponsorcontent' => $posts_data->set_post_type(
+				new MigrationObjectPropertyWrapper(
+					'post',
+					explode( '.', $migration_object->metadata->type->get_path() ),
+					$migration_object
+				)
+			), // TODO: should sponsorcontent be handled differently?
+			'flatpage' => $posts_data->set_post_type(
+				new MigrationObjectPropertyWrapper(
+					'page',
+					explode( '.', $migration_object->metadata->type->get_path() ),
+					$migration_object
+				)
+			),
+		};
 
 		if ( is_wp_error( $maybe_post_id ) ) {
 			ConsoleColor::red( 'Error creating post (' )->bright_red( $maybe_post_id->get_error_code() )->red( '):' )->underlined_bright_red( $maybe_post_id->get_error_message() )->output();
