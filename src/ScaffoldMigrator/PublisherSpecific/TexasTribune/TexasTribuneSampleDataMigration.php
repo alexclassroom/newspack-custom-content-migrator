@@ -374,7 +374,13 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return string
 	 */
 	private function handle_heading_component( MigrationObjectPropertyWrapper $component ): string {
-		return serialize_block( $this->block_generator->get_heading( $component->text->get_value(), $component->level->get_value() ) );
+		return serialize_block(
+			$this->block_generator->get_heading(
+				$component->text->get_value(),
+				'h' . $component->level->get_value(),
+				$component->identifier ? $component->identifier->get_value() : '',
+			)
+		);
 	}
 
 	/**
