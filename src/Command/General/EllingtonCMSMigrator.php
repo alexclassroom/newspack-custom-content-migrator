@@ -467,7 +467,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		), 0, 60 ); // Username can be max 60 chars.
 		$user_email = $username . '+jfp@mississippifreepress.org';
 
-		$wp_user = get_user_by( 'email', $user_email );
+		$wp_user = get_user_by( 'email', $user_email ) ?? get_user_by( 'login', $username );
 
 		if ( ! $wp_user ) {
 			$wp_user = wp_insert_user(
