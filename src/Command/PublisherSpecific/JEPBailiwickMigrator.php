@@ -292,7 +292,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			);
 
 			// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.wp_remote_get_wp_remote_get, WordPressVIPMinimum.Performance.RemoteRequestTimeout.timeout_timeout -- all good comes to those that wait.
-			$response = wp_remote_get( $url, [ 'timeout' => 20 ] );
+			$response = wp_remote_get( $url, [ 'timeout' => 40 ] );
 
 			if ( is_wp_error( $response ) ) {
 				NMT::exit_with_message( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
