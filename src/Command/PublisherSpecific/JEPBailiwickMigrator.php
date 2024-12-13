@@ -599,6 +599,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			if ( str_contains( $content, '<img ' ) ) {
 				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
 			}
+			if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
+				$replacers[] = fn( $html_doc ) => $this->get_downloadable_url_files( $html_doc, $post_id );
+			}
 
 			// Run the replacers.
 			if ( ! empty( $replacers ) ) {
@@ -806,6 +809,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * 
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * 
+	 * @throws RuntimeException If failed to extract all URLs from the content.
+	 * 
 	 * @return void
 	 */
 	public function cmd_helper_list_downloadable_urls( array $pos_args, array $assoc_args ): void {
@@ -853,16 +859,16 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					continue;
 				}
 
-				// Get all downloadable URLs using our method.
+				// Get all downloadable URLs (and their captions) using our method.
 				$urls        = $this->extract_downloadable_urls( $content );
 				$urls_count  = count( $urls );
-				$urls_unique = array_unique( $urls );
+				$urls_unique = array_unique( array_keys( $urls ) );
 
 				// Additionally validate if our method is extracting all the URLs well.
 				$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
 				$count   = preg_match_all( $pattern, $content, $matches );
 				if ( $count != $urls_count ) {
-					throw new RuntimeException( sprintf( 'Failed to extract all URLs from the content for article URL %s', $article['url'] ) );
+					throw new RuntimeException( sprintf( 'Failed to extract all URLs from the content for article URL %s', esc_url_raw( $article['url'] ) ) );
 				}
 
 				$downloadable_urls = array_merge( $downloadable_urls, $urls_unique );
@@ -881,7 +887,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * Returns all URLs, even duplicates (for tracking purposes).
 	 *
 	 * @param string $html HTML content.
-	 * @return array URLs.
+	 * @return array URLs Array with URLs as keys and captions as values. {
+	 *    @type string $url      URL.
+	 *    @type ?string $caption Caption. Null if not found.
+	 * }
 	 */
 	private function extract_downloadable_urls( $html ) {
 		$urls = [];
@@ -905,15 +914,20 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// Find elements with potential URLs.
 		$elements = $dom->getElementsByTagName( '*' );
 		foreach ( $elements as $element ) {
-			// Check for URLs in attributes (src or href).
-			$value = $element->getAttribute( 'src' ) ?? null;
-			if ( $value && preg_match( $pattern, $value, $matches ) ) {
-				$urls[] = $value;
+			// Check for URLs in attributes -- src or href.
+			$url = $element->getAttribute( 'src' ) ?? null;
+			if ( ! $url ) {
+				$url = $element->getAttribute( 'href' ) ?? null;
 			}
-		  
-			$value = $element->getAttribute( 'href' ) ?? null;
-			if ( $value && preg_match( $pattern, $value, $matches ) ) {
-				$urls[] = $value;
+
+			if ( $url && preg_match( $pattern, $url, $matches ) ) {
+				// Get alt or title attribute.
+				$caption = $element->getAttribute( 'alt' ) ?? null;
+				if ( ! $caption ) {
+					$caption = $element->getAttribute( 'title' ) ?? null;
+				}
+
+				$urls[ $url ] = $caption;
 			}
 		}
 	  
@@ -1127,13 +1141,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Get `href` -- the full-sized image URL.
 			$href = $a?->getAttribute( 'href' );
+			if ( ! $href ) {
+				// No `href` attribute.
+				continue;
+			}
+
 			// Check if `href` extension is a supported image.
 			$parsed_href    = wp_parse_url( $href );
 			$href_path      = $parsed_href['path'];
 			$href_extension = pathinfo( $href_path, PATHINFO_EXTENSION );
-			if ( ! $href || ! in_array( strtolower( $href_extension ), self::WP_SUPPORTED_IMAGE_EXTENSIONS ) ) {
+			if ( ! in_array( strtolower( $href_extension ), self::WP_SUPPORTED_IMAGE_EXTENSIONS ) ) {
 				continue;
 			}
+
 			// Make sure `href` is fully qualified.
 			if ( ! str_starts_with( $href, 'http' ) ) {
 				$href = NP_LIVE . $src;
@@ -1189,7 +1209,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// alt text.
 			$alt_text = $img?->getAttribute( 'alt' ) ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
 
-			$att_id = $this->get_image_from_url( $src, $post_id, $alt_text );
+			$att_id = $this->import_attachment_from_url( $src, $post_id, $alt_text );
 			if ( is_wp_error( $att_id ) ) {
 				$this->cli_logger->error(
 					'ERROR: Failed to import inline image',
@@ -1230,6 +1250,62 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Find downloadable URLs (their equivalent of attachment URL) in HTMLDocument content and download them and replace with attachment URLs.
+	 *
+	 * @param HtmlDocument $html_doc The HTML document to replace in.
+	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 *
+	 * @return void
+	 */
+	private function get_downloadable_url_files( HtmlDocument $html_doc, int $post_id ): void {
+		
+		$html = $html_doc->save();
+		$urls = $this->extract_downloadable_urls( $html );
+		foreach ( $urls as $url => $caption ) {
+			$caption = $caption ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
+
+			$att_id = $this->import_attachment_from_url( $url, $post_id );
+			if ( is_wp_error( $att_id ) ) {
+				$this->cli_logger->error(
+					'ERROR: Failed to import downloadable URL',
+					[
+						'post_id' => $post_id,
+						'url'     => $url,
+						'error'   => $att_id,
+					]
+				);
+				continue;
+			}
+
+			// Set caption to attachment.
+			wp_update_post(
+				[
+					'ID'           => $att_id,
+					'post_excerpt' => $caption,
+				] 
+			);
+
+			// Replace the downloadable URL with the new attachment URL.
+			$new_url = wp_get_attachment_url( $att_id );
+			if ( $new_url ) {
+				$html_doc->load( str_replace( $url, $new_url, $html_doc->save() ) );
+			} else {
+				// This should not happen, but better safe.
+				$this->cli_logger->error(
+					'ERROR: Failed to get attachment URL after importing downloadable URL',
+					[
+						'post_id' => $post_id,
+						'url'     => $url,
+					],
+				);
+				
+				// Explicitly `continue;` for clarity.
+				continue;
+			}
+		}
+	}
+
+	/**
 	 * Downloads and sets the featured image on a post.
 	 *
 	 * @param int    $post_id   Post ID.
@@ -1248,7 +1324,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$image_url = trailingslashit( NP_LIVE ) . trim( $image_url, '/' );
 		}
 
-		$attachment_id = $this->get_image_from_url( $image_url, $post_id, $alt );
+		$attachment_id = $this->import_attachment_from_url( $image_url, $post_id, $alt );
 		if ( ! is_wp_error( $attachment_id ) ) {
 			$data['_thumbnail_id'] = $attachment_id;
 			FileLog::get_logger( 'bw-images' )->notice(
@@ -1477,17 +1553,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get image from URL and return the attachment ID.
+	 * Get image or another attachment file from URL into the Media Library and return the attachment ID.
 	 *
-	 * @param string $url      The URL to the image.
+	 * @param string $url      The URL to the image/attachment.
 	 * @param int    $post_id  The parent post ID (the published post ID with the content, not the attachment object).
-	 * @param string $alt_text The alt text for the image.
+	 * @param string $alt_text The alt text for the image/attachment.
 	 *
 	 * @return int|WP_Error
 	 */
-	private function get_image_from_url( string $url, int $post_id, string $alt_text = '' ): int|WP_Error {
+	private function import_attachment_from_url( string $url, int $post_id, string $alt_text = '' ): int|WP_Error {
 		if ( empty( $url ) ) {
-			return new WP_Error( '', 'No image URL provided' );
+			return new WP_Error( '', 'No image/attachment URL provided' );
 		}
 
 		// Download the image and import it (will return existing attachment ID if already imported).
