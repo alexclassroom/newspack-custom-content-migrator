@@ -827,6 +827,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->cli_logger->info( '' );
 
 		$downloadable_urls = [];
+		$downloadable_urls__list_of_original_article_urls_where_they_appear = [];
 
 		// Go through files.
 		$total_count = 0;
@@ -861,22 +862,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
 				$count   = preg_match_all( $pattern, $content, $matches );
 				if ( $count != $urls_count ) {
-					$this->cli_logger->error(
-						'Failed to extract all URLs from the content.',
-						[
-							'count'      => $count,
-							'urls_count' => $urls_count,
-						] 
-					);
-					$d = 1;
+					throw new RuntimeException( sprintf( 'Failed to extract all URLs from the content for article URL %s', $article['url'] ) );
 				}
 
 				$downloadable_urls = array_merge( $downloadable_urls, $urls_unique );
+				$downloadable_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
 			}
 		}
 
-		\WP_CLI::line( 'Downloadable URLs -- :' );
+		\WP_CLI::line( 'Downloadable URLs:' );
 		\WP_CLI::line( implode( "\n", $downloadable_urls ) );
+
+		\WP_CLI::line( 'Original article URLs where these downloadable articles appear:' );
+		\WP_CLI::line( implode( "\n", $downloadable_urls__list_of_original_article_urls_where_they_appear ) );
 	}
 
 	/**
