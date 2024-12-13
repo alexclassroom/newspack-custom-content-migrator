@@ -253,10 +253,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator bw-helper-fixer-img-srcs-with-urls-not-images',
-			self::get_command_closure( 'cmd_helper_fixer_img_srcs_with_urls_not_images' ),
+			'newspack-content-migrator bw-helper-list-posts-with-invalid-img-srcs',
+			self::get_command_closure( 'cmd_helper_list_posts_with_invalid_img_srcs' ),
 			[
-				'shortdesc' => 'Helper dev command. Checks and lists all posts which have <img> elements with src URLs that are not images.',
+				'shortdesc' => 'Helper dev command. Lists which posts which have wrong <img> elements with src URLs that are not images. This was caused by Publisher sharing wrong/partial specifications on how cached and full-sized images look in their markup.',
 			]
 		);
 	}
@@ -742,7 +742,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 * @return void
 	 */
-	public function cmd_helper_fixer_img_srcs_with_urls_not_images( array $pos_args, array $assoc_args ): void {
+	public function cmd_helper_list_posts_with_invalid_img_srcs( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
 		$this->cli_logger->info( 'Checking all posts for <img> elements with src URLs that are not images.' );
