@@ -17,6 +17,7 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Logic\UsersHelper;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
@@ -41,6 +42,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	const META_ORIGINAL_AUTHOR      = 'newspackmigration_original_author';
 	const META_ORIGINAL_BYLINE_NODE = 'newspackmigration_original_byline_node';
 	const META_DEFAULT_AUTHOR_RULE  = 'newspackmigration_default_author_rule';
+
+	const WP_SUPPORTED_IMAGE_EXTENSIONS = [ 'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif', 'svg' ];
 
 	/**
 	 * Logger for CLI output.
@@ -76,6 +79,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @var GutenbergBlockGenerator $gutenberg_blocks Gutenberg block generator.
 	 */
 	private GutenbergBlockGenerator $gutenberg_blocks;
+	
+	/**
+	 * Posts logic.
+	 *
+	 * @var Posts $posts Posts logic.
+	 */
+	private Posts $posts;
 
 	/**
 	 * Constructor.
@@ -86,6 +96,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->taxonomy         = new Taxonomy();
 		$this->multibranded     = Multibranded::get_instance();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
+		$this->posts            = new Posts();
 		if ( ! defined( 'NP_LIVE' ) ) {
 			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
 		}
@@ -187,6 +198,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						'description' => "Full name of the brand to which the posts will be assigned to, e.g. --brand-name='Bailiwick Express News Jersey' . Must correspond to constants of this class BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.",
 						'optional'    => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'process-single-url',
+						'description' => 'Dev helper, optiona. If provided, only this single URL will be processed.',
+						'optional'    => true,
+					],
 				],
 			]
 		);
@@ -232,6 +249,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-helper-fixer-img-srcs-with-urls-not-images',
+			self::get_command_closure( 'cmd_helper_fixer_img_srcs_with_urls_not_images' ),
+			[
+				'shortdesc' => 'Helper dev command. Checks and lists all posts which have <img> elements with src URLs that are not images.',
 			]
 		);
 	}
@@ -389,6 +414,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$header_images_bylines_csv = $assoc_args['header-images-bylines-csv-file'] ?? null;
 		$refresh                   = $assoc_args['refresh-existing'] ?? false;
 		$brand_name                = $assoc_args['brand-name'];
+		$process_single_url        = $assoc_args['process-single-url'] ?? null;
 		$brand_id                  = $this->multibranded->get_brand_id_from_brand_name( $brand_name );
 		if ( ! $brand_id ) {
 			NMT::exit_with_message( 'Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.', [ $this->cli_logger ] );
@@ -424,6 +450,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		foreach ( $articles as $article ) {
 			++$counter;
 
+			// Dev helper parameter to process only a single URL.
+			if ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
+				continue;
+			}
+			
 			// Skip importing some articles custom marked in the sponsors-bylines-csv-file.csv file.
 			if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) && ( '<POST CAN BE DELETED>' == $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
 				$this->cli_logger->notice(
@@ -705,6 +736,56 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Callable for `newspack-content-migrator bw-helper-fixer-img-srcs-with-urls-not-images`.
+	 * 
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_helper_fixer_img_srcs_with_urls_not_images( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
+		$this->cli_logger->info( 'Checking all posts for <img> elements with src URLs that are not images.' );
+		$this->cli_logger->info( '' );
+
+		$file_logger = PlainFileLog::get_logger( 'bw-err-img-src-nonsupported-extensions' );
+		$file_logger->info( 'post_id,src,original_url' );
+
+		$post_ids_w_errors = [];
+		$post_ids          = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $post_id ) {
+			// phpcs:disable
+			// WordPress.DB.DirectDatabaseQuery.DirectQuery WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_content = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT post_content FROM $wpdb->posts WHERE ID = %d",
+					$post_id
+				)
+			);
+			// phpcs:enable
+
+			$html_doc = new HtmlDocument( $post_content );
+			$images   = $html_doc->find( 'img' );
+			foreach ( $images as $image ) {
+				$src        = strtolower( $image?->getAttribute( 'src' ) );
+				$parsed_url = wp_parse_url( $src );
+				$path       = $parsed_url['path'];
+				$extension  = pathinfo( $path, PATHINFO_EXTENSION );
+
+				// Image `src` is empty or has an unsupported extension.
+				if ( empty( $src ) || ! in_array( strtolower( $extension ), self::WP_SUPPORTED_IMAGE_EXTENSIONS ) ) {
+					if ( in_array( $post_id, $post_ids_w_errors ) ) {
+						continue;
+					}
+					$post_ids_w_errors[] = $post_id;
+					$original_url        = get_post_meta( $post_id, self::META_ORIGINAL_URL, true );
+					$file_logger->info( sprintf( '%s,%s,%s', $post_id, $src, $original_url ) );
+				}
+			}
+		}
+	}
+
+	/**
 	 * Callable for `newspack-content-migrator bw-list-redirects`.
 	 *
 	 * @param array $pos_args   Positional arguments from WP_CLI.
@@ -911,9 +992,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Get `href` -- the full-sized image URL.
 			$href = $a?->getAttribute( 'href' );
-			if ( ! $href ) {
+			// Check if `href` extension is a supported image.
+			$parsed_href    = wp_parse_url( $href );
+			$href_path      = $parsed_href['path'];
+			$href_extension = pathinfo( $href_path, PATHINFO_EXTENSION );
+			if ( ! $href || ! in_array( strtolower( $href_extension ), self::WP_SUPPORTED_IMAGE_EXTENSIONS ) ) {
 				continue;
 			}
+			// Make sure `href` is fully qualified.
 			if ( ! str_starts_with( $href, 'http' ) ) {
 				$href = NP_LIVE . $src;
 			}
