@@ -201,7 +201,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					[
 						'type'        => 'assoc',
 						'name'        => 'process-single-url',
-						'description' => 'Dev helper, optiona. If provided, only this single URL will be processed.',
+						'description' => 'Dev helper, optional. If provided, only this single URL will be processed.',
 						'optional'    => true,
 					],
 				],
@@ -257,6 +257,22 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_helper_list_posts_with_invalid_img_srcs' ),
 			[
 				'shortdesc' => 'Helper dev command. Lists which posts which have wrong <img> elements with src URLs that are not images. This was caused by Publisher sharing wrong/partial specifications on how cached and full-sized images look in their markup.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-helper-list-live-downloadable-urls',
+			self::get_command_closure( 'cmd_helper_list_downloadable_urls' ),
+			[
+				'shortdesc' => 'Helper dev command. Lists articles which contain "downloadable URLs" (src URLs which contain `...bailiwickexpress.com/index.php/download_file/view/...` and which should be downloaded as files).',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'dir',
+						'description' => 'Will scan all XML files in this dir.',
+						'optional'    => false,
+					],
+				],
 			]
 		);
 	}
@@ -783,6 +799,127 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				}
 			}
 		}
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator bw-helper-list-live-downloadable-urls`.
+	 * 
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_helper_list_downloadable_urls( array $pos_args, array $assoc_args ): void {
+		$dir = $assoc_args['dir'] ?? null;
+	
+		// Get .xml files.
+		if ( is_null( $dir ) ) {
+			$xml_files = [ $xml_file ];
+		} else {
+			$xml_files = glob( "$dir/*.xml" );
+			if ( empty( $xml_files ) ) {
+				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				return;
+			}
+		}
+
+		// Log.
+		$this->cli_logger->info( 'Checking all posts with URL that can be downloaded.' );
+		$this->cli_logger->info( '' );
+
+		$downloadable_urls = [];
+
+		// Go through files.
+		$total_count = 0;
+		foreach ( $xml_files as $xml_file ) {
+			$xml_fetcher = null;
+			try {
+				$this->cli_logger->info( 'Parsing articles from XML file', [ 'xml_file' => $xml_file ] );
+				$xml_fetcher = new Concrete5Xml( $xml_file );
+			} catch ( Exception $o_0 ) {
+				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+			}
+	
+			// Go through articles in a file.
+			$articles    = $xml_fetcher->get_articles();
+			$total_count = $xml_fetcher->get_count();
+			$counter     = 0;
+			foreach ( $articles as $article ) {
+
+				$content = $article['content'];
+
+				// Check if there are downloadable URLs in the content from the previous CMS.
+				if ( false === str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
+					continue;
+				}
+
+				// Get all downloadable URLs using our method.
+				$urls        = $this->extract_downloadable_urls( $content );
+				$urls_count  = count( $urls );
+				$urls_unique = array_unique( $urls );
+
+				// Additionally validate if our method is extracting all the URLs well.
+				$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
+				$count   = preg_match_all( $pattern, $content, $matches );
+				if ( $count != $urls_count ) {
+					$this->cli_logger->error(
+						'Failed to extract all URLs from the content.',
+						[
+							'count'      => $count,
+							'urls_count' => $urls_count,
+						] 
+					);
+					$d = 1;
+				}
+
+				$downloadable_urls = array_merge( $downloadable_urls, $urls_unique );
+			}
+		}
+
+		\WP_CLI::line( 'Downloadable URLs -- :' );
+		\WP_CLI::line( implode( "\n", $downloadable_urls ) );
+	}
+
+	/**
+	 * Returns all URLs, even duplicates (for tracking purposes).
+	 *
+	 * @param string $html HTML content.
+	 * @return array URLs.
+	 */
+	private function extract_downloadable_urls( $html ) {
+		$urls = [];
+		
+		/**
+		 * The pattern to match URLs containing `...bailiwickexpress.com/index.php/download_file/view/...`.
+		 * - https?://: Match http:// or https://.
+		 * - (server\.com|[^\/]+): Match server.com or any domain.
+		 * - \/index\.php\/download_file\/view\/: Match the path.
+		 * - ([^\/]+(?:\/[^\/]+)*): Match the file path.
+		 * - \/: Match the last slash.
+		 */
+		$pattern = '/https?:\/\/(bailiwickexpress\.com|[^\/]+)\/index\.php\/download_file\/view\/([^\/]+(?:\/[^\/]+)*)/';
+
+		$dom = new \DOMDocument();
+		// phpcs:disable
+		// WordPress.PHP.NoSilencedErrors.Discouraged
+		@$dom->loadHTML( $html ); // Suppress errors.
+		// phpcs:enable
+	  
+		// Find elements with potential URLs.
+		$elements = $dom->getElementsByTagName( '*' );
+		foreach ( $elements as $element ) {
+			// Check for URLs in attributes (src or href).
+			$value = $element->getAttribute( 'src' ) ?? null;
+			if ( $value && preg_match( $pattern, $value, $matches ) ) {
+				$urls[] = $value;
+			}
+		  
+			$value = $element->getAttribute( 'href' ) ?? null;
+			if ( $value && preg_match( $pattern, $value, $matches ) ) {
+				$urls[] = $value;
+			}
+		}
+	  
+		return $urls;
 	}
 
 	/**
