@@ -255,7 +255,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			case 'thumbnail entry':
 			case 'sections':
 			case 'sections container':
-			return $this->get_post_content_by_handling_components( $component->components, $post_id, $featured_image );
+			    return $this->get_post_content_by_handling_components( $component->components, $post_id, $featured_image );
 			case 'sections entry container':
 				return $this->handle_sections_entry_container( $component, $post_id );
 			case 'text':
