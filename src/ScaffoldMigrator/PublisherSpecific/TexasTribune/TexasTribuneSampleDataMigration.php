@@ -84,16 +84,17 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 			if ( ! $user ) {
 				$users_data = new WordPressUsersData();
-				$users_data->set_migration_object(
-					new RunAwareMigrationObjectWrapper(
-						new MigrationObject(
-							$author->get_value(),
-							'id',
-							$migration_object->get_container()
-						),
-						$migration_object->get_run_key()
-					)
+
+				$author_migration_object = new RunAwareMigrationObjectWrapper(
+					new MigrationObject(
+						$author->get_value(),
+						'id',
+						$migration_object->get_container()
+					),
+					$migration_object->get_run_key()
 				);
+
+				$users_data->set_migration_object( $author_migration_object );
 
 				$users_data->set_display_name( $author['name'] );
 				if ( 1547 === intval( $author['id']->get_value() ) ) { // Display Name: The Texas Tribune Staff, and the staffs of The Texas Newsroom, Fort Worth Report and Amarillo Tribune.
@@ -111,6 +112,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 				} else {
 					ConsoleColor::green( 'Author created: ' )->bright_green( $user_create_result )->output();
 					$user = get_user_by( 'ID', $user_create_result );
+					$author_migration_object->mark_as_processed();
 				}
 			} else {
 				ConsoleColor::bright_white( 'Author already exists:' )
@@ -121,6 +123,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			}
 
 			$posts_data->add_author( $user );
+			$posts_data->set_post_author( $user );
 		}
 
 		$posts_data->set_post_title( $migration_object->metadata->headline );
