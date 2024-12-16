@@ -315,7 +315,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			case 'data graphic':
 				return $this->handle_data_graphic_component( $component, $next_sibling, $post_id );
 			case 'video':
-				return $this->handle_video_component( $component, $post_id );
+				return $this->handle_video_component( $component, $next_sibling, $post_id );
 			case 'iframe':
 				return $this->handle_iframe_component( $component );
 			case 'tweet':
@@ -329,9 +329,13 @@ class TexasTribuneSampleDataMigration implements Migration {
 					if ( 'data graphic' === $previous_sibling->role->get_value() ) {
 						return '';
 					}
+
+					if ( 'video' === $previous_sibling->role->get_value() ) {
+						return '';
+					}
 				}
 
-				return $this->handle_caption_component( $component );
+				return serialize_block( $this->handle_caption_component( $component ) );
 			case 'audio':
 				return $this->handle_audio_component( $component );
 			case 'document link':
@@ -751,16 +755,29 @@ class TexasTribuneSampleDataMigration implements Migration {
 	/**
 	 * Handles getting a gutenberg video HTML block from a video component.
 	 *
-	 * @param MigrationObjectPropertyWrapper $component Component to process.
-	 * @param int                            $post_id Post ID.
+	 * @param MigrationObjectPropertyWrapper      $component Component to process.
+	 * @param MigrationObjectPropertyWrapper|null $next_sibling Next sibling component.
+	 * @param int                                 $post_id Post ID.
 	 *
 	 * @return string
 	 */
-	private function handle_video_component( MigrationObjectPropertyWrapper $component, int $post_id ): string {
+	private function handle_video_component( MigrationObjectPropertyWrapper $component, ?MigrationObjectPropertyWrapper $next_sibling, int $post_id ): string {
 		$caption_block = [];
 
 		if ( $component->caption && ! empty( $component->caption->get_value() ) ) {
-			$caption_block = $this->block_generator->get_paragraph( $component->caption->get_value() );
+			$caption_block = $this->handle_caption_component(
+				new MigrationObjectPropertyWrapper(
+					[
+						'text' => $component->caption->get_value(),
+					],
+					[ 'text' ],
+					$component->get_migration_object()
+				)
+			);
+		} elseif ( $next_sibling ) {
+			if ( 'caption' === $next_sibling->role->get_value() ) {
+				$caption_block = $this->handle_caption_component( $next_sibling );
+			}
 		}
 
 		switch ( $component->player_type->get_value() ) {
@@ -841,10 +858,18 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 *
 	 * @param MigrationObjectPropertyWrapper $component Component to process.
 	 *
-	 * @return string
+	 * @return array
 	 */
-	private function handle_caption_component( MigrationObjectPropertyWrapper $component ): string {
-		return serialize_block( $this->block_generator->get_paragraph( $component->text->get_value(), '', 'gray', 'small' ) );
+	private function handle_caption_component( MigrationObjectPropertyWrapper $component ): array {
+		return $this->block_generator->get_paragraph(
+			$component->text->get_value(),
+			'',
+			'',
+			'',
+			[
+				'wp-caption-text',
+			]
+		);
 	}
 
 	/**
