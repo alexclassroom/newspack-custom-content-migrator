@@ -1199,20 +1199,16 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return string
 	 */
 	private function handle_newsletter_signup_component( MigrationObjectPropertyWrapper $component ): string {
-		return serialize_block(
-			$this->block_generator->get_paragraph(
-				'NEWSLETTER SIGNUP HERE',
-				'',
-				'',
-				'',
-				[
-					'newsletter-id' => $component->newsletter ? $component->newsletter->get_value() : '',
-					'slug'          => $component->slug ? $component->slug->get_value() : '',
-					'name'          => $component->name ? $component->name->get_value() : '',
-					'description'   => $component->description ? $component->description->get_value() : '',
-				]
-			)
-		);
+		$paragraph_block = $this->block_generator->get_paragraph( 'NEWSLETTER SIGNUP HERE' );
+
+		$paragraph_block['attrs'] = [
+			'newsletter-id' => $component->newsletter ? $component->newsletter->get_value() : '',
+			'slug'          => $component->slug ? $component->slug->get_value() : '',
+			'name'          => $component->name ? $component->name->get_value() : '',
+			'description'   => $component->description ? $component->description->get_value() : '',
+		];
+
+		return serialize_block( $paragraph_block );
 	}
 
 	/**
