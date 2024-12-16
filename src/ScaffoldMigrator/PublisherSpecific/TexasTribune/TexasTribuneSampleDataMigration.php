@@ -691,7 +691,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @throws Exception If the author is not a valid user.
 	 */
 	private function handle_data_graphic_component( MigrationObjectPropertyWrapper $component, ?MigrationObjectPropertyWrapper $next_sibling, int $post_id ): string {
-		if ( $component->use_static_graphic->get_value() ) {
+		/*if ( $component->use_static_graphic->get_value() ) {
 			$attachment_metadata = [];
 
 			if ( $next_sibling && 'caption' === $next_sibling->role->get_value() ) {
@@ -755,7 +755,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			}
 
 			return serialize_block( $this->block_generator->get_image( get_post( $maybe_attachment_id ), $image_size, true, null, $alignment ) );
-		}
+		}*/
 
 		return $this->handle_iframe_component( $component );
 	}
