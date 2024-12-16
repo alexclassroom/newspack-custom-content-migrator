@@ -1062,7 +1062,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$title = serialize_block(
 			$this->block_generator->get_heading(
 				$component->title->get_value(),
-				3,
+				'h3',
 				$component->cta_url->get_value()
 			)
 		);
