@@ -416,27 +416,35 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$doc = new \DOMDocument();
 
 		$matches = [];
-		// regex to extract <li>'s and the contents in between from string.
 		$pattern = '/<strong>(.*?)<\/strong>/';
-		preg_match( $pattern, $component->text->get_value(), $matches );
+		preg_match( $pattern, $text, $matches );
 
 		if ( ! empty( $matches ) ) {
 			$doc->loadHTML( $matches[0] );
 		} else {
-			$doc->loadHTML( $component->text->get_value() );
+			$doc->loadHTML( $text );
 		}
 
 		$timestamp = $doc->getElementsByTagName( 'time' )->item( 0 );
 
-		if ( $timestamp ) {
+		if ( $timestamp && $timestamp instanceof \DOMElement ) {
 			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-			$correction['date'] = $timestamp->ownerDocument->saveHTML( $timestamp );
+			$correction['date'] = $timestamp->nodeValue;
 		} else {
 			ConsoleColor::bright_magenta( 'Unable to find date' )->output();
 		}
 
 		if ( $timestamp->getAttribute( 'datetime' ) ) {
 			$correction['timestamp'] = $timestamp->getAttribute( 'datetime' );
+
+			if ( ! empty( $correction['timestamp'] ) && str_contains( $correction['timestamp'], '.' ) ) {
+				$correction['timestamp'] = substr(
+					$correction['timestamp'],
+					0,
+					strpos( $correction['timestamp'], '.' )
+				);
+			}
+		} else {
 			ConsoleColor::bright_magenta( 'Unable to find timestamp' )->output();
 		}
 
