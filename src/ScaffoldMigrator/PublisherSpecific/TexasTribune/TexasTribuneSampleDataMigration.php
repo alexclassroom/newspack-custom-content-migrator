@@ -207,7 +207,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 *
 	 * @return MigrationDataChest
 	 */
-	public function get_container(): MigrationDataChest {
+	public function get_data_chest(): MigrationDataChest {
 		return new JSONMigrationDataChest( '/var/www/html/2024-11-21_texas_tribune_all_sample_articles.json', 'identifier' );
 	}
 
