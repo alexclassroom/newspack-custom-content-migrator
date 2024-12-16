@@ -62,7 +62,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 *
 	 * @param RunAwareMigrationObject $migration_object The object to perform the migration on.
 	 *
-	 * @return bool|MigrationState|\WP_Error|null
+	 * @return bool|MigrationState|WP_Error|null
 	 * @throws Exception If an error occurs.
 	 */
 	public function command( RunAwareMigrationObject $migration_object ): bool|MigrationState|WP_Error|null {
@@ -147,6 +147,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 			);
 		}
 
+		// TODO - sponsorcontent - record the sponsor information somewhere if it’s not obvious from either the byline or some other metadata and migrate these into Newspack sponsors.
 		match ( $migration_object->metadata->type->get_value() ) {
 			'article', 'sponsorcontent' => $posts_data->set_post_type(
 				new MigrationObjectPropertyWrapper(
@@ -154,7 +155,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					explode( '.', $migration_object->metadata->type->get_path() ),
 					$migration_object
 				)
-			), // TODO: should sponsorcontent be handled differently?
+			),
 			'flatpage' => $posts_data->set_post_type(
 				new MigrationObjectPropertyWrapper(
 					'page',
@@ -413,6 +414,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 		$text = $component->text->get_value();
 
+		// TODO - perhaps we can ask TT to provide structured time data for when correction was made instead of this string parsing.
 		$doc = new \DOMDocument();
 
 		$matches = [];
@@ -858,6 +860,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$width  = $component->width ? $component->width->get_value() : null;
 		$height = $component->height ? $component->height->get_value() : null;
 
+		// TODO I believe we might need to update `get_iframe` to support alignment within post.
 		return serialize_block( $this->block_generator->get_iframe( $component->url->get_value(), $width, $height ) );
 	}
 
