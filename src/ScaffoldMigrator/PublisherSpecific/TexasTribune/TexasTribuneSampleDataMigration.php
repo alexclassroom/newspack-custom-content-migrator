@@ -327,11 +327,13 @@ class TexasTribuneSampleDataMigration implements Migration {
 						return '';
 					}
 
-					if ( 'data graphic' === $previous_sibling->role->get_value() ) {
-						return '';
-					}
+					$omit_caption_if_previous_sibling_matched_role = [
+						'audio',
+						'data graphic',
+						'video',
+					];
 
-					if ( 'video' === $previous_sibling->role->get_value() ) {
+					if ( in_array( $previous_sibling->role->get_value(), $omit_caption_if_previous_sibling_matched_role, true ) ) {
 						return '';
 					}
 				}
