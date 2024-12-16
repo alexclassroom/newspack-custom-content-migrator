@@ -259,6 +259,10 @@ class TexasTribuneSampleDataMigration implements Migration {
 			case 'sections entry container':
 				return $this->handle_sections_entry_container( $component, $post_id );
 			case 'text':
+				if ( $component->text && '* * *' === $component->text->get_value() ) {
+					return serialize_block( $this->block_generator->get_separator( 'is-stile-dots' ) );
+				}
+
 				return $this->handle_text_component( $component );
 			case 'context snippet':
 				return $this->handle_context_snippet_component( $component );
