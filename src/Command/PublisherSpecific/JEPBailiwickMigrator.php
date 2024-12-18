@@ -107,41 +107,24 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 */
 	public static function register_commands(): void {
 
-		$xml_file = [
-			'type'        => 'assoc',
-			'name'        => 'xml-file',
-			'description' => 'Path to XML file - can also be a url',
-			'optional'    => false,
-		];
-
-		$refresh = [
-			'type'        => 'flag',
-			'name'        => 'refresh-existing',
-			'description' => 'Refresh existing articles',
-			'optional'    => true,
-		];
-
-		$from_date = [
-			'type'        => 'assoc',
-			'name'        => 'from-date',
-			'description' => 'From date in format YYYY-MM-DD. For example 2024-11-14',
-			'optional'    => false,
-		];
-		$to_date   = [
-			'type'        => 'assoc',
-			'name'        => 'to-date',
-			'description' => 'To date in format YYYY-MM-DD. From date in format YYYY-MM-DD. For example 2024-10-31',
-			'optional'    => false,
-		];
-
 		WP_CLI::add_command(
 			'newspack-content-migrator bw-download-xml',
 			self::get_command_closure( 'cmd_download_xml' ),
 			[
 				'shortdesc' => 'Download XML files from date range.',
 				'synopsis'  => [
-					$from_date,
-					$to_date,
+					[
+						'type'        => 'assoc',
+						'name'        => 'from-date',
+						'description' => 'From date in format YYYY-MM-DD. For example 2024-11-14',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'to-date',
+						'description' => 'To date in format YYYY-MM-DD. From date in format YYYY-MM-DD. For example 2024-10-31',
+						'optional'    => false,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'base-url',
@@ -176,7 +159,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			[
 				'shortdesc' => 'Import articles from an XML file.',
 				'synopsis'  => [
-					$xml_file,
+					[
+						'type'        => 'assoc',
+						'name'        => 'xml-file',
+						'description' => 'Path to XML file - can also be a url',
+						'optional'    => true,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'sponsors-bylines-csv-file',
@@ -186,12 +174,23 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'dir',
+						'description' => 'Will scan all XML files in this dir.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'header-images-bylines-csv-file',
 						'description' => "CSV containing original article URL and the sponsor byline it should get. Expected header columns 'author_name','byline_image_url'.",
 						// Make it mandatory so as not to forget to use it.
 						'optional'    => false,
 					],
-					$refresh,
+					[
+						'type'        => 'flag',
+						'name'        => 'refresh-existing',
+						'description' => 'Refresh existing articles',
+						'optional'    => true,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'brand-name',
@@ -425,7 +424,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @throws Exception If things go wrong.
 	 */
 	public function cmd_import_articles_from_xml( array $pos_args, array $assoc_args ): void {
-		$xml_file_path             = $assoc_args['xml-file'];
+		$xml_file_path = $assoc_args['xml-file'] ?? null;
+		$dir           = $assoc_args['dir'] ?? null;
+		if ( is_null( $xml_file_path ) && is_null( $dir ) ) {
+			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			return;
+		}
 		$sponsors_urls_bylines_csv = $assoc_args['sponsors-bylines-csv-file'] ?? null;
 		$header_images_bylines_csv = $assoc_args['header-images-bylines-csv-file'] ?? null;
 		$refresh                   = $assoc_args['refresh-existing'] ?? false;
@@ -442,226 +446,245 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		// Fetch initial data.
-		$home_url  = home_url();
-		$timestamp = gmdate( 'Y-m-d H:i:s' );
-		$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
+		$home_url    = home_url();
 		$file_logger = PlainFileLog::get_logger( 'bw-article-import' );
-		$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
 		// Get CSV data into 2D arrays.
 		$sponsors_urls_to_bylines     = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
 		$header_image_urls_to_bylines = $this->get_csv_data_to_2d_array( $header_images_bylines_csv, 'byline_image_url', 'author_name' );
 
-		// Load XML file.
-		$xml_fetcher = null;
-		try {
-			$xml_fetcher = new Concrete5Xml( $xml_file_path );
-		} catch ( Exception $o_0 ) {
-			NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+		// Get .xml files.
+		$xml_files = [];
+		if ( is_null( $dir ) ) {
+			$xml_files = [ $xml_file_path ];
+		} else {
+			$xml_files = glob( "$dir/*.xml" );
+			if ( empty( $xml_files ) ) {
+				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				return;
+			}
 		}
 
-		// Import articles.
-		$articles    = $xml_fetcher->get_articles();
-		$total_count = $xml_fetcher->get_count();
-		$counter     = 0;
-		foreach ( $articles as $article ) {
-			++$counter;
+		foreach ( $xml_files as $xml_file_path ) {
 
-			// Dev helper parameter to process only a single URL.
-			if ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
-				continue;
-			}
-			
-			// Skip importing some articles custom marked in the sponsors-bylines-csv-file.csv file.
-			if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) && ( '<POST CAN BE DELETED>' == $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
-				$this->cli_logger->notice(
-					'WARNING: Skipping article because it is defined in sponsors-bylines-csv-file.csv to be deleted.',
-					[
-						'url' => $article['url'],
-					]
-				);
-				continue;
+			// Load XML file.
+			$xml_fetcher = null;
+			try {
+				$xml_fetcher = new Concrete5Xml( $xml_file_path );
+			} catch ( Exception $o_0 ) {
+				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
 			}
 
-			// New post data (or update if already imported).
-			$post = [
-				'post_type'   => 'post',
-				'post_status' => 'publish',
-			];
-			
-			// Get existing post ID if already imported.
-			$original_url = $article['url'];
-			$existing_id  = $this->get_post_id_by_original_url( $original_url );
-			if ( ! empty( $existing_id ) ) {
-				if ( ! $refresh ) {
+			// Log.
+			$timestamp = gmdate( 'Y-m-d H:i:s' );
+			$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
+			$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
+	
+			// Import articles.
+			$articles    = $xml_fetcher->get_articles();
+			$total_count = $xml_fetcher->get_count();
+			$counter     = 0;
+			foreach ( $articles as $article ) {
+				++$counter;
+	
+				// Dev helper parameter to process only a single URL.
+				if ( is_null( $process_single_url ) || rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
+					continue;
+				}
+				
+				// Skip importing some articles custom marked in the sponsors-bylines-csv-file.csv file.
+				if ( isset( $sponsors_urls_to_bylines[ $article['url'] ] ) && ( '<POST CAN BE DELETED>' == $sponsors_urls_to_bylines[ $article['url'] ] ) ) {
 					$this->cli_logger->notice(
-						'Article already imported, skipping',
+						'WARNING: Skipping article because it is defined in sponsors-bylines-csv-file.csv to be deleted.',
 						[
-							'url'     => $original_url,
-							'post_id' => $existing_id,
+							'url' => $article['url'],
 						]
 					);
 					continue;
 				}
-
-				// This will update the existing post.
-				$post['ID'] = $existing_id;
-			}
-
-			// Basic data.
-			$post['post_title'] = $article['title'];
-			$post['post_name']  = basename( $original_url );
-			$post['post_date']  = $article['datePublic'];
-			
-			// Set article <lead> to Newspack subtitle.
-			$lead = $article['lead'];
-			if ( ! empty( $lead ) ) {
-				$post['meta_input']['newspack_post_subtitle'] = $lead;
-			}
-
-			// Set content.
-			$post['post_content'] = $article['description'] . $article['content'];
-
-			// Get author name based on custom rules, and the rule itself (for easier QA).
-			$author_arr  = $this->get_author_name_based_on_custom_rules( $article, $brand_name, $sponsors_urls_to_bylines, $header_image_urls_to_bylines );
-			$author_name = $author_arr['author_name'];
-			$author_rule = $author_arr['author_rule'] ?? null;
-			
-			// Create and set author user.
-			$user_id             = $this->get_user_id( $author_name );
-			$post['post_author'] = $user_id;
-
-			// Set categories.
-			$category_name = $article['category'];
-			$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
-			if ( ! is_wp_error( $cat_id ) ) {
-				$post['post_category'] = [ $cat_id ];
-			} else {
-				$this->cli_logger->error(
-					'ERROR: Failed to get or create category',
-					[
-						'error'         => $cat_id,
-						'category_name' => $category_name,
-					] 
-				);
-			}
-			
-			// Set tags.
-			$tags = explode( ',', $article['tags'] );
-			if ( ! empty( $tags ) ) {
-				$post['tags_input'] = $tags;
-			}
-
-			// Save custom postmetas.
-			$post['meta_input'][ self::META_ORIGINAL_URL ]    = $original_url;
-			$post['meta_input'][ self::META_ORIGINAL_AUTHOR ] = $article['author'];
-			if ( $author_rule ) {
-				$post['meta_input'][ self::META_DEFAULT_AUTHOR_RULE ] = $author_rule;
-			}
-			if ( isset( $article['byline'] ) && ! empty( $article['byline'] ) ) {
-				$post['meta_input'][ self::META_ORIGINAL_BYLINE_NODE ] = $article['byline'];
-			}
-
-			// Insert or update post if it already exists.
-			$post_id = wp_insert_post( $post );
-			if ( is_wp_error( $post_id ) ) {
-				$this->cli_logger->error(
-					'ERROR: Failed to import/update post',
-					[
-						'error'     => $post_id,
-						'post_data' => $post,
-					] 
-				);
-				continue;
-			}
-			// Log.
-			$context = [
-				'url'      => $original_url,
-				'post_id'  => $post_id,
-				'from_url' => $original_url,
-				'to_url'   => "$home_url/?p=$post_id",
-			];
-			$action  = 0 !== $existing_id && $existing_id == $post_id ? 'Updated' : 'Imported';
-			$this->cli_logger->info( sprintf( '%s post', $action ), $context );
-			$file_logger->info( sprintf( '%s post', $action ), $context );
-			
-			// Custom updates to content.
-			$content         = get_post_field( 'post_content', $post_id );
-			$content_updated = $content;
-			
-			// Define content replacers -- $replacers holds callbacks to be applied to the content.
-			$replacers = [];
-			if ( str_contains( $content, '<h1>' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
-			}
-			if ( str_contains( $content, '<img ' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->get_full_sized_images( $html_doc, $post_id );
-			}
-			if ( str_contains( $content, '<img ' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
-			}
-			if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
-			}
-
-			// Run the replacers.
-			if ( ! empty( $replacers ) ) {
-				$html_doc = new HtmlDocument( $content_updated );
-				// Run the replacers on the same HTMLDocument so we don't have to parse the content multiple times.
-				foreach ( $replacers as $replacer ) {
-					$replacer( $html_doc, $post_id );
-				}
-				$content_updated = $html_doc->save();
-			}
-
-			// Import galleries -- after replacers which replace images.
-			$gallery_images = $article['gallery'] ?? null;
-			if ( $gallery_images ) {
-				// Download the gallery images.
-				$this->cli_logger->info( sprintf( 'Downloading %d gallery images', count( $gallery_images ) ) );
-				$gallery_image_att_ids = [];
-				foreach ( $gallery_images as $gallery_image ) {
-					$gallery_image_att_id = Attachments::import_external_file( $gallery_image, null, null, null, null, $post_id, [], '' );
-					if ( is_wp_error( $gallery_image_att_id ) ) {
-						$this->cli_logger->error(
-							'ERROR: Failed to import gallery image.',
+	
+				// New post data (or update if already imported).
+				$post = [
+					'post_type'   => 'post',
+					'post_status' => 'publish',
+				];
+				
+				// Get existing post ID if already imported.
+				$original_url = $article['url'];
+				$existing_id  = $this->get_post_id_by_original_url( $original_url );
+				if ( ! empty( $existing_id ) ) {
+					if ( ! $refresh ) {
+						$this->cli_logger->notice(
+							'Article already imported, skipping',
 							[
-								'error'         => $gallery_image_att_id,
-								'gallery_image' => $gallery_image,
-								'url'           => $original_url,
-								'post_id'       => $post_id,
-							] 
+								'url'     => $original_url,
+								'post_id' => $existing_id,
+							]
 						);
 						continue;
 					}
-
-					$gallery_image_att_ids[] = $gallery_image_att_id;
+	
+					// This will update the existing post.
+					$post['ID'] = $existing_id;
+				}
+	
+				// Basic data.
+				$post['post_title'] = $article['title'];
+				$post['post_name']  = basename( $original_url );
+				$post['post_date']  = $article['datePublic'];
+				
+				// Set article <lead> to Newspack subtitle.
+				$lead = $article['lead'];
+				if ( ! empty( $lead ) ) {
+					$post['meta_input']['newspack_post_subtitle'] = $lead;
+				}
+	
+				// Set content.
+				$post['post_content'] = $article['description'] . $article['content'];
+	
+				// Get author name based on custom rules, and the rule itself (for easier QA).
+				$author_arr  = $this->get_author_name_based_on_custom_rules( $article, $brand_name, $sponsors_urls_to_bylines, $header_image_urls_to_bylines );
+				$author_name = $author_arr['author_name'];
+				$author_rule = $author_arr['author_rule'] ?? null;
+				
+				// Create and set author user.
+				$user_id             = $this->get_user_id( $author_name );
+				$post['post_author'] = $user_id;
+	
+				// Set categories.
+				$category_name = $article['category'];
+				$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+				if ( ! is_wp_error( $cat_id ) ) {
+					$post['post_category'] = [ $cat_id ];
+				} else {
+					$this->cli_logger->error(
+						'ERROR: Failed to get or create category',
+						[
+							'error'         => $cat_id,
+							'category_name' => $category_name,
+						] 
+					);
 				}
 				
-				// Append gallery block to post_content.
-				if ( ! empty( $gallery_image_att_ids ) ) {
-					$gallery_block    = serialize_block(
-						$this->gutenberg_blocks->get_jetpack_slideshow( $gallery_image_att_ids )
-					);
-					$content_updated .= "\n\n" . $gallery_block;
+				// Set tags.
+				$tags = explode( ',', $article['tags'] );
+				if ( ! empty( $tags ) ) {
+					$post['tags_input'] = $tags;
 				}
-			}
+	
+				// Save custom postmetas.
+				$post['meta_input'][ self::META_ORIGINAL_URL ]    = $original_url;
+				$post['meta_input'][ self::META_ORIGINAL_AUTHOR ] = $article['author'];
+				if ( $author_rule ) {
+					$post['meta_input'][ self::META_DEFAULT_AUTHOR_RULE ] = $author_rule;
+				}
+				if ( isset( $article['byline'] ) && ! empty( $article['byline'] ) ) {
+					$post['meta_input'][ self::META_ORIGINAL_BYLINE_NODE ] = $article['byline'];
+				}
+	
+				// Insert or update post if it already exists.
+				$post_id = wp_insert_post( $post );
+				if ( is_wp_error( $post_id ) ) {
+					$this->cli_logger->error(
+						'ERROR: Failed to import/update post',
+						[
+							'error'     => $post_id,
+							'post_data' => $post,
+						] 
+					);
+					continue;
+				}
+				// Log.
+				$context = [
+					'url'      => $original_url,
+					'post_id'  => $post_id,
+					'from_url' => $original_url,
+					'to_url'   => "$home_url/?p=$post_id",
+				];
+				$action  = 0 !== $existing_id && $existing_id == $post_id ? 'Updated' : 'Imported';
+				$this->cli_logger->info( sprintf( '%s post', $action ), $context );
+				$file_logger->info( sprintf( '%s post', $action ), $context );
+				
+				// Custom updates to content.
+				$content         = get_post_field( 'post_content', $post_id );
+				$content_updated = $content;
+				
+				// Define content replacers -- $replacers holds callbacks to be applied to the content.
+				$replacers = [];
+				if ( str_contains( $content, '<h1>' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
+				}
+				if ( str_contains( $content, '<img ' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_full_sized_images( $html_doc, $post_id );
+				}
+				if ( str_contains( $content, '<img ' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
+				}
+				if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
+				}
+	
+				// Run the replacers.
+				if ( ! empty( $replacers ) ) {
+					$html_doc = new HtmlDocument( $content_updated );
+					// Run the replacers on the same HTMLDocument so we don't have to parse the content multiple times.
+					foreach ( $replacers as $replacer ) {
+						$replacer( $html_doc, $post_id );
+					}
+					$content_updated = $html_doc->save();
+				}
+	
+				// Import galleries -- after replacers which replace images.
+				$gallery_images = $article['gallery'] ?? null;
+				if ( $gallery_images ) {
+					// Download the gallery images.
+					$this->cli_logger->info( sprintf( 'Downloading %d gallery images', count( $gallery_images ) ) );
+					$gallery_image_att_ids = [];
+					foreach ( $gallery_images as $gallery_image ) {
+						$gallery_image_att_id = Attachments::import_external_file( $gallery_image, null, null, null, null, $post_id, [], '' );
+						if ( is_wp_error( $gallery_image_att_id ) ) {
+							$this->cli_logger->error(
+								'ERROR: Failed to import gallery image.',
+								[
+									'error'         => $gallery_image_att_id,
+									'gallery_image' => $gallery_image,
+									'url'           => $original_url,
+									'post_id'       => $post_id,
+								] 
+							);
+							continue;
+						}
+	
+						$gallery_image_att_ids[] = $gallery_image_att_id;
+					}
+					
+					// Append gallery block to post_content.
+					if ( ! empty( $gallery_image_att_ids ) ) {
+						$gallery_block    = serialize_block(
+							$this->gutenberg_blocks->get_jetpack_slideshow( $gallery_image_att_ids )
+						);
+						$content_updated .= "\n\n" . $gallery_block;
+					}
+				}
+	
+				// Update post content.
+				if ( $content !== $content_updated ) {
+					wp_update_post(
+						[
+							'ID'           => $post_id,
+							'post_content' => $content_updated,
+						]
+					);
+				}
+	
+				// Set featured image.
+				$this->set_featured_image_on_post( $post_id, $article['image'] );
+	
+				// Set brand.
+				$this->multibranded->set_brands_to_post( $post_id, [ $brand_id ] );
 
-			// Update post content.
-			if ( $content !== $content_updated ) {
-				wp_update_post(
-					[
-						'ID'           => $post_id,
-						'post_content' => $content_updated,
-					]
-				);
-			}
+			} // End articles loop.
+		} // End XML files loop.
 
-			// Set featured image.
-			$this->set_featured_image_on_post( $post_id, $article['image'] );
-
-			// Set brand.
-			$this->multibranded->set_brands_to_post( $post_id, [ $brand_id ] );
-		}
 
 		$timestamp = gmdate( 'Y-m-d H:i:s' );
 		$this->cli_logger->info( sprintf( '[%s] Done %s', $timestamp, $xml_file_path ) );
