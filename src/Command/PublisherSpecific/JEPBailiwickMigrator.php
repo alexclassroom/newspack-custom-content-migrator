@@ -451,6 +451,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// Get CSV data into 2D arrays.
 		$sponsors_urls_to_bylines     = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
 		$header_image_urls_to_bylines = $this->get_csv_data_to_2d_array( $header_images_bylines_csv, 'byline_image_url', 'author_name' );
+		$processed_single_url         = false;
 
 		// Get .xml files.
 		$xml_files = [];
@@ -489,6 +490,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				// Dev helper parameter to process only a single URL.
 				if ( is_null( $process_single_url ) || rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
 					continue;
+				} elseif ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) == rtrim( $article['url'], '/' ) ) {
+					$processed_single_url = true;
 				}
 				
 				// Skip importing some articles custom marked in the sponsors-bylines-csv-file.csv file.
@@ -685,6 +688,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			} // End articles loop.
 		} // End XML files loop.
 
+		// If $process_single_url was used, check if it was successfully processed.
+		if ( ! is_null( $process_single_url ) && true !== $processed_single_url ) {
+			$this->cli_logger->error( 'ERROR: The provided --process-single-url URL was not found in the XML files.', [ 'url' => $process_single_url ] );
+		}
 
 		$timestamp = gmdate( 'Y-m-d H:i:s' );
 		$this->cli_logger->info( sprintf( '[%s] Done %s', $timestamp, $xml_file_path ) );
