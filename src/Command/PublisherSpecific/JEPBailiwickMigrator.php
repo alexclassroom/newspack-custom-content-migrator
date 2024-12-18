@@ -264,7 +264,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			'newspack-content-migrator bw-helper-list-live-downloadable-urls',
 			self::get_command_closure( 'cmd_helper_list_downloadable_urls' ),
 			[
-				'shortdesc' => 'Helper dev command. Lists articles which contain "downloadable URLs" (src URLs which contain `...bailiwickexpress.com/index.php/download_file/view/...` and which should be downloaded as files).',
+				'shortdesc' => 'Helper dev command. Lists articles which contain downloadable URLs and which should be downloaded as files.',
 				'synopsis'  => [
 					[
 						'type'        => 'assoc',
@@ -600,7 +600,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
 			}
 			if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
-				$replacers[] = fn( $html_doc ) => $this->get_downloadable_url_files( $html_doc, $post_id );
+				$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
 			}
 
 			// Run the replacers.
@@ -810,8 +810,6 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 * 
-	 * @throws RuntimeException If failed to extract all URLs from the content.
-	 * 
 	 * @return void
 	 */
 	public function cmd_helper_list_downloadable_urls( array $pos_args, array $assoc_args ): void {
@@ -832,11 +830,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->cli_logger->info( 'Checking all posts with URL that can be downloaded.' );
 		$this->cli_logger->info( '' );
 
-		$downloadable_urls = [];
-		$downloadable_urls__list_of_original_article_urls_where_they_appear = [];
+		$download_file_urls = [];
+		$downloadad_file_urls__list_of_original_article_urls_where_they_appear = [];
+		$files_urls = [];
+		$files_urls__list_of_original_article_urls_where_they_appear = [];
 
 		// Go through files.
-		$total_count = 0;
 		foreach ( $xml_files as $xml_file ) {
 			$xml_fetcher = null;
 			try {
@@ -847,54 +846,105 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 	
 			// Go through articles in a file.
-			$articles    = $xml_fetcher->get_articles();
-			$total_count = $xml_fetcher->get_count();
-			$counter     = 0;
+			$articles = $xml_fetcher->get_articles();
 			foreach ( $articles as $article ) {
 
 				$content = $article['content'];
 
-				// Check if there are downloadable URLs in the content from the previous CMS.
-				if ( false === str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
-					continue;
+				/**
+				 * Get all "download_file URLs" and their captions -- these contain "bailiwickexpress.com/index.php/download_file/view".
+				 */
+				$urls = $this->extract_download_file_urls( $content );
+				if ( ! empty( $urls ) ) {
+					$urls_count = count( $urls );
+					
+					// Additionally validate if our method has extracted all the URLs correctly.
+					$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
+					$count   = preg_match_all( $pattern, $content, $matches );
+					if ( $count != $urls_count ) {
+						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "download_file URLs" from the content for article URL %s from XML %s . This might be OK if URLs just occur multiple times, but check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
+						$debug = $this->extract_download_file_urls( $content );
+						$url   = $article['url'];
+					}
+
+					// Get unique URLs.
+					$urls_unique = [];
+					foreach ( $urls as $element ) {
+						if ( ! in_array( $element['url'], $urls_unique ) ) {
+							$urls_unique[] = $element['url'];
+						}
+					}
+	
+					// Store.
+					$download_file_urls = array_merge( $download_file_urls, $urls_unique );
+					$downloadad_file_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
+				}           
+
+				/**
+				 * Now get all "files URLs" -- these contain "bailiwickexpress.com/files/".
+				 */
+				$urls = $this->extract_files_urls( $content );
+				if ( ! empty( $urls ) ) {
+					$urls_count = count( $urls );
+	
+					// Additionally validate if our method is extracting all the URLs correctly.
+					$pattern = '/bailiwickexpress\.com\/files/';
+					$count   = preg_match_all( $pattern, $content, $matches );
+
+					// These were manually checked and are OK -- ULRs simply appear multiple times in the content. It's not our method that is wrong, and these will be downloaded and replaced correctly.
+					$ignore = [
+						'https://www.bailiwickexpress.com/jsy/community/got-question-about-new-rubis-rd100-renewable-diesel-here-are-some-faqs',
+						'https://www.bailiwickexpress.com/jsy/sport/island-games-medals-designer-guernsey-models-her-creations',
+					];
+					if ( $count != $urls_count && ! in_array( $article['url'], $ignore ) ) {
+						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "files URLs" from the content for article URL %s from XML %s . This might be OK if URLs just occur multiple times, but check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
+						$debug = $this->extract_files_urls( $content );
+						$url   = $article['url'];
+					}
+	
+					// Get unique URLs.
+					$urls_unique = [];
+					foreach ( $urls as $element ) {
+						if ( ! in_array( $element['url'], $urls_unique ) ) {
+							$urls_unique[] = $element['url'];
+						}
+					}
+
+					// Store.
+					$files_urls = array_merge( $files_urls, $urls_unique );
+					$files_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
 				}
-
-				// Get all downloadable URLs (and their captions) using our method.
-				$urls        = $this->extract_downloadable_urls( $content );
-				$urls_count  = count( $urls );
-				$urls_unique = array_unique( array_keys( $urls ) );
-
-				// Additionally validate if our method is extracting all the URLs well.
-				$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
-				$count   = preg_match_all( $pattern, $content, $matches );
-				if ( $count != $urls_count ) {
-					throw new RuntimeException( sprintf( 'Failed to extract all URLs from the content for article URL %s', esc_url_raw( $article['url'] ) ) );
-				}
-
-				$downloadable_urls = array_merge( $downloadable_urls, $urls_unique );
-				$downloadable_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
 			}
 		}
 
-		\WP_CLI::line( 'Downloadable URLs:' );
-		\WP_CLI::line( implode( "\n", $downloadable_urls ) );
-
-		\WP_CLI::line( 'Original article URLs where these downloadable articles appear:' );
-		\WP_CLI::line( implode( "\n", $downloadable_urls__list_of_original_article_urls_where_they_appear ) );
+		WP_CLI::success( '"download_file URLs":' );
+		WP_CLI::line( implode( "\n", $download_file_urls ) );
+		WP_CLI::success( 'Articles with "download_file URLs":' );
+		WP_CLI::line( implode( "\n", $downloadad_file_urls__list_of_original_article_urls_where_they_appear ) );
+		
+		WP_CLI::success( '"files URLs":' );
+		WP_CLI::line( implode( "\n", $files_urls ) );
+		WP_CLI::success( 'Articles with "file URLs":' );
+		WP_CLI::line( implode( "\n", $files_urls__list_of_original_article_urls_where_they_appear ) );
 	}
 
 	/**
-	 * Returns all URLs, even duplicates (for tracking purposes).
+	 * Returns all URLs, even duplicates for tracking purposes, which contain:
+	 *      'bailiwickexpress.com/index.php/download_file/view'  -- internally we call these "download_file URLs" to distinguish them from "files URLs".
 	 *
 	 * @param string $html HTML content.
-	 * @return array URLs Array with URLs as keys and captions as values. {
+	 * @return array URLs Array with subarrays containing keys for URLs and for captions. {
 	 *    @type string $url      URL.
 	 *    @type ?string $caption Caption. Null if not found.
 	 * }
 	 */
-	private function extract_downloadable_urls( $html ) {
-		$urls = [];
+	private function extract_download_file_urls( $html ) {
+		$downlod_file_urls = [];
 		
+		if ( false === str_contains( $html, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
+			return $downlod_file_urls;
+		}
+
 		/**
 		 * The pattern to match URLs containing `...bailiwickexpress.com/index.php/download_file/view/...`.
 		 * - https?://: Match http:// or https://.
@@ -927,7 +977,75 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					$caption = $element->getAttribute( 'title' ) ?? null;
 				}
 
-				$urls[ $url ] = $caption;
+				$downlod_file_urls[] = [
+					'url'     => trim( $url ),
+					'caption' => trim( $caption ),
+				];
+			}
+		}
+	  
+		return $downlod_file_urls;
+	}
+
+	/**
+	 * Returns all URLs (even duplicates, for tracking purposes) which contain:
+	 *      'bailiwickexpress.com/files/' -- internally we call these "files URLs" to distinguish them from "download_file URLs".
+	 * 
+	 * Slightly different method than `extract_download_file_urls()`, added incrementaly
+	 * as we find different kinds of URLs to extract.
+	 *
+	 * @param string $html HTML content.
+	 * @return array URLs Array with subarrays containing keys for URLs and for captions. {
+	 *    @type string $url      URL.
+	 *    @type ?string $caption Caption. Null if not found.
+	 * }
+	 */
+	private function extract_files_urls( $html ) {
+		$urls = [];
+
+		if ( false === str_contains( $html, 'bailiwickexpress.com/files/' ) ) {
+			return $urls;
+		}
+		
+		/**
+		 * The pattern to match URLs containing `...bailiwickexpress.com/files/...`.
+		 * - https?://: Match http:// or https://.
+		 * - (bailiwickexpress\.com|[^\/]+): Match bailiwickexpress.com or any domain.
+		 * - \/files\/: Match the path.
+		 * - ([^\/]+(?:\/[^\/]+)*): Match the file path.
+		 *      - [^\/]+: Match any character except a slash.
+		 *      - (?:\/[^\/]+)*)*: Match a slash followed by any character except a slash, zero or more times.
+		 *          (?:...): This is a non-capturing group. It matches the enclosed pattern but doesn't store the matched content in a separate variable.
+		 * - \/: Match the last slash.
+		 */
+		$pattern = '/https?:\/\/(bailiwickexpress\.com|[^\/]+)\/files\/([^\/]+(?:\/[^\/]+)*)/';
+
+		$dom = new \DOMDocument();
+		// phpcs:disable
+		// WordPress.PHP.NoSilencedErrors.Discouraged
+		@$dom->loadHTML( $html ); // Suppress errors.
+		// phpcs:enable
+	  
+		// Find elements with potential URLs.
+		$elements = $dom->getElementsByTagName( '*' );
+		foreach ( $elements as $element ) {
+			// Check for URLs in attributes -- src or href.
+			$url = $element->getAttribute( 'src' ) ?? null;
+			if ( ! $url ) {
+				$url = $element->getAttribute( 'href' ) ?? null;
+			}
+
+			if ( $url && preg_match( $pattern, $url, $matches ) ) {
+				// Get alt or title attribute.
+				$caption = $element->getAttribute( 'alt' ) ?? null;
+				if ( ! $caption ) {
+					$caption = $element->getAttribute( 'title' ) ?? null;
+				}
+
+				$urls[] = [
+					'url'     => trim( $url ),
+					'caption' => trim( $caption ),
+				];
 			}
 		}
 	  
@@ -1250,27 +1368,29 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Find downloadable URLs (their equivalent of attachment URL) in HTMLDocument content and download them and replace with attachment URLs.
+	 * Finds "download_file URLs" (see $this->extract_download_file_urls) in HTMLDocument content and download them and replace with attachment URLs.
 	 *
 	 * @param HtmlDocument $html_doc The HTML document to replace in.
 	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 *
 	 * @return void
 	 */
-	private function get_downloadable_url_files( HtmlDocument $html_doc, int $post_id ): void {
+	private function get_download_file_urls( HtmlDocument $html_doc, int $post_id ): void {
 		
-		$html = $html_doc->save();
-		$urls = $this->extract_downloadable_urls( $html );
-		foreach ( $urls as $url => $caption ) {
-			$caption = $caption ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
+		$html               = $html_doc->save();
+		$download_file_urls = $this->extract_download_file_urls( $html );
+		foreach ( $download_file_urls as $element ) {
 
-			$att_id = $this->import_attachment_from_url( $url, $post_id );
+			$download_file_url = $element['url'];
+			$caption           = $element['caption'] ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
+
+			$att_id = $this->import_attachment_from_url( $download_file_url, $post_id );
 			if ( is_wp_error( $att_id ) ) {
 				$this->cli_logger->error(
 					'ERROR: Failed to import downloadable URL',
 					[
 						'post_id' => $post_id,
-						'url'     => $url,
+						'url'     => $download_file_url,
 						'error'   => $att_id,
 					]
 				);
@@ -1288,14 +1408,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// Replace the downloadable URL with the new attachment URL.
 			$new_url = wp_get_attachment_url( $att_id );
 			if ( $new_url ) {
-				$html_doc->load( str_replace( $url, $new_url, $html_doc->save() ) );
+				$html_doc->load( str_replace( $download_file_url, $new_url, $html_doc->save() ) );
 			} else {
 				// This should not happen, but better safe.
 				$this->cli_logger->error(
 					'ERROR: Failed to get attachment URL after importing downloadable URL',
 					[
 						'post_id' => $post_id,
-						'url'     => $url,
+						'url'     => $download_file_url,
 					],
 				);
 				
