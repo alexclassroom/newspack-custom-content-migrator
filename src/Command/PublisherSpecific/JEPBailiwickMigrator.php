@@ -476,10 +476,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 
 			// Log.
-			$timestamp = gmdate( 'Y-m-d H:i:s' );
-			$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
-			$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
-	
+			if ( is_null( $process_single_url ) ) {
+				$timestamp = gmdate( 'Y-m-d H:i:s' );
+				$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
+				$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
+			}
+
 			// Import articles.
 			$articles    = $xml_fetcher->get_articles();
 			$total_count = $xml_fetcher->get_count();
@@ -492,6 +494,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					continue;
 				} elseif ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) == rtrim( $article['url'], '/' ) ) {
 					$processed_single_url = true;
+
+					$timestamp = gmdate( 'Y-m-d H:i:s' );
+					$this->cli_logger->info( sprintf( '[%s] Importing single article from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
+					$file_logger->info( sprintf( '[%s] Importing single  article from XML file', $timestamp ) );
 				}
 				
 				// Skip importing some articles custom marked in the sponsors-bylines-csv-file.csv file.
