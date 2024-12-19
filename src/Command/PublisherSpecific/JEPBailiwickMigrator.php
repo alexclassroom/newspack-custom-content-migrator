@@ -27,6 +27,7 @@ use NewspackCustomContentMigrator\Command\General\MultiBranded;
 use NewspackCustomContentMigrator\Logic\Concrete5Xml;
 use Psr\Log\LoggerInterface;
 use Bramus\Monolog\Formatter\ColoredLineFormatter;
+use Bramus\Monolog\Formatter\ColorSchemes\DefaultScheme;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_Error;
@@ -91,8 +92,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->cli_logger       = CliLog::get_logger( 'bw', new ColoredLineFormatter( null, "%level_name%: %message% %context%\n", null, true ) );
-		$this->file_logger      = FileLog::get_logger( 'bw' );
+		// Colorless CLI logger for clearer piping of CLI output into a file.
+		$color_scheme = new DefaultScheme();
+		$color_scheme->setColorizeArray( [] );
+		$formatter        = new ColoredLineFormatter( $color_scheme, "%message% %context%\n", null, true );
+		$this->cli_logger = CliLog::get_logger( 'bw', $formatter );
+		// File logger.
+		$this->file_logger = FileLog::get_logger( 'bw' );
+		// Logic.
 		$this->taxonomy         = new Taxonomy();
 		$this->multibranded     = Multibranded::get_instance();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
@@ -369,11 +376,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$short_iso8601_format = 'Y-m-d';
 		$start                = DateTime::createFromFormat( $short_iso8601_format, $from_date );
 		if ( ! $start ) {
-			NMT::exit_with_message( sprintf( 'Invalid start date %s', $from_date ), [ $this->cli_logger ] );
+			NMT::exit_with_message( sprintf( 'ERROR: Invalid start date %s', $from_date ), [ $this->cli_logger ] );
 		}
 		$end = DateTime::createFromFormat( $short_iso8601_format, $to_date );
 		if ( ! $end ) {
-			NMT::exit_with_message( sprintf( 'Invalid end date %s', $to_date ), [ $this->cli_logger ] );
+			NMT::exit_with_message( sprintf( 'ERROR: Invalid end date %s', $to_date ), [ $this->cli_logger ] );
 		}
 
 		// Make sure the end date is inclusive by adding one day.
@@ -427,7 +434,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$xml_file_path = $assoc_args['xml-file'] ?? null;
 		$dir           = $assoc_args['dir'] ?? null;
 		if ( is_null( $xml_file_path ) && is_null( $dir ) ) {
-			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			$this->cli_logger->error( 'ERROR: Must provide either a directory or a specific XML file.' );
 			return;
 		}
 		$sponsors_urls_bylines_csv = $assoc_args['sponsors-bylines-csv-file'] ?? null;
@@ -437,12 +444,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$process_single_url        = $assoc_args['process-single-url'] ?? null;
 		$brand_id                  = $this->multibranded->get_brand_id_from_brand_name( $brand_name );
 		if ( ! $brand_id ) {
-			NMT::exit_with_message( 'Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.', [ $this->cli_logger ] );
+			NMT::exit_with_message( 'ERROR: Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.', [ $this->cli_logger ] );
 		}
 
 		// Check permalink structure.
 		if ( ! $this->is_permalink_structure_correct() ) {
-			NMT::exit_with_message( 'During import, permalink structure must be set to "/%category%/%postname%/". After the import it should be set back to "Post name".', [ $this->cli_logger ] );
+			NMT::exit_with_message( 'ERROR: During import, permalink structure must be set to "/%category%/%postname%/". After the import it should be set back to "Post name".', [ $this->cli_logger ] );
 		}
 
 		// Fetch initial data.
@@ -460,7 +467,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		} else {
 			$xml_files = glob( "$dir/*.xml" );
 			if ( empty( $xml_files ) ) {
-				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				$this->cli_logger->error( 'ERROR: No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
 			}
 		}
@@ -472,7 +479,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			try {
 				$xml_fetcher = new Concrete5Xml( $xml_file_path );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
 			}
 
 			// Log.
@@ -734,11 +741,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				if ( 0 == $row ) {
 					$key_index = array_search( $column_for_key, $data );
 					if ( false === $key_index ) {
-						NMT::exit_with_message( sprintf( 'Failed to find column for array key `%s` in header of CSV file %s', $column_for_key, $csv_filename ), [ $this->cli_logger ] );
+						NMT::exit_with_message( sprintf( 'ERROR: Failed to find column for array key `%s` in header of CSV file %s', $column_for_key, $csv_filename ), [ $this->cli_logger ] );
 					}
 					$value_index = array_search( $column_for_value, $data );
 					if ( false === $value_index ) {
-						NMT::exit_with_message( sprintf( 'Failed to find column for array value `%s` in header of CSV file %s', $column_for_value, $csv_filename ), [ $this->cli_logger ] );
+						NMT::exit_with_message( sprintf( 'ERROR: Failed to find column for array value `%s` in header of CSV file %s', $column_for_value, $csv_filename ), [ $this->cli_logger ] );
 					}
 				} else {
 					// Combine data into key-value pairs.
@@ -764,7 +771,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$xml_file = $assoc_args['xml-file'] ?? null;
 
 		if ( is_null( $dir ) && is_null( $xml_file ) ) {
-			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			$this->cli_logger->error( 'ERROR: Must provide either a directory or a specific XML file.' );
 			return;
 		}
 
@@ -774,7 +781,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		} else {
 			$files = glob( "$dir/*.xml" );
 			if ( empty( $files ) ) {
-				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				$this->cli_logger->error( 'ERROR: No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
 			}
 		}
@@ -857,7 +864,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		} else {
 			$xml_files = glob( "$dir/*.xml" );
 			if ( empty( $xml_files ) ) {
-				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				$this->cli_logger->error( 'ERROR: No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
 			}
 		}
@@ -878,7 +885,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$this->cli_logger->info( 'Parsing articles from XML file', [ 'xml_file' => $xml_file ] );
 				$xml_fetcher = new Concrete5Xml( $xml_file );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
 			}
 	
 			// Go through articles in a file.
@@ -1099,7 +1106,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$dir      = $assoc_args['dir'] ?? null;
 		$xml_file = $assoc_args['xml-file'] ?? null;
 		if ( is_null( $dir ) && is_null( $xml_file ) ) {
-			$this->cli_logger->error( 'Must provide either a directory or a specific XML file.' );
+			$this->cli_logger->error( 'ERROR: Must provide either a directory or a specific XML file.' );
 			return;
 		}
 
@@ -1109,7 +1116,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		} else {
 			$xml_files = glob( "$dir/*.xml" );
 			if ( empty( $xml_files ) ) {
-				$this->cli_logger->error( 'No XML files found in the directory.', [ 'dir' => $dir ] );
+				$this->cli_logger->error( 'ERROR: No XML files found in the directory.', [ 'dir' => $dir ] );
 				return;
 			}
 		}
@@ -1126,7 +1133,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file ] );
 				$xml_fetcher = new Concrete5Xml( $xml_file );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( $o_0->getMessage(), [ $this->cli_logger ] );
+				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
 			}
 	
 			// Go through articles in a file.
@@ -1676,7 +1683,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$default_author_id = 1;
 		if ( empty( $author_name ) ) {
 			$this->cli_logger->notice(
-				'WARNING Using default user adminnewspack.',
+				'WARNING: Using default user adminnewspack.',
 				[
 					'url' => $article['url'],
 				]
@@ -1700,7 +1707,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			return $user->ID;
 		} catch ( Exception $e ) {
-			$message = sprintf( 'Could not create user with name %s', $author_name );
+			$message = sprintf( 'ERROR: Could not create user with name %s', $author_name );
 			$this->cli_logger->error( $message, [ 'error' => $e ] );
 			$this->file_logger->critical( $message, [ 'error' => $e ] );
 
