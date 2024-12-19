@@ -483,7 +483,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$timestamp = gmdate( 'Y-m-d H:i:s' );
 		$this->cli_logger->info( sprintf( '[%s] Starting import', $timestamp ) );
 
-		foreach ( $xml_files as $xml_file_path ) {
+		foreach ( $xml_files as $key_xml_file_path => $xml_file_path ) {
 
 			// Load XML file.
 			$xml_fetcher = null;
@@ -495,8 +495,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Log.
 			if ( is_null( $process_single_url ) ) {
-				$this->cli_logger->info( sprintf( 'Importing articles from XML file' ), [ 'xml_file' => $xml_file_path ] );
-				$file_logger->info( sprintf( 'Importing articles from XML file' ) );
+				$this->cli_logger->info( sprintf( '(%d/%d) Importing articles from XML file', $key_xml_file_path + 1, count( $xml_files ) ), [ 'xml_file' => $xml_file_path ] );
+				$file_logger->info( sprintf( '(%d/%d) Importing articles from XML file', $key_xml_file_path + 1, count( $xml_files ) ) );
 			}
 
 			// Import articles.
@@ -578,7 +578,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	
 				// Set categories.
 				$category_name = $article['category'];
-				$cat_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
+				// Guernsey categories get a different name than the ones in XMLs.
+				if ( self::BRAND_NAME_BAILIWICK_GUERNSEY === $brand_name ) {
+					$category_name = $this->get_guernsey_category_name( $category_name );
+				}
+				$cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $category_name, 0 );
 				if ( ! is_wp_error( $cat_id ) ) {
 					$post['post_category'] = [ $cat_id ];
 				} else {
@@ -626,9 +630,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'from_url' => $original_url,
 					'to_url'   => "$home_url/?p=$post_id",
 				];
-				$action  = 0 !== $existing_id && $existing_id == $post_id ? 'Updated' : 'Imported';
-				$this->cli_logger->info( sprintf( '%s post', $action ), $context );
-				$file_logger->info( sprintf( '%s post', $action ), $context );
+				$action  = 0 !== $existing_id && $existing_id == $post_id ? 'Updating' : 'Importing';
+				$this->cli_logger->info( sprintf( '(%d/%d) %s post', $counter, $total_count, $action ), $context );
+				$file_logger->info( sprintf( '(%d/%d) %s post', $counter, $total_count, $action ), $context );
 				
 				// Custom updates to content.
 				$content         = get_post_field( 'post_content', $post_id );
@@ -718,6 +722,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		$timestamp = gmdate( 'Y-m-d H:i:s' );
 		$this->cli_logger->info( sprintf( '[%s] Done %s', $timestamp, $xml_file_path ) );
+	}
+
+	/**
+	 * Returns category name for Guernsey.
+	 * 
+	 * @param string $category_name Original XML category name for Guernsey article.
+	 * 
+	 * @return string New category name.
+	 */
+	private function get_guernsey_category_name( string $category_name ): string {
+		$category_name .= ' - GE';
+
+		return $category_name;
 	}
 
 	/**
@@ -1140,7 +1157,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		foreach ( $xml_files as $xml_file ) {
 			$xml_fetcher = null;
 			try {
-				$this->cli_logger->info( 'Importing articles from XML file', [ 'xml_file' => $xml_file ] );
+				$this->cli_logger->info( 'Checking articles from XML file', [ 'xml_file' => $xml_file ] );
 				$xml_fetcher = new Concrete5Xml( $xml_file );
 			} catch ( Exception $o_0 ) {
 				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
