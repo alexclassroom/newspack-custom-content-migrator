@@ -480,6 +480,9 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 		}
 
+		$timestamp = gmdate( 'Y-m-d H:i:s' );
+		$this->cli_logger->info( sprintf( '[%s] Starting import', $timestamp ) );
+
 		foreach ( $xml_files as $xml_file_path ) {
 
 			// Load XML file.
@@ -492,9 +495,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Log.
 			if ( is_null( $process_single_url ) ) {
-				$timestamp = gmdate( 'Y-m-d H:i:s' );
-				$this->cli_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ), [ 'xml_file' => $xml_file_path ] );
-				$file_logger->info( sprintf( '[%s] Importing articles from XML file', $timestamp ) );
+				$this->cli_logger->info( sprintf( 'Importing articles from XML file' ), [ 'xml_file' => $xml_file_path ] );
+				$file_logger->info( sprintf( 'Importing articles from XML file' ) );
 			}
 
 			// Import articles.
@@ -505,7 +507,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				++$counter;
 	
 				// Dev helper parameter to process only a single URL.
-				if ( is_null( $process_single_url ) || rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
+				if ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) !== rtrim( $article['url'], '/' ) ) {
 					continue;
 				} elseif ( ! is_null( $process_single_url ) && rtrim( $process_single_url, '/' ) == rtrim( $article['url'], '/' ) ) {
 					$processed_single_url = true;
@@ -1257,7 +1259,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// Get all the <a> tags.
 		$as = $html_doc->find( 'a' );
 		if ( empty( $as ) ) {
-			$this->cli_logger->info( 'No <a> tags found in post content', [ 'post_id' => $post_id ] );
+			// No <a> tags found in post content.
 			return;
 		}
 
