@@ -452,13 +452,21 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			NMT::exit_with_message( 'ERROR: During import, permalink structure must be set to "/%category%/%postname%/". After the import it should be set back to "Post name".', [ $this->cli_logger ] );
 		}
 
-		// Fetch initial data.
-		$home_url    = home_url();
-		$file_logger = PlainFileLog::get_logger( 'bw-article-import' );
+		// Initial data.
+		$home_url             = home_url();
+		$file_logger          = PlainFileLog::get_logger( 'bw-article-import' );
+		$processed_single_url = false;
 		// Get CSV data into 2D arrays.
-		$sponsors_urls_to_bylines     = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
+		$sponsors_urls_to_bylines = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
+		if ( empty( $sponsors_urls_to_bylines ) ) {
+			$this->cli_logger->error( 'ERROR: No sponsors URLs to bylines found in the CSV file.', [ 'csv_file' => $sponsors_urls_bylines_csv ] );
+			return;
+		}
 		$header_image_urls_to_bylines = $this->get_csv_data_to_2d_array( $header_images_bylines_csv, 'byline_image_url', 'author_name' );
-		$processed_single_url         = false;
+		if ( empty( $header_image_urls_to_bylines ) ) {
+			$this->cli_logger->error( 'ERROR: No header image URLs to bylines found in the CSV file.', [ 'csv_file' => $header_images_bylines_csv ] );
+			return;
+		}
 
 		// Get .xml files.
 		$xml_files = [];
