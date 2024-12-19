@@ -28,6 +28,7 @@ use NewspackCustomContentMigrator\Logic\Concrete5Xml;
 use Psr\Log\LoggerInterface;
 use Bramus\Monolog\Formatter\ColoredLineFormatter;
 use Bramus\Monolog\Formatter\ColorSchemes\DefaultScheme;
+use Monolog\Level;
 use simplehtmldom\HtmlDocument;
 use WP_CLI;
 use WP_Error;
@@ -92,11 +93,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	private function __construct() {
-		// Colorless CLI logger for clearer piping of CLI output into a file.
+		// Colorless CLI logger, for noiseless piping of CLI output into a file.
 		$color_scheme = new DefaultScheme();
-		$color_scheme->setColorizeArray( [] );
-		$formatter        = new ColoredLineFormatter( $color_scheme, "%message% %context%\n", null, true );
-		$this->cli_logger = CliLog::get_logger( 'bw', $formatter );
+		$color_scheme->setColorizeArray( array_fill_keys( Level::VALUES, '' ) );
+		$this->cli_logger = CliLog::get_logger( 'bw', new ColoredLineFormatter( $color_scheme, "%message% %context%\n", null, true ) );
 		// File logger.
 		$this->file_logger = FileLog::get_logger( 'bw' );
 		// Logic.
