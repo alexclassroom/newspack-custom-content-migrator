@@ -1119,19 +1119,13 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return string
 	 */
 	private function handle_faq_entry_component( MigrationObjectPropertyWrapper $component ): string {
-		$question_block = $this->block_generator->get_paragraph(
-			'<strong>' . $component->question->get_value() . '</strong>'
-		);
-
-		$answer_block = $this->block_generator->get_quote(
-			$component->answer->get_value()
-		);
-
 		return serialize_block(
-			$this->block_generator->get_group_constrained(
+			$this->block_generator->get_details(
+				$component->question->get_value(),
 				[
-					$question_block,
-					$answer_block,
+					$this->block_generator->get_quote(
+						$component->answer->get_value()
+					),
 				]
 			)
 		);
