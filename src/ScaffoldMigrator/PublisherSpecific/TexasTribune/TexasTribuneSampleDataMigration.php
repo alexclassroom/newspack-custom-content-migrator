@@ -1019,7 +1019,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		// TODO need to update this after we've imported categories/tags. The series_url needs to be updated to the correct category URL.
 		$more_in_series_link = '<a href="' . get_site_url( null, $component->series_url->get_value() ) . '">More in this series</a>';
 		$paragraph_block     = $this->block_generator->get_paragraph(
-			$component->text->get_value() . $more_in_series_link
+			strip_tags( $component->text->get_value(), [ 'a' ] ) . $more_in_series_link
 		);
 
 		if ( false === $component->show_logo->get_value() ) {
