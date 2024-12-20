@@ -1200,7 +1200,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$copy_link      = '';
 
 		if ( $section_entry_component->show_copy_link->get_value() ) {
-			$copy_link = '<a id="' . $section_entry_component->identifier->get_value() . '">&#x1F517</a>';
+			$copy_link = '<a id="' . $section_entry_component->identifier->get_value() . '">🔗</a>';
 		}
 
 		foreach ( $section_entry_component->components as $component ) {
