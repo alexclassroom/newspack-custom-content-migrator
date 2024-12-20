@@ -1336,7 +1336,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	private function handle_image_import( string $image_url, ?string $title = null, ?string $caption = null, ?string $description = null, ?string $alt = null ): TexasTribuneAttachmentMetadataObject|WP_Error {
 		$image_object = new TexasTribuneAttachmentMetadataObject( $image_url );
 
-		$maybe_attachment_id = Attachments::import_external_file( $image_url, $title, $caption, $description, $alt );
+		$maybe_attachment_id = Attachments::import_external_file( $image_object->download_url, $title, $caption, $description, $alt );
 
 		if ( is_wp_error( $maybe_attachment_id ) ) {
 			ConsoleColor::bright_magenta( 'Error Importing Image' )
