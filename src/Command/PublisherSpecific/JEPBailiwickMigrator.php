@@ -1031,8 +1031,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Returns all internally called "index download_file view URLs" which contain '/index.php/download_file/view'.
-	 * Matches both absolute and relative URLs, but modifies the relative ones into fully qualified ones when returning them.
-	 * Returns even duplicates for tracking purposes.
+	 * Matches and returns both absolute and relative URLs and returns even duplicates for tracking purposes.
 	 *
 	 * @param string $html       HTML content.
 	 * @param string $brand_name Brand name.
@@ -1060,7 +1059,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 *  - (?:\/[^\/]+)* Match a slash followed by any character except a slash, zero or more times.
 		 *  - \/ Match the last slash.
 		 */
-		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/index\.php\/download_file\/view\/([^\/]+(?:\/[^\/]+)*)\/';
+		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/index\.php\/download_file\/view\/([^\/]+(?:\/[^\/]+)*)\//';
 
 		$dom = new \DOMDocument();
 		// phpcs:disable
@@ -1078,16 +1077,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 
 			// If $url is relative, make it fully qualified.
-			if ( ! str_starts_with( $url, 'http' ) ) {
-				if ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
-					$url = NP_LIVE_JSY . $url;
-				} else {
-					$url = NP_LIVE_GSY . $url;
-				}
+			$url_absolute = null;
+			if ( str_starts_with( $url, 'http' ) ) {
+				$url_absolute = $url;
+			} elseif ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
+					$url_absolute = NP_LIVE_JSY . $url;
+			} else {
+				$url_absolute = NP_LIVE_GSY . $url;
 			}
 
 			// Check if URL matches the pattern.
-			if ( $url && preg_match( $pattern, $url, $matches ) ) {
+			if ( $url_absolute && preg_match( $pattern, $url_absolute, $matches ) ) {
 				
 				// Try and get caption from alt or title attributes.
 				$caption = $element->getAttribute( 'alt' ) ?? null;
@@ -1107,8 +1107,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Returns all internally called "files URLs" which contain '/files/'.
-	 * Matches both absolute and relative URLs, but modifies the relative ones into fully qualified ones when returning them.
-	 * Returns even duplicates for tracking purposes.
+	 * Matches and returns both absolute and relative URLs and returns even duplicates for tracking purposes.
 	 * 
 	 * @param string $html       HTML content.
 	 * @param string $brand_name Brand name.
@@ -1136,7 +1135,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		 *      - (?:\/[^\/]+)* Match a slash followed by any character except a slash, zero or more times.
 		 *      - \/ Match the last slash.
 		 */
-		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/files\/([^\/]+(?:\/[^\/]+)*)\/';
+		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/files\/([^\/]+(?:\/[^\/]+)*)\//';
 
 		$dom = new \DOMDocument();
 		// phpcs:disable
@@ -1154,16 +1153,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 
 			// If $url is relative, make it fully qualified.
-			if ( ! str_starts_with( $url, 'http' ) ) {
-				if ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
-					$url = NP_LIVE_JSY . $url;
-				} else {
-					$url = NP_LIVE_GSY . $url;
-				}
+			$url_absolute = null;
+			if ( str_starts_with( $url, 'http' ) ) {
+				$url_absolute = $url;
+			} elseif ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
+					$url_absolute = NP_LIVE_JSY . $url;
+			} else {
+				$url_absolute = NP_LIVE_GSY . $url;
 			}
 
 			// Check if URL matches the pattern.
-			if ( $url && preg_match( $pattern, $url, $matches ) ) {
+			if ( $url_absolute && preg_match( $pattern, $url_absolute, $matches ) ) {
 				
 				// Try and get caption from alt or title attributes.
 				$caption = $element->getAttribute( 'alt' ) ?? null;
@@ -1471,12 +1471,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			$att_id = $this->import_attachment_from_url( $src, $post_id, $alt_text );
 			if ( is_wp_error( $att_id ) ) {
+				$is_404 = false !== strpos( $att_id->get_error_code(), '404' );
 				$this->cli_logger->error(
 					'ERROR: Failed to import inline image',
 					[
 						'post_id' => $post_id,
 						'src'     => $src,
-						'error'   => $att_id,
+						'error'   => $is_404 ? '404' : $att_id,
 					]
 				);
 				continue;
@@ -1527,14 +1528,28 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$download_file_url = $element['url'];
 			$caption           = $element['caption'] ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
 
-			$att_id = $this->import_attachment_from_url( $download_file_url, $post_id );
+			// If the image URL is relative, make it fully qualified.
+			$download_file_url_absolute = null;
+			if ( str_starts_with( $download_file_url, 'http' ) ) {
+				$download_file_url_absolute = $download_file_url;
+			} elseif ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+					$download_file_url_absolute = NP_LIVE_JSY . $download_file_url;
+			} else {
+				$download_file_url_absolute = NP_LIVE_GSY . $download_file_url;
+			}
+
+			$att_id = $this->import_attachment_from_url( $download_file_url_absolute, $post_id );
 			if ( is_wp_error( $att_id ) ) {
+				$is_404 = false !== strpos( $att_id->get_error_code(), '404' );
 				$this->cli_logger->error(
-					'ERROR: Failed to import downloadable URL',
+					'ERROR: Failed to import index_download_file_view URL',
 					[
 						'post_id' => $post_id,
-						'url'     => $download_file_url,
-						'error'   => $att_id,
+						'url'     => [
+							'original'           => $download_file_url,
+							'absolute_attempted' => $download_file_url_absolute,
+						],
+						'error'   => $is_404 ? '404' : $att_id,
 					]
 				);
 				continue;
@@ -1586,14 +1601,28 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$download_file_url = $element['url'];
 			$caption           = $element['caption'] ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
 
-			$att_id = $this->import_attachment_from_url( $download_file_url, $post_id );
+			// If the image URL is relative, make it fully qualified.
+			$download_file_url_absolute = null;
+			if ( str_starts_with( $download_file_url, 'http' ) ) {
+				$download_file_url_absolute = $download_file_url;
+			} elseif ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+					$download_file_url_absolute = NP_LIVE_JSY . $download_file_url;
+			} else {
+				$download_file_url_absolute = NP_LIVE_GSY . $download_file_url;
+			}
+
+			$att_id = $this->import_attachment_from_url( $download_file_url_absolute, $post_id );
 			if ( is_wp_error( $att_id ) ) {
+				$is_404 = false !== strpos( $att_id->get_error_code(), '404' );
 				$this->cli_logger->error(
-					'ERROR: Failed to import downloadable URL',
+					'ERROR: Failed to import files URL',
 					[
 						'post_id' => $post_id,
-						'url'     => $download_file_url,
-						'error'   => $att_id,
+						'url'     => [
+							'original'           => $download_file_url,
+							'absolute_attempted' => $download_file_url_absolute,
+						],
+						'error'   => $is_404 ? '404' : $att_id,
 					]
 				);
 				continue;
@@ -1642,7 +1671,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( empty( $image_url ) ) {
 			return;
 		}
-		$data['_old_featured_image'] = $image_url;
+
+		// Store the old featured image URL.
+		$data                            = [];
+		$data[ self::META_ORIGINAL_URL ] = $image_url;
+		
+		// If the image URL is relative, make it fully qualified.
 		if ( ! str_starts_with( $image_url, 'http' ) ) {
 			if ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
 				$image_url = trailingslashit( NP_LIVE_JSY ) . trim( $image_url, '/' );
@@ -1652,24 +1686,27 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 
 		$attachment_id = $this->import_attachment_from_url( $image_url, $post_id, $alt );
-		if ( ! is_wp_error( $attachment_id ) ) {
-			$data['_thumbnail_id'] = $attachment_id;
-			FileLog::get_logger( 'bw-images' )->notice(
-				'Imported featured image',
-				[
-					'post_id' => $post_id,
-					'image'   => $image_url,
-				]
-			);
-		} else {
-			FileLog::get_logger( 'bw-images' )->error(
+		if ( is_wp_error( $attachment_id ) ) {
+			$is_404 = false !== strpos( $attachment_id->get_error_code(), '404' );
+			$this->cli_logger->error(
 				'ERROR: Could not download featured image',
 				[
 					'post_id' => $post_id,
 					'image'   => $image_url,
+					'error'   => $is_404 ? '404' : $attachment_id,
 				]
 			);
+		} else {
+			$this->cli_logger->info(
+				'Imported featured image',
+				[
+					'post_id' => $post_id,
+					'image'   => $image_url,
+				] 
+			);
+			$data['_thumbnail_id'] = $attachment_id;
 		}
+
 		wp_update_post(
 			[
 				'ID'         => $post_id,
@@ -1894,7 +1931,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @param int    $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 * @param string $alt_text The alt text for the image/attachment.
 	 *
-	 * @return int|WP_Error
+	 * @return int|WP_Error The attachment ID or WP_Error if failed. WP_Error must be handled.
 	 */
 	private function import_attachment_from_url( string $url, int $post_id, string $alt_text = '' ): int|WP_Error {
 		if ( empty( $url ) ) {
@@ -1904,15 +1941,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		// Download the image and import it (will return existing attachment ID if already imported).
 		$attachment_id = Attachments::import_attachment_for_post( $post_id, $url, $alt_text );
 		if ( is_wp_error( $attachment_id ) ) {
-			$this->cli_logger->error(
-				'ERROR: Failed to import attachment',
-				[
-					'post_id' => $post_id,
-					'url'     => $url,
-					'error'   => $attachment_id,
-				]
-			);
-
+			// Return the error to be handled.
 			return $attachment_id;
 		}
 
