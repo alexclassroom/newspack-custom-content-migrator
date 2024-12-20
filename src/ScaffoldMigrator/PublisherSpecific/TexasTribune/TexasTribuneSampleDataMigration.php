@@ -661,7 +661,6 @@ class TexasTribuneSampleDataMigration implements Migration {
 		}
 
 		$image_size = 'full';
-		$alignment  = '';
 
 		if ( $component->location ) {
 			switch ( strtolower( $component->location->get_value() ) ) {
@@ -680,6 +679,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					break;
 				case 'full':
 					$image_size = 'large';
+					$alignment = 'wide';
 					break;
 			}
 		}
