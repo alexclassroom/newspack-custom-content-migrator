@@ -89,7 +89,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					new MigrationObject(
 						$author->get_value(),
 						'id',
-						$migration_object->get_container()
+						$migration_object->get_data_chest()
 					),
 					$migration_object->get_run_key()
 				);
@@ -641,7 +641,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 									],
 								),
 								'url',
-								$migration_object->get_container()
+								$migration_object->get_data_chest()
 							),
 							$migration_object->get_run_key()
 						)
@@ -1399,7 +1399,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 							]
 						),
 						'decoded_file_name',
-						$migration_object->get_container()
+						$migration_object->get_data_chest()
 					),
 					$migration_object->get_run_key()
 				)
