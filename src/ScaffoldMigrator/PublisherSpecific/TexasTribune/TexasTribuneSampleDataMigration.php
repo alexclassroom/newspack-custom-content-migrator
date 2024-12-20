@@ -1258,24 +1258,40 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 		$image_block = '';
 
-		$maybe_attachment_id = Attachments::import_external_file( $component->logo->get_value() );
+		$maybe_image_object = $this->handle_image_import( $component->logo->get_value() );
 
-		if ( is_wp_error( $maybe_attachment_id ) ) {
+		if ( is_wp_error( $maybe_image_object ) ) {
 			ConsoleColor::red( 'Error getting pulitzer logo (' )
-						->bright_red( $maybe_attachment_id->get_error_code() )
+				->bright_red( $maybe_image_object->get_error_code() )
 						->red( '):' )
-						->underlined_bright_red( $maybe_attachment_id->get_error_message() )
+				->underlined_bright_red( $maybe_image_object->get_error_message() )
 						->output();
 		} else {
-			$image_url   = wp_get_attachment_image_url( $maybe_attachment_id );
-			$image_block = $this->block_generator->get_image( get_post( $maybe_attachment_id ), 'full', false, null, 'center', $image_url );
+			$image_url   = wp_get_attachment_image_url( $maybe_image_object->attachment_id );
+			$image_block = $this->block_generator->get_image( get_post( $maybe_image_object->attachment_id ), 'full', false, null, 'center', $image_url );
 		}
 
-		return serialize_block(
-			$this->block_generator->get_group_constrained(
-				[ $image_block, $text_block ],
-			)
+		$group_block = $this->block_generator->get_group_constrained(
+			[ $image_block, $text_block ],
+			[
+				'alignright',
+				'has-light-gray-background-color',
+				'has-background',
+			],
+			[
+				'align'           => 'right',
+				'backgroundColor' => 'light-gray',
+			]
 		);
+
+		$group_block['attrs']['layout'] = [
+			'type'           => 'flex',
+			'orientation'    => 'vertical',
+			'justifyContent' => 'center',
+			'flexWrap'       => 'wrap',
+		];
+
+		return serialize_block( $group_block );
 	}
 
 	/**
