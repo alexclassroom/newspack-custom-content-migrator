@@ -165,6 +165,25 @@ class TexasTribuneSampleDataMigration implements Migration {
 			),
 		};
 
+		try {
+			$posts_data->set_post_date( $migration_object->metadata->date_created );
+			$posts_data->set_post_modified( $migration_object->metadata->date_created );
+
+			if ( $migration_object->metadata->date_published ) {
+				$posts_data->set_post_date( $migration_object->metadata->date_published ); // Using MigrationObjectPropertyWrapper so that data source can be properly recorded.
+			}
+
+			if ( $migration_object->metadata->date_modified ) {
+				$posts_data->set_post_modified( $migration_object->metadata->date_modified );
+			}
+
+			$maybe_post_id = $posts_data->set_post_status( $post_status_value )
+										->set_post_excerpt( $migration_object->metadata->summary )
+										->create();
+		} catch ( \Exception $e ) {
+			$maybe_post_id = $posts_data->get_post_id_from_legacy_id( $migration_object->get_data_id() );
+		}
+
 		if ( is_wp_error( $maybe_post_id ) ) {
 			ConsoleColor::red( 'Error creating post (' )->bright_red( $maybe_post_id->get_error_code() )->red( '):' )->underlined_bright_red( $maybe_post_id->get_error_message() )->output();
 			// TODO replace with FailedMigrationState
@@ -190,6 +209,12 @@ class TexasTribuneSampleDataMigration implements Migration {
 			} else {
 				set_post_thumbnail( $maybe_post_id, $maybe_featured_image_attachment_object->attachment_id );
 			}
+		}
+
+		update_post_meta( $maybe_post_id, 'newspack_show_updated_date', 1 );
+
+		if ( $migration_object->metadata->summary ) {
+			update_post_meta( $maybe_post_id, 'newspack_post_subtitle', $migration_object->metadata->summary );
 		}
 
 		$post_content_value = $this->get_post_content_by_handling_components( $migration_object->components, $maybe_post_id, $maybe_featured_image_attachment_object );
