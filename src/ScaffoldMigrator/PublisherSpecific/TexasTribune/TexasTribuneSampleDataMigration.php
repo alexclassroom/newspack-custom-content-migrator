@@ -582,17 +582,18 @@ class TexasTribuneSampleDataMigration implements Migration {
 			);
 		}
 
-		return serialize_block(
-			$this->block_generator->get_paragraph(
-				'<a href="' . $component->article_url->get_value() . '">' . $component->article_headline->get_value() . '</a>',
-				'',
-				'',
-				'',
-				[
-					'original-related-story-id' => $component->article_id->get_value(),
-				]
-			)
+		$paragraph_block = $this->block_generator->get_paragraph(
+			'<a href="' . $component->article_url->get_value() . '">' . $component->article_headline->get_value() . '</a>',
 		);
+
+		$paragraph_block['attrs'] = array_merge(
+			$paragraph_block['attrs'],
+			[
+				'original-related-story-id' => $component->article_id->get_value(),
+			]
+		);
+
+		return serialize_block( $paragraph_block );
 	}
 
 	/**
@@ -944,19 +945,18 @@ class TexasTribuneSampleDataMigration implements Migration {
 								->underlined_bright_red( $attachment_id->get_error_message() )
 								->output();
 
-					return serialize_block(
-						$this->block_generator->get_paragraph(
-							$component->file_url->get_value(),
-							'',
-							'',
-							'',
-							[
-								'original-file-url'  => $component->file_url->get_value(),
-								'original-file-type' => $component->file_type->get_value(),
-								'original-caption'   => $component->caption->get_value(),
-							]
-						)
+					$paragraph_block = $this->block_generator->get_paragraph( $component->file_url->get_value() );
+
+					$paragraph_block['attrs'] = array_merge(
+						$paragraph_block['attrs'],
+						[
+							'original-file-url'  => $component->file_url->get_value(),
+							'original-file-type' => $component->file_type->get_value(),
+							'original-caption'   => $component->caption->get_value(),
+						]
 					);
+
+					return serialize_block( $paragraph_block );
 				}
 
 				$pdf = serialize_block( $this->block_generator->get_file_pdf( get_post( $attachment_id ) ) );
@@ -1231,12 +1231,15 @@ class TexasTribuneSampleDataMigration implements Migration {
 	private function handle_newsletter_signup_component( MigrationObjectPropertyWrapper $component ): string {
 		$paragraph_block = $this->block_generator->get_paragraph( 'NEWSLETTER SIGNUP HERE' );
 
-		$paragraph_block['attrs'] = [
-			'newsletter-id' => $component->newsletter ? $component->newsletter->get_value() : '',
-			'slug'          => $component->slug ? $component->slug->get_value() : '',
-			'name'          => $component->name ? $component->name->get_value() : '',
-			'description'   => $component->description ? $component->description->get_value() : '',
-		];
+		$paragraph_block['attrs'] = array_merge(
+			$paragraph_block['attrs'],
+			[
+				'newsletter-id' => $component->newsletter ? $component->newsletter->get_value() : '',
+				'slug'          => $component->slug ? $component->slug->get_value() : '',
+				'name'          => $component->name ? $component->name->get_value() : '',
+				'description'   => $component->description ? $component->description->get_value() : '',
+			]
+		);
 
 		return serialize_block( $paragraph_block );
 	}
