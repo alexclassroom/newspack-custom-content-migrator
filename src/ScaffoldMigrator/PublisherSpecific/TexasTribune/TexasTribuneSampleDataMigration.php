@@ -900,8 +900,10 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return array
 	 */
 	private function handle_caption_component( MigrationObjectPropertyWrapper $component ): array {
+		$caption = $component->text ?? $component->caption;
+
 		return $this->block_generator->get_paragraph(
-			$component->text->get_value(),
+			$caption->get_value(),
 			'',
 			'',
 			'',
@@ -961,7 +963,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 				$pdf = serialize_block( $this->block_generator->get_file_pdf( get_post( $attachment_id ) ) );
 
-				$caption = $component->caption ?
+				$caption_block = $this->handle_caption_component( $component );
 					serialize_block( $this->block_generator->get_paragraph( $component->caption->get_value() ) ) :
 					'';
 
