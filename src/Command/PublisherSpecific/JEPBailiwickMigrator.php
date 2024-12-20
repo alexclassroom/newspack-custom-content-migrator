@@ -103,8 +103,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->multibranded     = Multibranded::get_instance();
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		$this->posts            = new Posts();
-		if ( ! defined( 'NP_LIVE' ) ) {
-			$this->cli_logger->error( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
+		if ( ! defined( 'NP_LIVE_JSY' ) || ! defined( 'NP_LIVE_GSY' ) ) {
+			$this->cli_logger->error( 'NP_LIVE_JSY or NP_LIVE_GSY constants are not defined. Please add them in wp-config.php with the value of the live site schema and hostname (no ending slash).' );
 			exit;
 		}
 	}
@@ -659,14 +659,26 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					$replacers[] = fn( $html_doc ) => $this->fix_h1s( $html_doc, $post_id );
 				}
 				if ( str_contains( $content, '<img ' ) ) {
-					$replacers[] = fn( $html_doc ) => $this->get_full_sized_images( $html_doc, $post_id );
+					$replacers[] = fn( $html_doc ) => $this->get_full_sized_images( $html_doc, $post_id, $brand_name );
 				}
 				if ( str_contains( $content, '<img ' ) ) {
-					$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
+					$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id, $brand_name );
 				}
-// TODO 2nd URL ?
+				// Fully qualified URLs.
 				if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
 					$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
+				}
+				// Relative URLs.
+				if ( str_contains( $content, '"/index.php/download_file/view' ) ) {
+					// TODO.
+				}
+				// Fully qualified URLs.
+				if ( str_contains( $content, 'bailiwickexpress.com/files/' ) || str_contains( $content, '"/files/' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_download_files_urls( $html_doc, $post_id );
+				}
+				// Relative URLs.
+				if ( str_contains( $content, '"/files/' ) ) {
+					// TODO.
 				}
 	
 				// Run the replacers.
@@ -723,7 +735,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				}
 	
 				// Set featured image.
-				$this->set_featured_image_on_post( $post_id, $article['image'] );
+				$this->set_featured_image_on_post( $post_id, $article['image'], '', $brand_name );
 	
 				// Set brand.
 				$this->multibranded->set_brands_to_post( $post_id, [ $brand_id ] );
@@ -1284,14 +1296,15 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * 
 	 * This medhod replaces such <a>s with just the <img> with the correct full-sized `src` takend from the <a>'s `href`.
 	 *
-	 * @param HtmlDocument $html_doc The HTML document to replace in.
-	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param HtmlDocument $html_doc   The HTML document to replace in.
+	 * @param int          $post_id    The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param string       $brand_name The brand name.
 	 *
 	 * @throws RuntimeException If a cached image URL is not fully qualified.
 	 * 
 	 * @return void
 	 */
-	private function get_full_sized_images( HtmlDocument $html_doc, int $post_id ): void {
+	private function get_full_sized_images( HtmlDocument $html_doc, int $post_id, string $brand_name ): void {
 		
 		// Get all the <a> tags.
 		$as = $html_doc->find( 'a' );
@@ -1344,7 +1357,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// Check if `src` is fully qualified, and if it's not, expand it.
 			$src_expand_fully_qualified = null;
 			if ( ! str_starts_with( $src, 'http' ) ) {
-				$src_expand_fully_qualified = NP_LIVE . $src;
+				if ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+					$src_expand_fully_qualified = NP_LIVE_JSY . $src;
+				} else {
+					$src_expand_fully_qualified = NP_LIVE_GSY . $src;
+				}
 			}
 
 			// Get `href` -- the full-sized image URL.
@@ -1364,7 +1381,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 			// Make sure `href` is fully qualified.
 			if ( ! str_starts_with( $href, 'http' ) ) {
-				$href = NP_LIVE . $src;
+				if ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+					$href = NP_LIVE_JSY . $src;
+				} else {
+					$href = NP_LIVE_GSY . $src;
+				}
 			}
 			
 			// Create a new <img> element. Cloning the existing $img object is an efficient way to keep all the existing attributes.
@@ -1387,12 +1408,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Find images in HTMLDocument content and download them and replace with image blocks.
 	 *
-	 * @param HtmlDocument $html_doc The HTML document to replace in.
-	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param HtmlDocument $html_doc   The HTML document to replace in.
+	 * @param int          $post_id    The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param string       $brand_name The brand name.
 	 *
 	 * @return void
 	 */
-	private function get_inline_images( HtmlDocument $html_doc, int $post_id ): void {
+	private function get_inline_images( HtmlDocument $html_doc, int $post_id, string $brand_name ): void {
 		$images = $html_doc->find( 'img' );
 		if ( empty( $images ) ) {
 			$this->cli_logger->info( 'No inline images found in post', [ 'post_id' => $post_id ] );
@@ -1410,8 +1432,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			// $src_attr might be relative, so get the absolute URL.
 			if ( str_starts_with( $src_attr, 'http' ) ) {
 				$src = $src_attr;
+			} elseif ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+					$src = NP_LIVE_JSY . $src_attr;
 			} else {
-				$src = NP_LIVE . $src_attr;
+				$src = NP_LIVE_GSY . $src_attr;
 			}
 
 			// alt text.
@@ -1516,22 +1540,85 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Downloads and sets the featured image on a post.
+	 * Finds "files URLs" (see $this->extract_files_urls) in HTMLDocument content and download them and replace with attachment URLs.
 	 *
-	 * @param int    $post_id   Post ID.
-	 * @param string $image_url Image URL to download image from.
-	 * @param string $alt       Alt text for the image.
+	 * @param HtmlDocument $html_doc The HTML document to replace in.
+	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
 	 *
 	 * @return void
 	 */
-	private function set_featured_image_on_post( int $post_id, string $image_url, string $alt = '' ): void {
+	private function get_download_files_urls( HtmlDocument $html_doc, int $post_id ): void {
+		
+		$html               = $html_doc->save();
+		$download_file_urls = $this->extract_files_urls( $html );
+		foreach ( $download_file_urls as $element ) {
+
+			$download_file_url = $element['url'];
+			$caption           = $element['caption'] ?: ''; // phpcs:ignore Universal.Operators.DisallowShortTernary.Found
+
+			$att_id = $this->import_attachment_from_url( $download_file_url, $post_id );
+			if ( is_wp_error( $att_id ) ) {
+				$this->cli_logger->error(
+					'ERROR: Failed to import downloadable URL',
+					[
+						'post_id' => $post_id,
+						'url'     => $download_file_url,
+						'error'   => $att_id,
+					]
+				);
+				continue;
+			}
+
+			// Set caption to attachment.
+			wp_update_post(
+				[
+					'ID'           => $att_id,
+					'post_excerpt' => $caption,
+				] 
+			);
+
+			// Replace the downloadable URL with the new attachment URL.
+			$new_url = wp_get_attachment_url( $att_id );
+			if ( $new_url ) {
+				$html_doc->load( str_replace( $download_file_url, $new_url, $html_doc->save() ) );
+			} else {
+				// This should not happen, but better safe.
+				$this->cli_logger->error(
+					'ERROR: Failed to get attachment URL after importing downloadable URL',
+					[
+						'post_id' => $post_id,
+						'url'     => $download_file_url,
+					],
+				);
+				
+				// Explicitly `continue;` for clarity.
+				continue;
+			}
+		}
+	}
+
+	/**
+	 * Downloads and sets the featured image on a post.
+	 *
+	 * @param int    $post_id    Post ID.
+	 * @param string $image_url  Image URL to download image from.
+	 * @param string $alt        Alt text for the image.
+	 * @param string $brand_name Brand name.
+	 *
+	 * @return void
+	 */
+	private function set_featured_image_on_post( int $post_id, string $image_url, string $alt = '', string $brand_name ): void {
 		$image_url = trim( $image_url );
 		if ( empty( $image_url ) ) {
 			return;
 		}
 		$data['_old_featured_image'] = $image_url;
 		if ( ! str_starts_with( $image_url, 'http' ) ) {
-			$image_url = trailingslashit( NP_LIVE ) . trim( $image_url, '/' );
+			if ( self::BRAND_NAME_BAILIWICK_JERSEY == $brand_name ) {
+				$image_url = trailingslashit( NP_LIVE_JSY ) . trim( $image_url, '/' );
+			} else {
+				$image_url = trailingslashit( NP_LIVE_GSY ) . trim( $image_url, '/' );
+			}
 		}
 
 		$attachment_id = $this->import_attachment_from_url( $image_url, $post_id, $alt );
@@ -1716,7 +1803,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		if ( isset( $article['byline'] ) && ! empty( trim( $article['byline'] ) ) ) {
 			return [
 				'author_name' => 'Bailiwick Express News Team',
-				'author_rule' => sprintf( "Article has byline '%s' which is not found in header_byline_images CSV file, so setting author to 'Bailiwick Express News Team'", trim( $article['byline'] ) ),
+				'author_rule' => sprintf( "Article has byline '%s' which is not found in header_byline_images CSV file, therefore setting author to 'Bailiwick Express News Team'", trim( $article['byline'] ) ),
 			];
 		}
 
@@ -1786,6 +1873,18 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		// Download the image and import it (will return existing attachment ID if already imported).
 		$attachment_id = Attachments::import_attachment_for_post( $post_id, $url, $alt_text );
+		if ( is_wp_error( $attachment_id ) ) {
+			$this->cli_logger->error(
+				'ERROR: Failed to import attachment',
+				[
+					'post_id' => $post_id,
+					'url'     => $url,
+					'error'   => $attachment_id,
+				]
+			);
+
+			return $attachment_id;
+		}
 
 		// Save original URL as custom meta to $attachment_id.
 		update_post_meta( $attachment_id, self::META_ORIGINAL_URL, $url );
