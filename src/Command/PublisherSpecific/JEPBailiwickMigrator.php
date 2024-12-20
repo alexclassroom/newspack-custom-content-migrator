@@ -39,10 +39,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	const BRAND_NAME_BAILIWICK_JERSEY   = 'Bailiwick Express News Jersey';
 	const BRAND_NAME_BAILIWICK_GUERNSEY = 'Bailiwick Express News Guernsey';
 
-	const META_ORIGINAL_URL         = 'newspackmigration_original_url';
-	const META_ORIGINAL_AUTHOR      = 'newspackmigration_original_author';
-	const META_ORIGINAL_BYLINE_NODE = 'newspackmigration_original_byline_node';
-	const META_DEFAULT_AUTHOR_RULE  = 'newspackmigration_default_author_rule';
+	const META_ORIGINAL_URL          = 'newspackmigration_original_url';
+	const META_ORIGINAL_AUTHOR       = 'newspackmigration_original_author';
+	const META_ORIGINAL_BYLINE_NODE  = 'newspackmigration_original_byline_node';
+	const META_DEFAULT_AUTHOR_RULE   = 'newspackmigration_default_author_rule';
+	const META_ORIGINAL_FEAT_IMG_URL = 'newspackmigration_original_featured_image_url';
 
 	const WP_SUPPORTED_IMAGE_EXTENSIONS = [ 'png', 'jpg', 'jpeg', 'gif', 'webp', 'heic', 'heif', 'svg' ];
 
@@ -1672,9 +1673,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			return;
 		}
 
-		// Store the old featured image URL.
-		$data                            = [];
-		$data[ self::META_ORIGINAL_URL ] = $image_url;
+		// Store some meta directly to parent post.
+		$parent_post_meta = [];
+		// The old featured image URL.
+		$parent_post_meta[ self::META_ORIGINAL_FEAT_IMG_URL ] = $image_url;
 		
 		// If the image URL is relative, make it fully qualified.
 		if ( ! str_starts_with( $image_url, 'http' ) ) {
@@ -1704,13 +1706,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'image'   => $image_url,
 				] 
 			);
-			$data['_thumbnail_id'] = $attachment_id;
+			$parent_post_meta['_thumbnail_id'] = $attachment_id;
 		}
 
 		wp_update_post(
 			[
 				'ID'         => $post_id,
-				'meta_input' => $data,
+				'meta_input' => $parent_post_meta,
 			]
 		);
 	}
