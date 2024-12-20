@@ -18,7 +18,6 @@ use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\Logic\Posts;
-use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\PlainFileLog;
@@ -465,16 +464,23 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$file_logger          = PlainFileLog::get_logger( 'bw-article-import' );
 		$processed_single_url = false;
 		// Get CSV data into 2D arrays.
-		$sponsors_urls_to_bylines = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
-		if ( empty( $sponsors_urls_to_bylines ) ) {
-			$this->cli_logger->error( 'ERROR: No sponsors URLs to bylines found in the CSV file.', [ 'csv_file' => $sponsors_urls_bylines_csv ] );
-			return;
-		}
 		$header_image_urls_to_bylines = $this->get_csv_data_to_2d_array( $header_images_bylines_csv, 'byline_image_url', 'author_name' );
 		if ( empty( $header_image_urls_to_bylines ) ) {
 			$this->cli_logger->error( 'ERROR: No header image URLs to bylines found in the CSV file.', [ 'csv_file' => $header_images_bylines_csv ] );
 			return;
 		}
+		$sponsors_urls_to_bylines = $this->get_csv_data_to_2d_array( $sponsors_urls_bylines_csv, 'url', 'sponsor_byline' );
+		if ( empty( $sponsors_urls_to_bylines ) ) {
+			$this->cli_logger->error( 'ERROR: No sponsors URLs to bylines found in the CSV file.', [ 'csv_file' => $sponsors_urls_bylines_csv ] );
+			return;
+		}
+		// Rtrim / from $sponsors_urls_to_bylines URLs.
+		$sponsors_urls_to_bylines_trimmed = [];
+		foreach ( $sponsors_urls_to_bylines as $url => $byline ) {
+			$sponsors_urls_to_bylines_trimmed[ rtrim( $url, '/' ) ] = $byline;
+		}
+		$sponsors_urls_to_bylines = $sponsors_urls_to_bylines_trimmed;
+		unset( $sponsors_urls_to_bylines_trimmed );
 
 		// Get .xml files.
 		$xml_files = [];
@@ -658,6 +664,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				if ( str_contains( $content, '<img ' ) ) {
 					$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id );
 				}
+// TODO 2nd URL ?
 				if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
 					$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
 				}
@@ -1703,6 +1710,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					'url'    => $article['url'],
 				] 
 			);
+		}
+
+		// If <byline> exists, but author is not found in the header_byline_images CSV file, set author to 'Bailiwick Express News Team'.
+		if ( isset( $article['byline'] ) && ! empty( trim( $article['byline'] ) ) ) {
+			return [
+				'author_name' => 'Bailiwick Express News Team',
+				'author_rule' => sprintf( "Article has byline '%s' which is not found in header_byline_images CSV file, so setting author to 'Bailiwick Express News Team'", trim( $article['byline'] ) ),
+			];
 		}
 
 		return [
