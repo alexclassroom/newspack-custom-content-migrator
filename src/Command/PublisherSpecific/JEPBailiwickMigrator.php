@@ -105,7 +105,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->gutenberg_blocks = new GutenbergBlockGenerator();
 		$this->posts            = new Posts();
 		if ( ! defined( 'NP_LIVE' ) ) {
-			NMT::exit_with_message( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
+			$this->cli_logger->error( 'NP_LIVE constant is not defined. Please add it in wp-config.php with the value of the live site.' );
+			exit;
 		}
 	}
 
@@ -303,7 +304,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 
 		if ( ! empty( $output_dir ) ) {
 			if ( ! file_exists( $output_dir ) ) {
-				NMT::exit_with_message( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+				$this->cli_logger->error( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+				exit;
 			}
 		}
 
@@ -322,7 +324,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$filename = sanitize_file_name( sprintf( '%s-%s-%s.xml', $domain, $chunk['from']->format( $short_iso8601_format ), $chunk['to']->format( $short_iso8601_format ) ) );
 			if ( ! empty( $output_dir ) ) {
 				if ( ! file_exists( $output_dir ) ) {
-					NMT::exit_with_message( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+					$this->cli_logger->error( sprintf( 'Output directory for the XML file "%s" does not exist', $output_dir ) );
+					exit;
 				}
 				$filename = trailingslashit( $output_dir ) . $filename;
 			}
@@ -342,7 +345,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			$response = wp_remote_get( $url, [ 'timeout' => 40 ] );
 
 			if ( is_wp_error( $response ) ) {
-				NMT::exit_with_message( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
+				$this->cli_logger->error( sprintf( 'HTTP request failed fetching %s with message %s', $url, $response->get_error_message() ) );
+				exit;
 			}
 
 			if ( ! $overwrite ) {
@@ -376,11 +380,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$short_iso8601_format = 'Y-m-d';
 		$start                = DateTime::createFromFormat( $short_iso8601_format, $from_date );
 		if ( ! $start ) {
-			NMT::exit_with_message( sprintf( 'ERROR: Invalid start date %s', $from_date ), [ $this->cli_logger ] );
+			$this->cli_logger->error( sprintf( 'ERROR: Invalid start date %s', $from_date ) );
+			exit;
 		}
 		$end = DateTime::createFromFormat( $short_iso8601_format, $to_date );
 		if ( ! $end ) {
-			NMT::exit_with_message( sprintf( 'ERROR: Invalid end date %s', $to_date ), [ $this->cli_logger ] );
+			$this->cli_logger->error( sprintf( 'ERROR: Invalid end date %s', $to_date ) );
+			exit;
 		}
 
 		// Make sure the end date is inclusive by adding one day.
@@ -444,12 +450,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$process_single_url        = $assoc_args['process-single-url'] ?? null;
 		$brand_id                  = $this->multibranded->get_brand_id_from_brand_name( $brand_name );
 		if ( ! $brand_id ) {
-			NMT::exit_with_message( 'ERROR: Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.', [ $this->cli_logger ] );
+			$this->cli_logger->error( 'ERROR: Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.' );
+			exit;
 		}
 
 		// Check permalink structure.
 		if ( ! $this->is_permalink_structure_correct() ) {
-			NMT::exit_with_message( 'ERROR: During import, permalink structure must be set to "/%category%/%postname%/". After the import it should be set back to "Post name".', [ $this->cli_logger ] );
+			$this->cli_logger->error( 'ERROR: During import, permalink structure must be set to "/%category%/%postname%/". After the import it should be set back to "Post name".' );
+			exit;
 		}
 
 		// Initial data.
@@ -490,7 +498,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			try {
 				$xml_fetcher = new Concrete5Xml( $xml_file_path );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
+				$this->cli_logger->error( 'ERROR: ' . $o_0->getMessage() );
+				exit;
 			}
 
 			// Log.
@@ -768,11 +777,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				if ( 0 == $row ) {
 					$key_index = array_search( $column_for_key, $data );
 					if ( false === $key_index ) {
-						NMT::exit_with_message( sprintf( 'ERROR: Failed to find column for array key `%s` in header of CSV file %s', $column_for_key, $csv_filename ), [ $this->cli_logger ] );
+						$this->cli_logger->error( sprintf( 'ERROR: Failed to find column for array key `%s` in header of CSV file %s', $column_for_key, $csv_filename ) );
+						exit;
 					}
 					$value_index = array_search( $column_for_value, $data );
 					if ( false === $value_index ) {
-						NMT::exit_with_message( sprintf( 'ERROR: Failed to find column for array value `%s` in header of CSV file %s', $column_for_value, $csv_filename ), [ $this->cli_logger ] );
+						$this->cli_logger->error( sprintf( 'ERROR: Failed to find column for array value `%s` in header of CSV file %s', $column_for_value, $csv_filename ) );
+						exit;
 					}
 				} else {
 					// Combine data into key-value pairs.
@@ -912,7 +923,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$this->cli_logger->info( 'Parsing articles from XML file', [ 'xml_file' => $xml_file ] );
 				$xml_fetcher = new Concrete5Xml( $xml_file );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
+				$this->cli_logger->error( 'ERROR: ' . $o_0->getMessage() );
+				exit;
 			}
 	
 			// Go through articles in a file.
@@ -1160,7 +1172,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$this->cli_logger->info( 'Checking articles from XML file', [ 'xml_file' => $xml_file ] );
 				$xml_fetcher = new Concrete5Xml( $xml_file );
 			} catch ( Exception $o_0 ) {
-				NMT::exit_with_message( 'ERROR: ' . $o_0->getMessage(), [ $this->cli_logger ] );
+				$this->cli_logger->error( 'ERROR: ' . $o_0->getMessage() );
+				exit;
 			}
 	
 			// Go through articles in a file.
