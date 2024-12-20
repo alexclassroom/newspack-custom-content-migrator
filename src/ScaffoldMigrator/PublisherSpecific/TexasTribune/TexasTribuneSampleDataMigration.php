@@ -214,7 +214,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		update_post_meta( $maybe_post_id, 'newspack_show_updated_date', 1 );
 
 		if ( $migration_object->metadata->summary ) {
-			update_post_meta( $maybe_post_id, 'newspack_post_subtitle', $migration_object->metadata->summary );
+			update_post_meta( $maybe_post_id, 'newspack_post_subtitle', $migration_object->metadata->summary->get_value() );
 		}
 
 		$post_content_value = $this->get_post_content_by_handling_components( $migration_object->components, $maybe_post_id, $maybe_featured_image_attachment_object );
