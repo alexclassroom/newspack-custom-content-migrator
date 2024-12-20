@@ -78,8 +78,6 @@ class PluginSetup {
 			foreach ( $classes as $command_class ) {
 				if ( is_a( $command_class, Command\RegisterCommandInterface::class, true ) ) {
 					$command_class::register_commands();
-				} else {
-					CliLog::get_logger( 'register_command_classes' )->critical( sprintf( 'Registering commands for class %s.', $command_class ) );
 				}
 			}
 		} catch ( \Exception $o_0 ) {
