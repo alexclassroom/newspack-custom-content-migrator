@@ -278,6 +278,12 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						'description' => 'Will scan all XML files in this dir.',
 						'optional'    => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'brand-name',
+						'description' => "Full name of the brand to which the posts will be assigned to, e.g. --brand-name='Bailiwick Express News Jersey' . Must correspond to constants of this class BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.",
+						'optional'    => false,
+					],
 				],
 			]
 		);
@@ -664,21 +670,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				if ( str_contains( $content, '<img ' ) ) {
 					$replacers[] = fn( $html_doc ) => $this->get_inline_images( $html_doc, $post_id, $brand_name );
 				}
-				// Fully qualified URLs.
-				if ( str_contains( $content, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
-					$replacers[] = fn( $html_doc ) => $this->get_download_file_urls( $html_doc, $post_id );
+				if ( str_contains( $content, '/index.php/download_file/view' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_index_download_file_view_urls( $html_doc, $post_id, $brand_name );
 				}
-				// Relative URLs.
-				if ( str_contains( $content, '"/index.php/download_file/view' ) ) {
-					// TODO.
-				}
-				// Fully qualified URLs.
-				if ( str_contains( $content, 'bailiwickexpress.com/files/' ) || str_contains( $content, '"/files/' ) ) {
-					$replacers[] = fn( $html_doc ) => $this->get_download_files_urls( $html_doc, $post_id );
-				}
-				// Relative URLs.
-				if ( str_contains( $content, '"/files/' ) ) {
-					// TODO.
+				if ( str_contains( $content, '/files/' ) ) {
+					$replacers[] = fn( $html_doc ) => $this->get_files_urls( $html_doc, $post_id, $brand_name );
 				}
 	
 				// Run the replacers.
@@ -913,7 +909,13 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	 * @return void
 	 */
 	public function cmd_helper_list_downloadable_urls( array $pos_args, array $assoc_args ): void {
-		$dir = $assoc_args['dir'] ?? null;
+		$dir        = $assoc_args['dir'] ?? null;
+		$brand_name = $assoc_args['brand-name'];
+		$brand_id   = $this->multibranded->get_brand_id_from_brand_name( $brand_name );
+		if ( ! $brand_id ) {
+			$this->cli_logger->error( 'ERROR: Brand does not exist. Check or create Multibranded plugin brands, and set this class constants BRAND_NAME_BAILIWICK_JERSEY and BRAND_NAME_BAILIWICK_GUERNSEY.' );
+			exit;
+		}
 	
 		// Get .xml files.
 		if ( is_null( $dir ) ) {
@@ -930,8 +932,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		$this->cli_logger->info( 'Checking all posts with URL that can be downloaded.' );
 		$this->cli_logger->info( '' );
 
-		$download_file_urls = [];
-		$downloadad_file_urls__list_of_original_article_urls_where_they_appear = [];
+		$download_file_view_urls = [];
+		$downloadad_file_view_urls__list_of_original_article_urls_where_they_appear = [];
 		$files_urls = [];
 		$files_urls__list_of_original_article_urls_where_they_appear = [];
 
@@ -953,18 +955,17 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$content = $article['content'];
 
 				/**
-				 * Get all "download_file URLs" and their captions -- these contain "bailiwickexpress.com/index.php/download_file/view".
+				 * Get all "index download_file view URLs" and their captions -- these contain "/index.php/download_file/view".
 				 */
-				$urls = $this->extract_download_file_urls( $content );
+				$urls = $this->extract_index_download_file_view_urls( $content, $brand_name );
 				if ( ! empty( $urls ) ) {
 					$urls_count = count( $urls );
 					
 					// Additionally validate if our method has extracted all the URLs correctly.
-					$pattern = '/bailiwickexpress\.com\/index\.php\/download_file\/view/';
-					$count   = preg_match_all( $pattern, $content, $matches );
+					$count = substr_count( $content, '/index.php/download_file/view/' );
 					if ( $count != $urls_count ) {
-						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "download_file URLs" from the content for article URL %s from XML %s . This might be OK if URLs just occur multiple times, but check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
-						$debug = $this->extract_download_file_urls( $content );
+						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "index download_file view URLs" from the content for article URL %s from XML %s . This might be a false positive, but still check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
+						$debug = $this->extract_index_download_file_view_urls( $content, $brand_name );
 						$url   = $article['url'];
 					}
 
@@ -977,20 +978,19 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 					}
 	
 					// Store.
-					$download_file_urls = array_merge( $download_file_urls, $urls_unique );
-					$downloadad_file_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
+					$download_file_view_urls = array_merge( $download_file_view_urls, $urls_unique );
+					$downloadad_file_view_urls__list_of_original_article_urls_where_they_appear[] = $article['url'];
 				}           
 
 				/**
-				 * Now get all "files URLs" -- these contain "bailiwickexpress.com/files/".
+				 * Now get all "files URLs" -- these contain "/files/".
 				 */
-				$urls = $this->extract_files_urls( $content );
+				$urls = $this->extract_files_urls( $content, $brand_name );
 				if ( ! empty( $urls ) ) {
 					$urls_count = count( $urls );
 	
 					// Additionally validate if our method is extracting all the URLs correctly.
-					$pattern = '/bailiwickexpress\.com\/files/';
-					$count   = preg_match_all( $pattern, $content, $matches );
+					$count = substr_count( $content, '/files/' );
 
 					// These were manually checked and are OK -- ULRs simply appear multiple times in the content. It's not our method that is wrong, and these will be downloaded and replaced correctly.
 					$ignore = [
@@ -998,8 +998,8 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 						'https://www.bailiwickexpress.com/jsy/sport/island-games-medals-designer-guernsey-models-her-creations',
 					];
 					if ( $count != $urls_count && ! in_array( $article['url'], $ignore ) ) {
-						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "files URLs" from the content for article URL %s from XML %s . This might be OK if URLs just occur multiple times, but check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
-						$debug = $this->extract_files_urls( $content );
+						WP_CLI::warning( sprintf( 'WARNING: Failed to extract all the "files URLs" from the content for article URL %s from XML %s . This might be a false positive, but still check the article and manually add URL to ignore in command.', esc_url_raw( $article['url'] ), esc_url( $xml_file ) ) );
+						$debug = $this->extract_files_urls( $content, $brand_name );
 						$url   = $article['url'];
 					}
 	
@@ -1018,10 +1018,10 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			}
 		}
 
-		WP_CLI::success( '"download_file URLs":' );
-		WP_CLI::line( implode( "\n", $download_file_urls ) );
-		WP_CLI::success( 'Articles with "download_file URLs":' );
-		WP_CLI::line( implode( "\n", $downloadad_file_urls__list_of_original_article_urls_where_they_appear ) );
+		WP_CLI::success( '"index download_file view URLs":' );
+		WP_CLI::line( implode( "\n", $download_file_view_urls ) );
+		WP_CLI::success( 'Articles with "index download_file view URLs":' );
+		WP_CLI::line( implode( "\n", $downloadad_file_view_urls__list_of_original_article_urls_where_they_appear ) );
 		
 		WP_CLI::success( '"files URLs":' );
 		WP_CLI::line( implode( "\n", $files_urls ) );
@@ -1030,31 +1030,37 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Returns all URLs, even duplicates for tracking purposes, which contain:
-	 *      'bailiwickexpress.com/index.php/download_file/view'  -- internally we call these "download_file URLs" to distinguish them from "files URLs".
+	 * Returns all internally called "index download_file view URLs" which contain '/index.php/download_file/view'.
+	 * Matches both absolute and relative URLs, but modifies the relative ones into fully qualified ones when returning them.
+	 * Returns even duplicates for tracking purposes.
 	 *
-	 * @param string $html HTML content.
+	 * @param string $html       HTML content.
+	 * @param string $brand_name Brand name.
+	 * 
 	 * @return array URLs Array with subarrays containing keys for URLs and for captions. {
 	 *    @type string $url      URL.
 	 *    @type ?string $caption Caption. Null if not found.
 	 * }
 	 */
-	private function extract_download_file_urls( $html ) {
+	private function extract_index_download_file_view_urls( string $html, string $brand_name ) {
 		$downlod_file_urls = [];
 		
-		if ( false === str_contains( $html, 'bailiwickexpress.com/index.php/download_file/view' ) ) {
+		if ( false === str_contains( $html, '/index.php/download_file/view' ) ) {
 			return $downlod_file_urls;
 		}
 
 		/**
-		 * The pattern to match URLs containing `...bailiwickexpress.com/index.php/download_file/view/...`.
-		 * - https?://: Match http:// or https://.
-		 * - (server\.com|[^\/]+): Match server.com or any domain.
-		 * - \/index\.php\/download_file\/view\/: Match the path.
-		 * - ([^\/]+(?:\/[^\/]+)*): Match the file path.
-		 * - \/: Match the last slash.
+		 * Pattern explanation:
+		 * - ^ Match the start of the string.
+		 * - (?:https?:\/\/)? Match http:// or https://, zero or one time.
+		 * - ([^\.]+\.)bailiwickexpress\.com Match any subdomain of bailiwickexpress.com.
+		 * - \/index\.php\/download_file\/view\/ Match the path.
+		 * - ([^\/]+(?:\/[^\/]+)*)\/
+		 *  - [^\/]+ Match any character except a slash.
+		 *  - (?:\/[^\/]+)* Match a slash followed by any character except a slash, zero or more times.
+		 *  - \/ Match the last slash.
 		 */
-		$pattern = '/https?:\/\/(bailiwickexpress\.com|[^\/]+)\/index\.php\/download_file\/view\/([^\/]+(?:\/[^\/]+)*)/';
+		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/index\.php\/download_file\/view\/([^\/]+(?:\/[^\/]+)*)\/';
 
 		$dom = new \DOMDocument();
 		// phpcs:disable
@@ -1071,16 +1077,27 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$url = $element->getAttribute( 'href' ) ?? null;
 			}
 
+			// If $url is relative, make it fully qualified.
+			if ( ! str_starts_with( $url, 'http' ) ) {
+				if ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
+					$url = NP_LIVE_JSY . $url;
+				} else {
+					$url = NP_LIVE_GSY . $url;
+				}
+			}
+
+			// Check if URL matches the pattern.
 			if ( $url && preg_match( $pattern, $url, $matches ) ) {
-				// Get alt or title attribute.
+				
+				// Try and get caption from alt or title attributes.
 				$caption = $element->getAttribute( 'alt' ) ?? null;
 				if ( ! $caption ) {
 					$caption = $element->getAttribute( 'title' ) ?? null;
 				}
-
+				
 				$downlod_file_urls[] = [
 					'url'     => trim( $url ),
-					'caption' => trim( $caption ),
+					'caption' => $caption ? trim( $caption ) : null,
 				];
 			}
 		}
@@ -1089,37 +1106,37 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Returns all URLs (even duplicates, for tracking purposes) which contain:
-	 *      'bailiwickexpress.com/files/' -- internally we call these "files URLs" to distinguish them from "download_file URLs".
+	 * Returns all internally called "files URLs" which contain '/files/'.
+	 * Matches both absolute and relative URLs, but modifies the relative ones into fully qualified ones when returning them.
+	 * Returns even duplicates for tracking purposes.
 	 * 
-	 * Slightly different method than `extract_download_file_urls()`, added incrementaly
-	 * as we find different kinds of URLs to extract.
-	 *
-	 * @param string $html HTML content.
+	 * @param string $html       HTML content.
+	 * @param string $brand_name Brand name.
+	 * 
 	 * @return array URLs Array with subarrays containing keys for URLs and for captions. {
 	 *    @type string $url      URL.
 	 *    @type ?string $caption Caption. Null if not found.
 	 * }
 	 */
-	private function extract_files_urls( $html ) {
-		$urls = [];
+	private function extract_files_urls( string $html, string $brand_name ): array {
+		$files_urls = [];
 
-		if ( false === str_contains( $html, 'bailiwickexpress.com/files/' ) ) {
-			return $urls;
+		if ( false === str_contains( $html, '/files/' ) ) {
+			return $files_urls;
 		}
-		
+
 		/**
-		 * The pattern to match URLs containing `...bailiwickexpress.com/files/...`.
-		 * - https?://: Match http:// or https://.
-		 * - (bailiwickexpress\.com|[^\/]+): Match bailiwickexpress.com or any domain.
-		 * - \/files\/: Match the path.
-		 * - ([^\/]+(?:\/[^\/]+)*): Match the file path.
-		 *      - [^\/]+: Match any character except a slash.
-		 *      - (?:\/[^\/]+)*)*: Match a slash followed by any character except a slash, zero or more times.
-		 *          (?:...): This is a non-capturing group. It matches the enclosed pattern but doesn't store the matched content in a separate variable.
-		 * - \/: Match the last slash.
+		 * Pattern explained:
+		 * - ^ Match the start of the string.
+		 * - (?:https?:\/\/)? Match http:// or https://, zero or one time.
+		 * - ([^\.]+\.)bailiwickexpress\.com Match any subdomain of bailiwickexpress.com.
+		 * - \/files\/ Match the path.
+		 * - ([^\/]+(?:\/[^\/]+)*)\/
+		 *      - [^\/]+ Match any character except a slash.
+		 *      - (?:\/[^\/]+)* Match a slash followed by any character except a slash, zero or more times.
+		 *      - \/ Match the last slash.
 		 */
-		$pattern = '/https?:\/\/(bailiwickexpress\.com|[^\/]+)\/files\/([^\/]+(?:\/[^\/]+)*)/';
+		$pattern = '/^(?:https?:\/\/)?([^\.]+\.)bailiwickexpress\.com\/files\/([^\/]+(?:\/[^\/]+)*)\/';
 
 		$dom = new \DOMDocument();
 		// phpcs:disable
@@ -1136,21 +1153,32 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				$url = $element->getAttribute( 'href' ) ?? null;
 			}
 
+			// If $url is relative, make it fully qualified.
+			if ( ! str_starts_with( $url, 'http' ) ) {
+				if ( self::BRAND_NAME_BAILIWICK_JERSEY === $brand_name ) {
+					$url = NP_LIVE_JSY . $url;
+				} else {
+					$url = NP_LIVE_GSY . $url;
+				}
+			}
+
+			// Check if URL matches the pattern.
 			if ( $url && preg_match( $pattern, $url, $matches ) ) {
-				// Get alt or title attribute.
+				
+				// Try and get caption from alt or title attributes.
 				$caption = $element->getAttribute( 'alt' ) ?? null;
 				if ( ! $caption ) {
 					$caption = $element->getAttribute( 'title' ) ?? null;
 				}
 
-				$urls[] = [
+				$files_urls[] = [
 					'url'     => trim( $url ),
-					'caption' => trim( $caption ),
+					'caption' => $caption ? trim( $caption ) : null,
 				];
 			}
 		}
 	  
-		return $urls;
+		return $files_urls;
 	}
 
 	/**
@@ -1482,17 +1510,18 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Finds "download_file URLs" (see $this->extract_download_file_urls) in HTMLDocument content and download them and replace with attachment URLs.
+	 * Finds "index download_file view URLs" (see $this->extract_download_file_view_urls) in HTMLDocument content and download them and replace with attachment URLs.
 	 *
-	 * @param HtmlDocument $html_doc The HTML document to replace in.
-	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param HtmlDocument $html_doc   The HTML document to replace in.
+	 * @param int          $post_id    The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param string       $brand_name The brand name.
 	 *
 	 * @return void
 	 */
-	private function get_download_file_urls( HtmlDocument $html_doc, int $post_id ): void {
+	private function get_index_download_file_view_urls( HtmlDocument $html_doc, int $post_id, string $brand_name ): void {
 		
 		$html               = $html_doc->save();
-		$download_file_urls = $this->extract_download_file_urls( $html );
+		$download_file_urls = $this->extract_index_download_file_view_urls( $html, $brand_name );
 		foreach ( $download_file_urls as $element ) {
 
 			$download_file_url = $element['url'];
@@ -1542,15 +1571,16 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Finds "files URLs" (see $this->extract_files_urls) in HTMLDocument content and download them and replace with attachment URLs.
 	 *
-	 * @param HtmlDocument $html_doc The HTML document to replace in.
-	 * @param int          $post_id  The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param HtmlDocument $html_doc   The HTML document to replace in.
+	 * @param int          $post_id    The parent post ID (the published post ID with the content, not the attachment object).
+	 * @param string       $brand_name Brand name.
 	 *
 	 * @return void
 	 */
-	private function get_download_files_urls( HtmlDocument $html_doc, int $post_id ): void {
+	private function get_files_urls( HtmlDocument $html_doc, int $post_id, string $brand_name ): void {
 		
 		$html               = $html_doc->save();
-		$download_file_urls = $this->extract_files_urls( $html );
+		$download_file_urls = $this->extract_files_urls( $html, $brand_name );
 		foreach ( $download_file_urls as $element ) {
 
 			$download_file_url = $element['url'];
