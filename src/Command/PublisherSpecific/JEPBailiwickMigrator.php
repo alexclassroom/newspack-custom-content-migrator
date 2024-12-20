@@ -731,7 +731,7 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 				}
 	
 				// Set featured image.
-				$this->set_featured_image_on_post( $post_id, $article['image'], '', $brand_name );
+				$this->set_featured_image_on_post( $brand_name, $post_id, $article['image'] );
 	
 				// Set brand.
 				$this->multibranded->set_brands_to_post( $post_id, [ $brand_id ] );
@@ -1630,14 +1630,14 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 	/**
 	 * Downloads and sets the featured image on a post.
 	 *
+	 * @param string $brand_name Brand name.
 	 * @param int    $post_id    Post ID.
 	 * @param string $image_url  Image URL to download image from.
 	 * @param string $alt        Alt text for the image.
-	 * @param string $brand_name Brand name.
 	 *
 	 * @return void
 	 */
-	private function set_featured_image_on_post( int $post_id, string $image_url, string $alt = '', string $brand_name ): void {
+	private function set_featured_image_on_post( string $brand_name, int $post_id, string $image_url, string $alt = '' ): void {
 		$image_url = trim( $image_url );
 		if ( empty( $image_url ) ) {
 			return;
