@@ -961,15 +961,16 @@ class TexasTribuneSampleDataMigration implements Migration {
 					return serialize_block( $paragraph_block );
 				}
 
-				$pdf = serialize_block( $this->block_generator->get_file_pdf( get_post( $attachment_id ) ) );
+				$pdf_block = $this->block_generator->get_file_pdf( get_post( $attachment_id ), '', false );
 
 				$caption_block = $this->handle_caption_component( $component );
-					serialize_block( $this->block_generator->get_paragraph( $component->caption->get_value() ) ) :
-					'';
 
 				return serialize_block(
-					$this->block_generator->get_paragraph(
-						$pdf . $caption
+					$this->block_generator->get_group_constrained(
+						[
+							$pdf_block,
+							$caption_block,
+						]
 					)
 				);
 			default:
