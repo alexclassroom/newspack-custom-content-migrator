@@ -889,7 +889,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 		$height = $component->height ? $component->height->get_value() : null;
 
 		// TODO I believe we might need to update `get_iframe` to support alignment within post.
-		return serialize_block( $this->block_generator->get_iframe( $component->url->get_value(), $width, $height ) );
+		return serialize_block( $this->block_generator->get_iframe( $component->url->get_value(), intval( $width ), intval( $height ) ) );
 	}
 
 	/**
