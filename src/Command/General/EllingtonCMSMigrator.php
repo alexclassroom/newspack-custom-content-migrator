@@ -7,8 +7,11 @@ use DateTimeZone;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts as PostsLogic;
-use Newspack\MigrationTools\Util\Log\Logger;
+use Newspack\MigrationTools\Util\Log\CliLog;
+use Newspack\MigrationTools\Util\Log\FileLog;
+use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 use WP_Error;
@@ -37,13 +40,6 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	private Attachments $attachments;
 
 	/**
-	 * Logger.
-	 * 
-	 * @var Logger
-	 */
-	private Logger $logger;
-
-	/**
 	 * Co-Authors Plus.
 	 * 
 	 * @var CoAuthorsPlusHelper
@@ -51,13 +47,31 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	private CoAuthorsPlusHelper $cap;
 
 	/**
+	 * Gutenber Block Generator.
+	 * 
+	 * @var GutenbergBlockGenerator
+	 */
+	private GutenbergBlockGenerator $gutenberg_block_generator;
+
+	/**
+	 * Logger.
+	 * 
+	 * @var MultiLog
+	 */
+	private MultiLog $logger;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->posts_logic = new PostsLogic();
-		$this->attachments = new Attachments();
-		$this->logger      = new Logger();
-		$this->cap         = new CoAuthorsPlusHelper();
+		$this->posts_logic               = new PostsLogic();
+		$this->attachments               = new Attachments();
+		$this->cap                       = new CoAuthorsPlusHelper();
+		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->logger                    = MultiLog::get_logger( 'ellingtoncms-migrator', [
+			CliLog::get_logger( 'ellingtoncms-migrator' ),
+			FileLog::get_logger( 'ellingtoncms-migrator' ),
+		] );
 	}
 
 	/**
@@ -132,8 +146,6 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	 * @return void
 	 */
 	public function cmd_migrate_posts( $args, $assoc_args ) {
-		$log_file = 'ellingtoncms-migrator-migrate-posts-' . date( 'Y-m-d-H-i-s' ) . '.log';
-
 		$xml_dir_path           = $assoc_args['dir-path'];
 		$source_timezone        = $assoc_args['source-timezone'];
 		$refresh_content        = isset( $assoc_args['refresh-content'] ) ? true : false;
@@ -147,27 +159,39 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 		natsort( $xml_files );
 
-		$progress_bar = WP_CLI\Utils\make_progress_bar( 'Ellington CMS Migrator: Migrating Posts', count( $xml_files ) );
+		// QA
+		$qa_filename    = 'ellingtoncms-migrator-migrate-posts.csv';
+		$qa_file_exists = file_exists( $qa_filename );
+		$qa_file        = fopen( $qa_filename, 'a' );
 
-		$this->logger->log(
-			$log_file,
-			sprintf( 'Found %d files', count( $xml_files ) ),
-			Logger::LINE
+		$qa_header  = [
+			'#',
+			'Post ID',
+			'Post URL',
+			'XML Source File',
+		];
+
+		if ( ! $qa_file_exists ) {
+			fputcsv( $qa_file, $qa_header );
+		}
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar(
+			sprintf(
+				'[Memory Usage: %s] Ellington CMS Migrator: Migrating Posts',
+				size_format( memory_get_usage( true ) )
+			),
+			count( $xml_files )
 		);
 
-		foreach ( array_values( $xml_files ) as $index => $xml_file ) {
-			$this->logger->log(
-				$log_file,
-				sprintf( 'Processing %d / %d', $index + 1, count( $xml_files ) ),
-				Logger::LINE
-			);
+		$this->logger->info( sprintf( 'Found %d files', count( $xml_files ) ) );
 
+		foreach ( array_values( $xml_files ) as $index => $xml_file ) {
 			$progress_bar->tick(
 				1,
 				sprintf(
-					'[Memory: %s] Ellington CMS Migrator: Migrating Posts (%d/%d)',
+					'[Memory Usage: %s] Ellington CMS Migrator: Migrating Posts (%d/%d)',
 					size_format( memory_get_usage( true ) ),
-					$index + 1,
+					$index,
 					count( $xml_files )
 				)
 			);
@@ -176,29 +200,42 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
+			$this->logger->info(
+				sprintf(
+					'Processing %d / %d — %s',
+					$index + 1,
+					count( $xml_files ),
+					$xml_file
+				)
+			);
+
 			$xml_contents = file_get_contents( $xml_dir_path . DIRECTORY_SEPARATOR . $xml_file );
 
-			$this->upsert_post(
+			$post_id = $this->upsert_post(
 				file_contents: $xml_contents,
 				filename: $xml_file,
 				source_timezone: $source_timezone,
-				log_file: $log_file,
 				default_author: $default_author,
 				default_featured_image: $default_featured_image,
 				post_tag: $post_tag,
 				refresh: $refresh_content
 			);
+
+			fputcsv( $qa_file, [
+				$index + 1,
+				$post_id,
+				get_permalink( $post_id ),
+				$xml_file
+			] );
 		}
 
 		$progress_bar->finish();
 
-		wp_cache_flush();
+		fclose( $qa_file );
 
-		$this->logger->log(
-			$log_file,
-			'Done!',
-			Logger::SUCCESS
-		);
+		wp_cache_flush();
+		
+		$this->logger->info( 'Completed! 🎉' );
 	}
 
 	/**
@@ -207,7 +244,6 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	 * @param  string       $file_contents The contents of the XML file.
 	 * @param  string       $filename The name of the XML file.
 	 * @param  string       $source_timezone The Timezone of the Source.
-	 * @param  string       $log_file The log file name.
 	 * @param  string|null  $default_author The default author to use for the Posts.
 	 * @param  string|null  $default_featured_image The default featured image to use for the Posts.
 	 * @param  string|null  $post_tag The Post Tag to apply to the Post.
@@ -218,7 +254,6 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		string $file_contents,
 		string $filename,
 		string $source_timezone,
-		string $log_file,
 		?string $default_author,
 		?string $default_featured_image,
 		?string $post_tag,
@@ -241,38 +276,84 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		);
 
 		if ( $local_post_id ) {
-			$this->logger->log(
-				$log_file,
-				sprintf( 'Post #%d already exists', $local_post_id ),
-				Logger::WARNING
-			);
+			$this->logger->warning( sprintf( 'Post #%d already exists', $local_post_id ) );
 		}
 
 		if ( $local_post_id && ! $refresh ) {
-			$this->logger->log(
-				$log_file,
-				'Skipping update (Refresh not required)',
-				Logger::WARNING
-			);
+			$this->logger->info( 'Skipping update (Refresh not required)' );
 
 			return absint( $local_post_id );
 		}
 
 		$post_data = $this->parse_post_xml( $file_contents );
 
+		// Post Data Comments
+		if ( ! empty( $post_data['comments'] ) ) {
+			// Details
+			// — Group
+			// — — Comment Text
+			// — — Comment Meta
+			$comment_blocks = [];
+
+			foreach ( $post_data['comments'] as $comment_index => $comment ) {
+				$comment_block = [
+					$this
+						->gutenberg_block_generator
+						->get_paragraph( $comment['Comment'] ),
+					...parse_blocks(
+						sprintf(
+							'<!-- wp:paragraph {"style":{"elements":{"link":{"color":{"text":"%1$s"}}},"color":{"text":"%1$s"}},"fontSize":"small"} --><p class="has-text-color has-link-color has-small-font-size" style="color:%1$s">#%2$s | Author: %3$s | Date: %4$s</p><!-- /wp:paragraph -->',
+							'#bbbbbb',
+							$comment['ID'],
+							$comment['Author'],
+							date( 'M j Y', strtotime( $comment['Date'] ) )
+						)
+					)
+				];
+
+				$comment_blocks[] = $this
+					->gutenberg_block_generator
+					->get_group_constrained( $comment_block, [ 'jfp-comment-' . $comment['ID'] ] );
+
+				if ( $comment_index !== count( $post_data['comments'] ) - 1 ) {
+					$comment_blocks[] = $this
+						->gutenberg_block_generator
+						->get_separator( 'is-style-wide' );
+				}
+			}
+
+			$details_block_inner_content = ['<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>'];
+
+			foreach ( $comment_blocks as $index => $comment_block ) {
+				$details_block_inner_content[] = NULL;
+
+				if ( $index < ( count( $comment_blocks ) - 1 ) ) {
+					$details_block_inner_content[] = '';
+				}
+			}
+
+			$details_block_inner_content[] = '</details>';
+
+			$post_data['content'] .= serialize_block( [
+				'blockName'    => 'core/details',
+				'attrs'        => [
+					'className' => 'jfp-previous-comments',
+				],
+				'innerBlocks'  => $comment_blocks,
+				'innerHTML'    => '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary> </details>',
+				'innerContent' => $details_block_inner_content,
+			] );
+		}
+
 		// Post Authors.
 		$post_authors = array_values(
 			array_filter(
 				array_map(
-					function ( $author_data ) use ( $log_file, $post_source_id ) {
+					function ( $author_data ) use ( $post_source_id ) {
 						$wp_user = $this->upsert_author( $author_data['first_name'], $author_data['last_name'] );
 
 						if ( is_wp_error( $wp_user ) ) {
-							$this->logger->log(
-								$log_file,
-								sprintf( '#' . $post_source_id . ' Couldn\'t upsert Author "%s" (%s)', implode( ', ', array_filter( $author_data ) ), $wp_user->get_error_message( 0 ) ),
-								Logger::ERROR
-							);
+							$this->logger->critical( sprintf( '#' . $post_source_id . ' Couldn\'t upsert Author "%s" (%s)', implode( ', ', array_filter( $author_data ) ), $wp_user->get_error_message( 0 ) ) );
 
 							return null;
 						}
@@ -305,10 +386,11 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			'post_category' => wp_list_pluck( $categories, 'term_id' ),
 			'tags_input'    => ! empty( $post_tag ) ? [ $post_tag ] : [], 
 			'meta_input'    => [
-				'_thumbnail_id'                 => $default_featured_image,
-				'newspack_post_source_id'       => $post_source_id,
-				'newspack_post_source_url'      => $post_data['full_slug'],
-				'newspack_post_source_filename' => $filename,
+				'_thumbnail_id'                    => $default_featured_image,
+				'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+				'newspack_post_source_id'          => $post_source_id,
+				'newspack_post_source_url'         => $post_data['full_slug'],
+				'newspack_post_source_filename'    => $filename,
 			],
 		];
 
@@ -319,7 +401,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				$this->cap->assign_authors_to_post( $post_authors, $post_id );
 			}
 		} catch ( \Exception $e ) {
-			var_dump( $post_id, $e->getMessage() );
+			$this->logger->critical( '🚫 Error assigning authors to post. Post ID: ' . $post_id . ' — ' . $e->getMessage() );
 		}
 
 		// Address media in post content.
@@ -355,7 +437,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			'full_slug'      => $post_doc->find( 'nitf > head > doc-id', 0 )?->getAttribute( 'id-string' ),
 			'published_date' => $post_doc->find( 'nitf > head > docdata > date_release', 0 )?->getAttribute( 'norm' ),
 			'excerpt'        => $post_doc->find( 'nitf > body > body_head > abstract', 0 )?->text(),
-			'content'        => str_replace( [ '<body_content>', '</body_content>' ], '', $post_doc->find( 'nitf > body > body_content', 0 )?->text() ),
+			'content'        => str_replace( [ '<body_content><div>', '</div></body_content>' ], '', $post_doc->find( 'nitf > body > body_content', 0 )?->text() ),
 			'authors'        => array_map(
 				function ( $author ) {
 					return [
@@ -366,6 +448,30 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				$post_doc->find( 'nitf > body > body_head > byline > person' ) ?? []
 			),
 		];
+
+		// Handle Post Comments.
+		if ( strpos( $post_data['content'], 'Previous Comments' ) ) {
+			// Organize comments.
+			$content_parts = explode( '<h3>Previous Comments</h3>', $post_data['content'] );
+			$comments      = ( new HTMLDocument( $content_parts[1] ) )->find( 'dl' );
+			
+			$post_data['comments'] = array_map(
+				function ( $comment ) {
+					$comment_data    = [];
+					$comment_details = array_chunk( $comment->nodes, 2 );
+
+					foreach ( $comment_details as $comment_detail ) {
+						$comment_data[ $comment_detail[0]->text() ] = $comment_detail[1]->text();
+					}
+
+					return $comment_data;
+				},
+				$comments
+			);
+
+			// Cleanup comments from body
+			$post_data['content'] = trim( $content_parts[0] );
+		}
 
 		return $post_data;
 	}
@@ -416,7 +522,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			}
 
 			if ( is_wp_error( $attachment_id ) ) {
-				var_dump( $post_id, $attachment_id );
+				$this->logger->critical( '🚫 Error importing attachment. Post ID: ' . $post_id . ' — ' . $attachment_id->get_error_message() );
 				continue;
 			}
 
@@ -426,6 +532,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 			if ( $is_post_thumbnail ) {
 				update_post_meta( $post_id, '_thumbnail_id', $attachment_id );
+				update_post_meta( $post_id, 'newspack_featured_image_position', '' ); // Show featured image.
 
 				$post_content = str_replace( $media->outerText(), '', $post_content );
 			} else {
@@ -467,7 +574,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		), 0, 60 ); // Username can be max 60 chars.
 		$user_email = $username . '+jfp@mississippifreepress.org';
 
-		$wp_user = get_user_by( 'email', $user_email ) ?? get_user_by( 'login', $username );
+		$wp_user = get_user_by( 'email', $user_email ) ?: get_user_by( 'login', $username );
 
 		if ( ! $wp_user ) {
 			$wp_user = wp_insert_user(
@@ -534,7 +641,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			}
 
 			if ( is_wp_error( $category ) ) {
-				var_dump( $category, $category_name, $raw_category_slugs );
+				$this->logger->critical( '🚫 Error inserting category: ' . $category->get_error_message() . ' | ' . $category_name . ' | ' . $raw_category_slugs );
 			} else {
 				$categories[] = $category;
 			}

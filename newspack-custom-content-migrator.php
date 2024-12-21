@@ -96,3 +96,4 @@ PluginSetup::register_migrators(
 	// Ideally the class you put there should be refactored to implement the RegisterCommandInterface, and then you can include it (temporarily) in the array above.
 	]
 );
+
