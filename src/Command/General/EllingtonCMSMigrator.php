@@ -9,6 +9,7 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts as PostsLogic;
+use Newspack\MigrationTools\Util\CsvIterator;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
@@ -19,7 +20,7 @@ use WP_User;
 use simplehtmldom\HtmlDocument;
 
 /**
- * Custom migration scripts for Posts' content.
+ * Custom migration scripts for Posts' and Comments' content.
  */
 class EllingtonCMSMigrator implements RegisterCommandInterface {
 
@@ -136,6 +137,23 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ellington-cms-migrator migrate-comments',
+			self::get_command_closure( 'cmd_migrate_comments' ),
+			[
+				'shortdesc' => 'Migrates legacy comments from CSV.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'source-csv-path',
+						'description' => 'Path to the CSV file containing the comments.',
+						'optional'    => false,
+						'repeating'   => false,
+					]
+				],
+			]
+		);
 	}
 
 	/**
@@ -226,6 +244,169 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				$post_id,
 				get_permalink( $post_id ),
 				$xml_file
+			] );
+		}
+
+		$progress_bar->finish();
+
+		fclose( $qa_file );
+
+		wp_cache_flush();
+		
+		$this->logger->info( 'Completed! 🎉' );
+	}
+
+	/**
+	 * Migrates comments from CSV.
+	 *
+	 * @param  array  $args
+	 * @param  array  $assoc_args
+	 * @return void
+	 */
+	public function cmd_migrate_comments( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Input.
+		$csv_file_path = $assoc_args['source-csv-path'];
+
+		// CSV.
+		$all_comments         = [ ...(new CsvIterator)->items( $csv_file_path, ',' ) ];
+		$comments_by_story_id = array_reduce( $all_comments, function ( $carry, $item ) {
+			if ( ! isset( $carry[ $item['object_pk'] ] ) ) {
+				$carry[ $item['object_pk'] ] = [];
+			}
+
+			$carry[ $item['object_pk'] ][] = $item;
+
+			return $carry;
+		}, [] );
+		$count_stories_with_comments = count( array_values( $comments_by_story_id ) );
+
+		// QA.
+		$qa_filename    = 'ellingtoncms-migrator-migrate-comments.csv';
+		$qa_file_exists = file_exists( $qa_filename );
+		$qa_file        = fopen( $qa_filename, 'a' );
+
+		$qa_header  = [
+			'Post ID',
+			'Story ID',
+			'Comments Count',
+			'Comment IDs',
+			'Post URL',
+			'Revision URL'
+		];
+
+		if ( ! $qa_file_exists ) {
+			fputcsv( $qa_file, $qa_header );
+		}
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar(
+			sprintf(
+				'[Memory Usage: %s] Ellington CMS Migrator: Migrating Comments',
+				size_format( memory_get_usage( true ) )
+			),
+			$count_stories_with_comments
+		);
+
+		$index = 0;
+		foreach ( $comments_by_story_id as $story_id => $story_comments ) {
+			$index++;
+
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory Usage: %s] Ellington CMS Migrator: Migrating Comments (%d/%d)',
+					size_format( memory_get_usage( true ) ),
+					$index,
+					$count_stories_with_comments
+				)
+			);
+
+			$this->logger->info(
+				sprintf(
+					'Processing Story #%d',
+					$story_id
+				)
+			);
+
+			// Reaching here means that the comments batch for the previous story
+			// is ready to be inserted as a Previous Comments Block.
+			$comments_block = $this->create_comments_block( array_map(
+				function ( $comment ) {
+					return [
+						'ID'      => $comment['id'],
+						'Comment' => $comment['comment'],
+						'Author'  => $comment['user_name'],
+						'Date'    => $comment['submit_date'],
+					];
+				},
+				$story_comments
+			) );
+
+			$local_post_id = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT `post_id`
+					FROM `$wpdb->postmeta`
+					WHERE `meta_key` = 'newspack_post_source_id'
+					AND `meta_value` = %s",
+					$story_id
+				)
+			);
+	
+			if ( ! $local_post_id ) {
+				$this->logger->critical( sprintf( 'Story #%d doesn\'t exist locally.', $story_id ) );
+
+				fputcsv( $qa_file, [
+					'',
+					$story_id,
+					count( $story_comments ),
+					implode( ', ',  array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
+					'',
+					'',
+				] );
+
+				continue;
+			}
+
+			wp_save_post_revision( $local_post_id );
+
+			$old_content = get_post_field( 'post_content', $local_post_id );
+			$new_content = $old_content . serialize_block( $comments_block );
+
+			// Using $wpdb->update to prevent post_modified from being updated.
+			// Clearing cache immediately after that to make revisions work.
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_content' => $new_content
+				],
+				[
+					'ID' => $local_post_id
+				]
+			);
+
+			clean_post_cache( $local_post_id );
+
+			if ( $post_revision_id = wp_save_post_revision( $local_post_id ) ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_date'     => current_time( 'mysql' ),
+						'post_date_gmt' => current_time( 'mysql', 1 ),
+					],
+					[
+						'ID' => $post_revision_id
+					]
+				);
+			}
+
+			fputcsv( $qa_file, [
+				$local_post_id,
+				$story_id,
+				count( $story_comments ),
+				implode( ', ',  array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
+				get_permalink( $local_post_id ),
+				$post_revision_id ? admin_url( sprintf( 'revision.php?revision=%d', $post_revision_id ) ) : null,
 			] );
 		}
 
@@ -648,5 +829,68 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		}
 
 		return $categories;
+	}
+
+	/**
+	 * Creates a "Previous Comments" from the given comments.
+	 * 
+	 * @param  array  $comments An array of comments to create the comments block.
+	 * @return array
+	 */
+	private function create_comments_block( array $comments = [] ): array {
+		// Details
+		// — Group
+		// — — Comment Text
+		// — — Comment Meta
+		$comment_blocks = [];
+
+		foreach ( $comments as $comment_index => $comment ) {
+			$comment_block = [
+				$this
+					->gutenberg_block_generator
+					->get_paragraph( $comment['Comment'] ),
+				...parse_blocks(
+					sprintf(
+						'<!-- wp:paragraph {"style":{"elements":{"link":{"color":{"text":"%1$s"}}},"color":{"text":"%1$s"}},"fontSize":"small"} --><p class="has-text-color has-link-color has-small-font-size" style="color:%1$s">#%2$s | Author: %3$s | Date: %4$s</p><!-- /wp:paragraph -->',
+						'#bbbbbb',
+						$comment['ID'],
+						$comment['Author'],
+						date( 'M j Y', strtotime( $comment['Date'] ) )
+					)
+				)
+			];
+
+			$comment_blocks[] = $this
+				->gutenberg_block_generator
+				->get_group_constrained( $comment_block, [ 'jfp-comment-' . $comment['ID'] ] );
+
+			if ( $comment_index !== count( $comments ) - 1 ) {
+				$comment_blocks[] = $this
+					->gutenberg_block_generator
+					->get_separator( 'is-style-wide' );
+			}
+		}
+
+		$details_block_inner_content = ['<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>'];
+
+		foreach ( $comment_blocks as $index => $comment_block ) {
+			$details_block_inner_content[] = NULL;
+
+			if ( $index < ( count( $comment_blocks ) - 1 ) ) {
+				$details_block_inner_content[] = '';
+			}
+		}
+
+		$details_block_inner_content[] = '</details>';
+
+		return [
+			'blockName'    => 'core/details',
+			'attrs'        => [
+				'className' => 'jfp-previous-comments',
+			],
+			'innerBlocks'  => $comment_blocks,
+			'innerHTML'    => '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary> </details>',
+			'innerContent' => $details_block_inner_content,
+		];
 	}
 }
