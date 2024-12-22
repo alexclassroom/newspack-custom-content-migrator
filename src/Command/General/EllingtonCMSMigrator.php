@@ -69,10 +69,13 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$this->attachments               = new Attachments();
 		$this->cap                       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
-		$this->logger                    = MultiLog::get_logger( 'ellingtoncms-migrator', [
-			CliLog::get_logger( 'ellingtoncms-migrator' ),
-			FileLog::get_logger( 'ellingtoncms-migrator' ),
-		] );
+		$this->logger                    = MultiLog::get_logger(
+			'ellingtoncms-migrator',
+			[
+				CliLog::get_logger( 'ellingtoncms-migrator' ),
+				FileLog::get_logger( 'ellingtoncms-migrator' ),
+			] 
+		);
 	}
 
 	/**
@@ -150,7 +153,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 						'description' => 'Path to the CSV file containing the comments.',
 						'optional'    => false,
 						'repeating'   => false,
-					]
+					],
 				],
 			]
 		);
@@ -159,8 +162,8 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	/**
 	 * Migrates posts from XML.
 	 *
-	 * @param  array  $args
-	 * @param  array  $assoc_args
+	 * @param  array $args
+	 * @param  array $assoc_args
 	 * @return void
 	 */
 	public function cmd_migrate_posts( $args, $assoc_args ) {
@@ -182,7 +185,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$qa_file_exists = file_exists( $qa_filename );
 		$qa_file        = fopen( $qa_filename, 'a' );
 
-		$qa_header  = [
+		$qa_header = [
 			'#',
 			'Post ID',
 			'Post URL',
@@ -239,12 +242,15 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				refresh: $refresh_content
 			);
 
-			fputcsv( $qa_file, [
-				$index + 1,
-				$post_id,
-				get_permalink( $post_id ),
-				$xml_file
-			] );
+			fputcsv(
+				$qa_file,
+				[
+					$index + 1,
+					$post_id,
+					get_permalink( $post_id ),
+					$xml_file,
+				] 
+			);
 		}
 
 		$progress_bar->finish();
@@ -259,8 +265,8 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	/**
 	 * Migrates comments from CSV.
 	 *
-	 * @param  array  $args
-	 * @param  array  $assoc_args
+	 * @param  array $args
+	 * @param  array $assoc_args
 	 * @return void
 	 */
 	public function cmd_migrate_comments( $args, $assoc_args ) {
@@ -270,16 +276,20 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$csv_file_path = $assoc_args['source-csv-path'];
 
 		// CSV.
-		$all_comments         = [ ...(new CsvIterator)->items( $csv_file_path, ',' ) ];
-		$comments_by_story_id = array_reduce( $all_comments, function ( $carry, $item ) {
-			if ( ! isset( $carry[ $item['object_pk'] ] ) ) {
-				$carry[ $item['object_pk'] ] = [];
-			}
+		$all_comments                = [ ...( new CsvIterator() )->items( $csv_file_path, ',' ) ];
+		$comments_by_story_id        = array_reduce(
+			$all_comments,
+			function ( $carry, $item ) {
+				if ( ! isset( $carry[ $item['object_pk'] ] ) ) {
+					$carry[ $item['object_pk'] ] = [];
+				}
 
-			$carry[ $item['object_pk'] ][] = $item;
+				$carry[ $item['object_pk'] ][] = $item;
 
-			return $carry;
-		}, [] );
+				return $carry;
+			},
+			[] 
+		);
 		$count_stories_with_comments = count( array_values( $comments_by_story_id ) );
 
 		// QA.
@@ -287,13 +297,13 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$qa_file_exists = file_exists( $qa_filename );
 		$qa_file        = fopen( $qa_filename, 'a' );
 
-		$qa_header  = [
+		$qa_header = [
 			'Post ID',
 			'Story ID',
 			'Comments Count',
 			'Comment IDs',
 			'Post URL',
-			'Revision URL'
+			'Revision URL',
 		];
 
 		if ( ! $qa_file_exists ) {
@@ -310,7 +320,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 		$index = 0;
 		foreach ( $comments_by_story_id as $story_id => $story_comments ) {
-			$index++;
+			++$index;
 
 			$progress_bar->tick(
 				1,
@@ -331,17 +341,19 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 			// Reaching here means that the comments batch for the previous story
 			// is ready to be inserted as a Previous Comments Block.
-			$comments_block = $this->create_comments_block( array_map(
-				function ( $comment ) {
-					return [
-						'ID'      => $comment['id'],
-						'Comment' => $comment['comment'],
-						'Author'  => $comment['user_name'],
-						'Date'    => $comment['submit_date'],
-					];
-				},
-				$story_comments
-			) );
+			$comments_block = $this->create_comments_block(
+				array_map(
+					function ( $comment ) {
+						return [
+							'ID'      => $comment['id'],
+							'Comment' => $comment['comment'],
+							'Author'  => $comment['user_name'],
+							'Date'    => $comment['submit_date'],
+						];
+					},
+					$story_comments
+				) 
+			);
 
 			$local_post_id = $wpdb->get_var(
 				$wpdb->prepare(
@@ -356,14 +368,17 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			if ( ! $local_post_id ) {
 				$this->logger->critical( sprintf( 'Story #%d doesn\'t exist locally.', $story_id ) );
 
-				fputcsv( $qa_file, [
-					'',
-					$story_id,
-					count( $story_comments ),
-					implode( ', ',  array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
-					'',
-					'',
-				] );
+				fputcsv(
+					$qa_file,
+					[
+						'',
+						$story_id,
+						count( $story_comments ),
+						implode( ', ', array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
+						'',
+						'',
+					] 
+				);
 
 				continue;
 			}
@@ -378,10 +393,10 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			$wpdb->update(
 				$wpdb->posts,
 				[
-					'post_content' => $new_content
+					'post_content' => $new_content,
 				],
 				[
-					'ID' => $local_post_id
+					'ID' => $local_post_id,
 				]
 			);
 
@@ -395,19 +410,22 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 						'post_date_gmt' => current_time( 'mysql', 1 ),
 					],
 					[
-						'ID' => $post_revision_id
+						'ID' => $post_revision_id,
 					]
 				);
 			}
 
-			fputcsv( $qa_file, [
-				$local_post_id,
-				$story_id,
-				count( $story_comments ),
-				implode( ', ',  array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
-				get_permalink( $local_post_id ),
-				$post_revision_id ? admin_url( sprintf( 'revision.php?revision=%d', $post_revision_id ) ) : null,
-			] );
+			fputcsv(
+				$qa_file,
+				[
+					$local_post_id,
+					$story_id,
+					count( $story_comments ),
+					implode( ', ', array_map( fn ( $comment ) => $comment['id'], $story_comments ) ),
+					get_permalink( $local_post_id ),
+					$post_revision_id ? admin_url( sprintf( 'revision.php?revision=%d', $post_revision_id ) ) : null,
+				] 
+			);
 		}
 
 		$progress_bar->finish();
@@ -422,13 +440,13 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	/**
 	 * Upsert Post from an XML file.
 	 * 
-	 * @param  string       $file_contents The contents of the XML file.
-	 * @param  string       $filename The name of the XML file.
-	 * @param  string       $source_timezone The Timezone of the Source.
-	 * @param  string|null  $default_author The default author to use for the Posts.
-	 * @param  string|null  $default_featured_image The default featured image to use for the Posts.
-	 * @param  string|null  $post_tag The Post Tag to apply to the Post.
-	 * @param  boolean      $refresh Whether the Post should be refreshed.
+	 * @param  string      $file_contents The contents of the XML file.
+	 * @param  string      $filename The name of the XML file.
+	 * @param  string      $source_timezone The Timezone of the Source.
+	 * @param  string|null $default_author The default author to use for the Posts.
+	 * @param  string|null $default_featured_image The default featured image to use for the Posts.
+	 * @param  string|null $post_tag The Post Tag to apply to the Post.
+	 * @param  boolean     $refresh Whether the Post should be refreshed.
 	 * @return int The ID of the created / updated Post.
 	 */
 	private function upsert_post(
@@ -471,7 +489,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		// Post Data Comments
 		if ( ! empty( $post_data['comments'] ) ) {
 			// Details
-			// — Group
+			//  — Group
 			// — — Comment Text
 			// — — Comment Meta
 			$comment_blocks = [];
@@ -489,7 +507,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 							$comment['Author'],
 							date( 'M j Y', strtotime( $comment['Date'] ) )
 						)
-					)
+					),
 				];
 
 				$comment_blocks[] = $this
@@ -503,10 +521,10 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				}
 			}
 
-			$details_block_inner_content = ['<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>'];
+			$details_block_inner_content = [ '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>' ];
 
 			foreach ( $comment_blocks as $index => $comment_block ) {
-				$details_block_inner_content[] = NULL;
+				$details_block_inner_content[] = null;
 
 				if ( $index < ( count( $comment_blocks ) - 1 ) ) {
 					$details_block_inner_content[] = '';
@@ -515,15 +533,17 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 			$details_block_inner_content[] = '</details>';
 
-			$post_data['content'] .= serialize_block( [
-				'blockName'    => 'core/details',
-				'attrs'        => [
-					'className' => 'jfp-previous-comments',
-				],
-				'innerBlocks'  => $comment_blocks,
-				'innerHTML'    => '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary> </details>',
-				'innerContent' => $details_block_inner_content,
-			] );
+			$post_data['content'] .= serialize_block(
+				[
+					'blockName'    => 'core/details',
+					'attrs'        => [
+						'className' => 'jfp-previous-comments',
+					],
+					'innerBlocks'  => $comment_blocks,
+					'innerHTML'    => '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary> </details>',
+					'innerContent' => $details_block_inner_content,
+				] 
+			);
 		}
 
 		// Post Authors.
@@ -746,13 +766,17 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	 * @return WP_User|WP_Error The ID of the User on success. Otherwise, returns a WP_Error
 	 */
 	private function upsert_author( $first_name, $last_name = null ): WP_User|WP_Error {
-		$username = substr( implode(
-			'',
-			array_map(
-				fn ( $name_part ) => str_replace( '-', '', sanitize_title( $name_part ) ),
-				array_filter( [ $first_name, $last_name ] )
-			) 
-		), 0, 60 ); // Username can be max 60 chars.
+		$username   = substr(
+			implode(
+				'',
+				array_map(
+					fn ( $name_part ) => str_replace( '-', '', sanitize_title( $name_part ) ),
+					array_filter( [ $first_name, $last_name ] )
+				) 
+			),
+			0,
+			60 
+		); // Username can be max 60 chars.
 		$user_email = $username . '+jfp@mississippifreepress.org';
 
 		$wp_user = get_user_by( 'email', $user_email ) ?: get_user_by( 'login', $username );
@@ -797,13 +821,16 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	 */
 	private function upsert_categories( string $raw_category_slugs ): array {
 		$category_slugs = explode( '|', $raw_category_slugs );
-		$category_slugs = array_map( function ( $category_slug ) {
-			if ( $category_slug === '/' ) {
-				$category_slug = 'news';
-			}
+		$category_slugs = array_map(
+			function ( $category_slug ) {
+				if ( $category_slug === '/' ) {
+						$category_slug = 'news';
+				}
 
-			return str_replace( '/', '', $category_slug );
-		}, $category_slugs );
+				return str_replace( '/', '', $category_slug );
+			},
+			$category_slugs 
+		);
 
 		$category_names = array_map( fn ( $category ) => ucwords( str_replace( '-', ' ', $category ) ), $category_slugs );
 
@@ -834,12 +861,12 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	/**
 	 * Creates a "Previous Comments" from the given comments.
 	 * 
-	 * @param  array  $comments An array of comments to create the comments block.
+	 * @param  array $comments An array of comments to create the comments block.
 	 * @return array
 	 */
 	private function create_comments_block( array $comments = [] ): array {
 		// Details
-		// — Group
+		//  — Group
 		// — — Comment Text
 		// — — Comment Meta
 		$comment_blocks = [];
@@ -857,7 +884,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 						$comment['Author'],
 						date( 'M j Y', strtotime( $comment['Date'] ) )
 					)
-				)
+				),
 			];
 
 			$comment_blocks[] = $this
@@ -871,10 +898,10 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			}
 		}
 
-		$details_block_inner_content = ['<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>'];
+		$details_block_inner_content = [ '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary>' ];
 
 		foreach ( $comment_blocks as $index => $comment_block ) {
-			$details_block_inner_content[] = NULL;
+			$details_block_inner_content[] = null;
 
 			if ( $index < ( count( $comment_blocks ) - 1 ) ) {
 				$details_block_inner_content[] = '';
