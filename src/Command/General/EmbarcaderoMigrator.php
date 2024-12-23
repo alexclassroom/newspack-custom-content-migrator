@@ -4671,6 +4671,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					}
 
 					copy( $file_dir_path . '/' . $filename, $new_file_dir_path . '/' . $filename );
+					break;
 				}
 
 				fputcsv( $file, [
