@@ -4568,28 +4568,81 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$missing_media_csv_filepath = $assoc_args['missing-media-csv-path'];
 		$story_photos_csv_file_path = $assoc_args['story-photos-csv-path'];
 		$story_photos_dir_path      = $assoc_args['story-photos-dir-path'];
-		
-		$missing_media_iterator = ( new FileImportFactory() )->get_file( $missing_media_csv_filepath )->getIterator();
-		$photos                 = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
+
+		global $wpdb;
+
+		// Logging
+		$file_logger  = new FileLogger;
+		$log_filename = 'embarcadero-get-missing-media-filepaths.log';
+
+		$csv_iterator = new CsvIterator;
+
+		$count_csv_rows = $csv_iterator->count_csv_file_entries( $missing_media_csv_filepath, ',' );
+		$photos         = $this->get_data_from_csv_or_tsv( $story_photos_csv_file_path );
 		
 		$header  = [
-			'story_id' => null,
-			'post_id'  => null,
-			'photo_id' => null,
-			'year'     => null,
-			'month'    => null,
-			'day'      => null,
+			'story_id'   => null,
+			'post_id'    => null,
+			'photo_id'   => null,
+			'photo_name' => null,
+			'year'       => null,
+			'month'      => null,
+			'day'        => null,
 		];
 		$file = fopen( 'missing-media-filepaths.csv', 'w' );
 		fputcsv( $file, array_keys( $header ) );
 
-		foreach ( $missing_media_iterator as $row ) {
-			$story_id             = $row['story_id'];
-			$post_id              = $row['post_id'];
-			$original_photo_ids   = explode( ',', $row['photo_ids'] );
+		$progress_bar = WP_CLI\Utils\make_progress_bar(
+			sprintf(
+				'[Memory Usage: %s] Embarcadero: Fix Missing Media',
+				size_format( memory_get_usage( true ) )
+			),
+			$count_csv_rows
+		);
+
+		foreach ( $csv_iterator->items( $missing_media_csv_filepath, ',' ) as $row ) {
+			$story_id           = (int) $row['story_id'];
+			$post_id            = (int) $row['post_id'];
+			$original_photo_ids = explode( ',', $row['photo_ids'] );
+
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory Usage: %s] Embarcadero: Get Missing Media Filepaths (Story ID: #%d) (Post ID: #%d)',
+					size_format( memory_get_usage( true ) ),
+					$story_id,
+					$post_id
+				)
+			);
+
+			if ( $row['difference'] == 'NO' ) {
+				continue;
+			}
+
+			$photo_id_placeholders = implode( ', ', array_fill( 0, count( $original_photo_ids ), '%d' ) );
+			$locally_imported_photo_attachment_map = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT pm.post_id as attachment_id,pm.meta_value as photo_id FROM $wpdb->postmeta pm INNER JOIN $wpdb->posts p ON p.ID = pm.post_id WHERE p.post_type = 'attachment' AND pm.meta_key = %s AND pm.meta_value IN ( $photo_id_placeholders )",
+					self::EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY,
+					...$original_photo_ids
+				),
+				ARRAY_A
+			);
 
 			foreach ( $original_photo_ids as $photo_id ) {
-				$filenames = [];
+				$filenames     = [];
+				$attachment_id = null;
+
+				foreach ( $locally_imported_photo_attachment_map as $local_photo_map ) {
+					if ( absint( $local_photo_map['photo_id'] ) === absint( $photo_id ) ) {
+						$attachment_id = $local_photo_map['attachment_id'];
+						break;
+					}
+				}
+
+				if ( $attachment_id ) {
+					continue;
+				}
 
 				$photo_data = array_filter( $photos, fn ( $photo ) => $photo['photo_id'] === $photo_id );
 				$photo_data = array_shift( $photo_data );
@@ -4624,6 +4677,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$story_id,
 					$post_id,
 					$photo_id,
+					$photo_data['photo_name'],
 					$media_year,
 					$media_month,
 					$photo_data['photo_day']
@@ -4632,7 +4686,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		}
 
 		fclose( $file );
-		WP_CLI::line( 'Done!' );
+
+		$progress_bar->finish();
 	}
 
 	public function cmd_embarcadero_fix_missing_media( array $args, array $assoc_args ): void {
@@ -4654,16 +4709,16 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 		$qa_file        = fopen( $qa_filename, 'a' );
 		
 		$header  = [
-			'story_id'              => null,
-			'post_id'               => null,
-			'staging_url'           => null,
-			'revision_url'          => null,
-			'photo_ids'             => null,
-			'count_found_photo_ids' => null,
-			'attachment_ids'        => null,
-			'count_attachment_ids'  => null,
-			'old_post_content'      => null,
-			'new_post_content'      => null,
+			'Story ID'              => null,
+			'Post ID'               => null,
+			'Staging URL'           => null,
+			'Revision URL'          => null,
+			'Photo IDs'             => null,
+			'Count Photo IDs'       => null,
+			'Attachment IDs'        => null,
+			'Count Attachment IDs'  => null,
+			'Old Post Content'      => null,
+			'New Post Content'      => null,
 		];
 
 		if ( ! $qa_file_exists ) {
