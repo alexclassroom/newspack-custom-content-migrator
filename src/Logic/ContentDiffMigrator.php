@@ -1102,9 +1102,9 @@ class ContentDiffMigrator {
 					
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
-							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
-							$live_term_taxonomy_row['taxonomy'],
+							"Warning, could not insert term='%s' taxonomy='%s' live_term_id=%s for live_post_ID=%s . This is totally OK if you did not wish to migrate this term taxonomy. Message :%s",
 							$live_term_name,
+							$live_term_taxonomy_row['taxonomy'],
 							$live_term_id,
 							$post_id,
 							$term_insert_result->get_error_message()
