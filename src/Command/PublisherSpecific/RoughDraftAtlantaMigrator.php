@@ -85,11 +85,10 @@ class RoughDraftAtlantaMigrator implements RegisterCommandInterface {
 		);
 		// phpcs:enable
 		WP_CLI::line( 'Found ' . count( $post_ids ) . ' posts to update.' );
-		foreach ( $post_ids as $post_id ) {
-			
+		foreach ( $post_ids as $key_post_id => $post_id ) {
 			$response = $this->taxonomy->move_category_tree_under_new_top_parent( $post_id, $main_parent_cat_id );
 			$result   = $response ? 'Success' : 'ERROR';
-			WP_CLI::line( sprintf( '%s PostID %d msg: %s', $result, $post_id, wp_json_encode( $response ) ) );
+			WP_CLI::line( sprintf( '%s (%d/%d) PostID %d msg: %s', $result, $key_post_id + 1, count( $post_ids ), $post_id, wp_json_encode( $response ) ) );
 		}
 	}
 }
