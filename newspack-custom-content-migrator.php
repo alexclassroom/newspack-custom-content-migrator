@@ -81,6 +81,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\MiradorProvincialMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
+		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
 	]
 );
 
