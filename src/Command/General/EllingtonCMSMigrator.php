@@ -189,6 +189,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			'#',
 			'Post ID',
 			'Post URL',
+			'Old Slug',
 			'XML Source File',
 		];
 
@@ -248,6 +249,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 					$index + 1,
 					$post_id,
 					get_permalink( $post_id ),
+					get_post_meta( $post_id, 'newspack_post_source_url', true ),
 					$xml_file,
 				] 
 			);
