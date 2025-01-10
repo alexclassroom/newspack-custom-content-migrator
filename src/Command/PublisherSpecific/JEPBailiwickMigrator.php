@@ -238,6 +238,11 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator bw-consolidate-authors-delete-authors-without-posts',
+			self::get_command_closure( 'cmd_delete_authors_without_posts' ),
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
 			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
 			[
@@ -1180,6 +1185,111 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		}
 	  
 		return $files_urls;
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator bw-consolidate-authors-delete-authors-without-posts`.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_delete_authors_without_posts( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+		
+		// Get all post types.
+		$post_types = $wpdb->get_col( "SELECT DISTINCT post_type FROM $wpdb->posts" ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery WordPress.DB.DirectDatabaseQuery.NoCaching.
+		if ( empty( $post_types ) ) {
+			$this->cli_logger->error( 'ERROR: No post types found.' );
+			return;
+		}
+
+		// Get users without posts -- SQL way.
+		// phpcs:disable -- WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users WordPress.DB.DirectDatabaseQuery.NoCaching WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		$users_wo_posts_sql = $wpdb->get_col(
+			"SELECT u.ID 
+			FROM $wpdb->users u 
+			LEFT JOIN $wpdb->posts p ON u.ID = p.post_author 
+			WHERE p.ID IS NULL;"
+		);
+		// phpcs:enable
+		
+		// Get users without posts -- the WP way, where we'll also double check counts.
+		$users             = get_users();
+		$users_wo_posts_wp = [];
+		$roles_unique      = [];
+		foreach ( $users as $user ) {
+			// Save role to $roles_unique array.
+			$roles_unique = array_merge( $roles_unique, $user->roles );
+
+			// Get user post count.
+			$post_count = count_user_posts( $user->ID, $post_types ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.count_user_posts_count_user_posts
+			if ( 0 == $post_count ) {
+				$users_wo_posts_wp[] = $user->ID;
+			}
+		}
+
+		// Output unique roles, one in every line.
+		$roles_unique = array_unique( $roles_unique );
+		$this->cli_logger->info( 'Unique roles:' );
+		foreach ( $roles_unique as $role ) {
+			WP_CLI::line( '- ' . $role );
+		}
+
+
+		// Let's compare $users_wo_posts_sql and $users_wo_posts_wp. A bit paranoid? Why not. Better safe than sorry.
+		$users_wo_posts_sql = array_map( 'intval', $users_wo_posts_sql );
+		$users_wo_posts_wp  = array_map( 'intval', $users_wo_posts_wp );
+		sort( $users_wo_posts_sql );
+		sort( $users_wo_posts_wp );
+		$users_wo_posts_diff = [];
+		if ( $users_wo_posts_sql !== $users_wo_posts_wp ) {
+			if ( count( $users_wo_posts_sql ) > count( $users_wo_posts_wp ) ) {
+				$users_wo_posts_diff = array_diff( $users_wo_posts_sql, $users_wo_posts_wp );
+				$this->cli_logger->error( sprintf( 'User diff IDs from $users_wo_posts_sql: %s', implode( ',', $users_wo_posts_diff ) ) );
+			} elseif ( count( $users_wo_posts_sql ) < count( $users_wo_posts_wp ) ) {
+				$users_wo_posts_diff = array_diff( $users_wo_posts_wp, $users_wo_posts_sql );
+				$this->cli_logger->error( sprintf( 'User diff IDs from $users_wo_posts_wp: %s', implode( ',', $users_wo_posts_diff ) ) );
+			} else {
+				$users_wo_posts_diff = array_diff( $users_wo_posts_wp, $users_wo_posts_sql );
+				$this->cli_logger->error( sprintf( 'User diff IDs: %s', implode( ',', $users_wo_posts_diff ) ) );
+			}
+		}
+
+		// Display diff users, which we won't delete just in case.
+		$this->cli_logger->info( sprintf( 'Not deleting %d diff users:', count( $users_wo_posts_diff ) ) );
+		foreach ( $users_wo_posts_diff as $user_id ) {
+			$user = get_user_by( 'ID', $user_id );
+			$this->cli_logger->info( sprintf( '- %d, `%s`, `%s`, `%s`', $user_id, $user->display_name, $user->user_email, implode( ',', $user->roles ) ) );
+		}
+		
+		// Delete users without posts.
+		$this->cli_logger->info( sprintf( 'Deleting %d-%d users without posts...', count( $users_wo_posts_sql ), count( $users_wo_posts_diff ) ) );
+		foreach ( $users_wo_posts_sql as $user_id ) {
+			// If User ID in diff, skip continue.
+			if ( in_array( $user_id, $users_wo_posts_diff ) ) {
+				$this->cli_logger->info( sprintf( 'Skipping user ID %d.', $user_id ) );
+				continue;
+			}
+			
+			// Delete user.
+			$user    = get_user_by( 'ID', $user_id );
+			$deleted = wp_delete_user( $user_id );
+			if ( false === $deleted ) {
+				$this->cli_logger->error( 'ERROR: Failed to delete user.', [ 'user_id' => $user_id ] );
+				continue;
+			}
+
+			$this->cli_logger->info(
+				'Deleted user.',
+				[
+					'user_id'      => $user_id,
+					'display_name' => $user->display_name,
+					'user_email'   => $user->user_email,
+					'roles'        => $user->roles,
+				] 
+			);
+		}
 	}
 
 	/**
