@@ -74,7 +74,6 @@ PluginSetup::register_command_classes(
 		Command\General\MediaCreditPluginMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
-		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
