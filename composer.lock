@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "2e8c2c02a82dd5d0d6a30a8df8287ba5",
+    "content-hash": "59e1380939225925f8f809888c69204d",
     "packages": [
         {
             "name": "automattic/newspack-content-converter",
@@ -55,12 +55,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "5f2298c3259ee64615d5420c653e3c70c545bbf7"
+                "reference": "0819106711dac2a00057f8d6b416b024dad8f52d"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/5f2298c3259ee64615d5420c653e3c70c545bbf7",
-                "reference": "5f2298c3259ee64615d5420c653e3c70c545bbf7",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/0819106711dac2a00057f8d6b416b024dad8f52d",
+                "reference": "0819106711dac2a00057f8d6b416b024dad8f52d",
                 "shasum": ""
             },
             "require": {
@@ -114,15 +114,21 @@
                 "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2024-11-28T14:05:33+00:00"
+            "time": "2025-01-15T05:08:53+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
-            "version": "dev-master",
+            "version": "dev-trunk",
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-post-image-downloader.git",
-                "reference": "f5d941fd40ed4a772e2a84423ce7f78d8debebb2"
+                "reference": "fe07ba6282436ce2e4169a0ceecaca2c860b595a"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/Automattic/newspack-post-image-downloader/zipball/fe07ba6282436ce2e4169a0ceecaca2c860b595a",
+                "reference": "fe07ba6282436ce2e4169a0ceecaca2c860b595a",
+                "shasum": ""
             },
             "require": {
                 "brainmaestro/composer-git-hooks": "^2.6",
@@ -131,10 +137,10 @@
                 "symfony/dom-crawler": "^5.2"
             },
             "require-dev": {
-                "automattic/vipwpcs": "^2.0.0",
+                "automattic/vipwpcs": "^3.0",
                 "dealerdirect/phpcodesniffer-composer-installer": "*",
                 "phpcompatibility/phpcompatibility-wp": "*",
-                "wp-coding-standards/wpcs": "*",
+                "wp-coding-standards/wpcs": "^3.0",
                 "xwp/wp-dev-lib": "^1.5"
             },
             "default-branch": true,
@@ -188,7 +194,11 @@
                 "GPL-2.0-or-later"
             ],
             "description": "Downloads all Post images hosted externally, or imports them from local files.",
-            "time": "2022-12-02T16:09:21+00:00"
+            "support": {
+                "source": "https://github.com/Automattic/newspack-post-image-downloader/tree/trunk",
+                "issues": "https://github.com/Automattic/newspack-post-image-downloader/issues"
+            },
+            "time": "2025-01-08T13:56:39+00:00"
         },
         {
             "name": "automattic/newspack-scraper-migrator",
@@ -5325,5 +5335,5 @@
     "prefer-lowest": false,
     "platform": [],
     "platform-dev": [],
-    "plugin-api-version": "2.6.0"
+    "plugin-api-version": "2.2.0"
 }
