@@ -81,6 +81,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
 		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
+		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
 	]
 );
 
