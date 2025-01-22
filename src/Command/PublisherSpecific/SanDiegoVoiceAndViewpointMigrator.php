@@ -38,15 +38,26 @@ class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, Sho
 	 * 
 	 * @see ShortcodeReplacementInterface::replace_shortcode().
 	 * 
-	 * @param string $shortcode_name Shortcode name.
-	 * @param int    $post_id        Post ID where the shortcode is being replaced.
-	 * @return string
+	 * @param string $shortcode Shortcode string.
+	 * @param int    $post_id   Post ID where the shortcode is being replaced.
+	 * 
+	 * @return string|false String replacement for the shortcode, or false if no replacement is successfully generated.
 	 */
-	public function replace_shortcode( string $shortcode_name, int $post_id ): string {
+	public function replace_shortcode( string $shortcode, int $post_id ): string|false {
 		$replacement = '';
 		
-		WP_CLI::line( sprintf( '> replace_shortcode method args: %s %s', $shortcode_name, $post_id ) );
+		// Get url attribute from shortcode.
+		$parsed_attrs = shortcode_parse_atts( $shortcode );
+		$url          = $parsed_attrs['url'] ?? null;
+		if ( ! $url ) {
+			return false;
+		}
 
+		// Decode the URL to expose quotation mars, then trim all quotes.
+		$url_trimmed = trim( html_entity_decode( $url ), '"”″' );
+
+		// TODO: Add custom logic here to generate the replacement for the shortcode.
+		
 		return $replacement;
 	}
 }
