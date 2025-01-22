@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.8.1
+ * Version:     1.8.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
