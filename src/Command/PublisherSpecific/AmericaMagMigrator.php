@@ -32,6 +32,49 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_pre_register_post_type', [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 		add_filter( 'fgd2wpp_get_users_sql',         [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
 
+		// global $fgd2wpp;
+		// var_dump( $fgd2wpp );
+		// exit();
+		
+		// global $drupal_db;
+
+		// FYI: unset($wp_filter['wp_insert_post']); // Remove the "wp_insert_post" that consumes a lot of CPU and memory
+		
+		// Logging.
+		add_action( 'fgd2wp_post_import_post', function( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
+			WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
+				$new_post_id, $node, $content_type, $post_type, $entity_type,
+			) ) );
+		}, 10, 5 );
+
+
+
+
+		// Order descending:
+		add_filter( 'fgd2wp_get_nodes_sql', function( $sql, $prefix, $last_drupal_id, $limit, $content_type, $entity_type ) {
+	
+			// $sql = "
+			// 	AND n.nid > '$last_drupal_id'
+			// 	ORDER BY n.nid
+			// 	LIMIT $limit
+			// ";
+			
+			// where clause.  the first time $last_drupal_id will be (int) 0 . this will cause the MAX ID to be on the top of DESC.
+			// upon each insert, $last_drupal_id will progressively get less.  so need to change to AND n.nid < '$last_drupal_id'
+			if( $last_drupal_id > 0 ) {
+				$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+			}
+
+			// order by.
+			$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
+
+			return $sql;
+
+		}, 10, 6 );
+
+
+
+
 		// Call NMT's migrator using a unique migration name.
 		DrupalMigrator::cmd_wrap_drupal_import( [ 'am_mag' ], [] );
 
