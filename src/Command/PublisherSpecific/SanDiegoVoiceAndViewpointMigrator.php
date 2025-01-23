@@ -20,6 +20,13 @@ class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, Sho
 	use WpCliCommandTrait;
 
 	/**
+	 * Gutenberg block generator.
+	 *
+	 * @var $blocks GutenbergBlockGenerator Gutenberg block generator.
+	 */
+	private $blocks;
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
