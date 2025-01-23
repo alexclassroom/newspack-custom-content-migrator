@@ -27,10 +27,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public function cmd_run_import( array $pos_args, array $assoc_args ): void {
 		
 		// Setup FG plugin's filters.
-		add_filter( 'fgd2wp_get_node_types',         [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
-		// add_filter( 'fgd2wp_get_nodes_sql',          [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
-		add_filter( 'fgd2wp_map_taxonomy',           [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
-		add_filter( 'fgd2wp_pre_register_post_type', [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
+		add_filter( 'fgd2wp_get_node_types',             [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
+		add_filter( 'fgd2wp_get_nodes_sql',              [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_map_taxonomy',               [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_pre_register_post_type',     [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
+		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 
 		// global $fgd2wpp;
 		// var_dump( $fgd2wpp );
@@ -46,28 +47,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// 		$new_post_id, $node, $content_type, $post_type, $entity_type,
 		// 	) ) );
 		// }, 10, 5 );
-
-		// Premium options / Default values / FG plugin version 3.85.2
-		// $this->premium_options = array(
-		// 	'cpt_format'				=> 'acf',
-		// 	'unicode_usernames'			=> false,
-		// 	'links'						=> 'as_links',
-		// 	'url_redirect'				=> true,
-		// 	'skip_taxonomies'			=> false,
-		// 	'skip_nodes'				=> false,
-		// 	'nodes_to_skip'				=> array(),
-		// 	'skip_users'				=> false,
-		// 	'only_authors'				=> false,
-		// 	'skip_menus'				=> false,
-		// 	'skip_comments'				=> false,
-		// 	'skip_blocks'				=> false,
-		// 	'skip_redirects'			=> false,
-		// );
-		// had filter not existed, db option name is get_option('fgd2wpp_options') * note the extra "p" for premium
-		add_filter( 'fgd2wpp_post_init_premium_options', function( $premium_options ) {
-			$premium_options['only_authors'] = true;
-			return $premium_options;
-		}, 10, 1);	
 
 		// Call NMT's migrator using a unique migration name.
 		DrupalMigrator::cmd_wrap_drupal_import( [ 'am_mag' ], [] );
@@ -125,6 +104,32 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// }
 
 		return $post_type;
+	}
+
+	public function fgd2wpp_post_init_premium_options( $premium_options ) {
+
+		// had filter not existed, db option name is get_option('fgd2wpp_options') * note the extra "p" for premium
+
+		// Premium options / Default values / FG plugin version 3.85.2
+		// $this->premium_options = array(
+		// 	'cpt_format'				=> 'acf',
+		// 	'unicode_usernames'			=> false,
+		// 	'links'						=> 'as_links',
+		// 	'url_redirect'				=> true,
+		// 	'skip_taxonomies'			=> false,
+		// 	'skip_nodes'				=> false,
+		// 	'nodes_to_skip'				=> array(),
+		// 	'skip_users'				=> false,
+		// 	'only_authors'				=> false,
+		// 	'skip_menus'				=> false,
+		// 	'skip_comments'				=> false,
+		// 	'skip_blocks'				=> false,
+		// 	'skip_redirects'			=> false,
+		// );
+	
+		$premium_options['only_authors'] = true;
+
+		return $premium_options;
 	}
 
 	/*
