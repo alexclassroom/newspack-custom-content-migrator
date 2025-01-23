@@ -11,6 +11,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\MigrationTools\Command\ShortcodeReplacementInterface;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
+use Newspack\MigrationTools\Logic\Shortcodes;
 
 /**
  * SanDiegoVoiceAndViewpointMigrator.
@@ -25,12 +26,20 @@ class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, Sho
 	 * @var $blocks GutenbergBlockGenerator Gutenberg block generator.
 	 */
 	private $blocks;
+	
+	/** 
+	 * Shortcodes logic.
+	 * 
+	 * @var Shortcodes $shortcodes Shortcodes.
+	 */
+	private $shortcodes;
 
 	/**
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->blocks = new GutenbergBlockGenerator();
+		$this->blocks     = new GutenbergBlockGenerator();
+		$this->shortcodes = new Shortcodes();
 	}
 
 	/**
@@ -55,7 +64,7 @@ class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, Sho
 		$replacement = '';
 		
 		// Get url attribute from shortcode.
-		$parsed_attrs = shortcode_parse_atts( $shortcode );
+		$parsed_attrs = $this->shortcodes->get_all_shortcode_attributes( $shortcode );
 		$url          = $parsed_attrs['url'] ?? null;
 		if ( ! $url ) {
 			return false;
