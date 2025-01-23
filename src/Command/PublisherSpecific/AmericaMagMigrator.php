@@ -30,7 +30,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_get_node_types',             [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
 		add_filter( 'fgd2wp_get_nodes_sql',              [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
 		add_filter( 'fgd2wp_map_taxonomy',               [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_post_import_post',           [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_filter( 'fgd2wp_pre_register_post_type',     [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
+
+		// Premium filters have extra "p" in name.s
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 
 		// global $fgd2wpp;
@@ -41,13 +44,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// FYI: unset($wp_filter['wp_insert_post']); // Remove the "wp_insert_post" that consumes a lot of CPU and memory
 		
-		// Logging.
-		// add_action( 'fgd2wp_post_import_post', function( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
-		// 	WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
-		// 		$new_post_id, $node, $content_type, $post_type, $entity_type,
-		// 	) ) );
-		// }, 10, 5 );
-
 		// Call NMT's migrator using a unique migration name.
 		DrupalMigrator::cmd_wrap_drupal_import( [ 'am_mag' ], [] );
 
@@ -72,7 +68,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// where clause.  the first time $last_drupal_id will be (int) 0 . this will cause the MAX ID to be on the top of DESC.
 		// upon each insert, $last_drupal_id will progressively get less.  so need to change to AND n.nid < '$last_drupal_id'
 		if( $last_drupal_id > 0 ) {
-			$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+			// for testing don't increment so we stay on 1 import
+			// $sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
 		}
 
 		// order by.
@@ -95,6 +92,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		return $wp_taxonomy;
+	}
+
+	public function fgd2wp_post_import_post( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
+		WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
+			$new_post_id, $node, $content_type, $post_type, $entity_type,
+		) ) );
 	}
 
 	public function fgd2wp_pre_register_post_type( $post_type, $node_type ) {
@@ -128,6 +131,16 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// );
 	
 		$premium_options['only_authors'] = true;
+
+		// temp / testing:
+		$premium_options['nodes_to_skip']  = ['page'];
+		$premium_options['skip_blocks']    = true; // sidebar widgets
+		$premium_options['skip_comments']  = true;
+		$premium_options['skip_menus']     = true;
+		$premium_options['skip_redirects'] = true;
+		$premium_options['url_redirect']   = false;
+		
+
 
 		return $premium_options;
 	}
