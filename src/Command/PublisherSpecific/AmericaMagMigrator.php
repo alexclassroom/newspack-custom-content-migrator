@@ -2,6 +2,7 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Command\DrupalMigrator;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\DrupalHelper;
@@ -26,6 +27,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_run_import( array $pos_args, array $assoc_args ): void {
 		
+		// Verify the FG Entity add-on is active.
+		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
+			NMT::exit_with_message( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
+		}
+
 		// Setup FG plugin's filters.
 		add_filter( 'fgd2wp_get_node_types',             [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
 		add_filter( 'fgd2wp_get_nodes_sql',              [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
@@ -56,6 +62,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 public function fgd2wp_get_node_types( array $node_types ): array {
 		$types_to_migrate = [
 			'article',
+			'profile',
 			// 'book_review',
 			// .. add more node types here.
 		];
@@ -65,18 +72,34 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	public function fgd2wp_get_nodes_sql ( $sql, $prefix, $last_drupal_id, $limit, $content_type, $entity_type ) {
 			
-		// where clause.  the first time $last_drupal_id will be (int) 0 . this will cause the MAX ID to be on the top of DESC.
-		// upon each insert, $last_drupal_id will progressively get less.  so need to change to AND n.nid < '$last_drupal_id'
-		if( $last_drupal_id > 0 ) {
-			// for testing don't increment so we stay on 1 import
-			// $sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+		if ( $content_type === 'article' ) {
+
+			// where clause.  the first time $last_drupal_id will be (int) 0 . this will cause the MAX ID to be on the top of DESC.
+			// upon each insert, $last_drupal_id will progressively get less.  so need to change to AND n.nid < '$last_drupal_id'
+			// if( $last_drupal_id > 0 ) {
+				// for testing don't increment so we stay on 1 import; it will stick on the last id (which is the MAX value)
+				// $sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+			// }
+			// order by.
+			// $sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
+			// limit for testing.
+			// $sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 1', $sql );
+
+			// hard coded
+			if( $last_drupal_id == 0 ) {
+				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(249615)", $sql );
+			} else {
+				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
+			}
 		}
-
-		// order by.
-		$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
-
-		// limit for testing.
-		$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 1', $sql );
+		else if ( $content_type === 'profile' ) {
+			if( $last_drupal_id == 0 ) {
+				// $sql = str_replace( "AND n.nid > '0'", "AND n.nid = 234552", $sql );
+				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(249613,249614)", $sql );
+			} else {
+				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
+			}	
+		}
 
 		return $sql;
 	}
