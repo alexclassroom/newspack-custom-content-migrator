@@ -15,6 +15,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	private string $migration_name = 'am_mag';
 
+	private array $custom_post_fields;
+
 	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator am-mag-import',
@@ -39,6 +41,51 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_post_import_post',           [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_filter( 'fgd2wp_pre_register_post_type',     [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
+
+add_action( 'fgd2wp_post_register_custom_post_fields', function( $custom_fields, $post_type ) {
+	// Save drupal's post fields to memory incase we need to look them up later.
+	if( $post_type === 'post' ) $this->custom_post_fields = $custom_fields;
+}, 10, 2 );
+	
+add_filter( 'fgd2wp_pre_insert_post', function( $new_post, $node ) {
+	
+
+	if ( 'article' !== $node['type'] ) return;
+	
+	global $fgd2wpp;
+
+	// option 1:
+	// if ( empty( $this->custom_post_fields['publication_date'] ) ) return;
+	// $result_array = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
+	// // todo UTC/GMT vs normal date??
+	// ?? -0400 ?? $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
+	// ?? $new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value'];
+	// $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
+
+
+	// option 2: via sql.
+	// $sql = sprintf(
+ 	// 	"SELECT DISTINCT field_publication_date_value, f.delta
+	// 	FROM node__field_publication_date f
+	// 	WHERE f.entity_id = '%d'
+	// 	AND f.langcode IN('en', 'und')
+	// 	ORDER BY f.delta", 
+	// 	(int) $node['nid']
+	// );
+ 	// $result_array = $fgd2wpp->drupal_query( $sql, true ); // fail on db error.
+	// if ( 1 !== count( $result_array )  ) return $new_post;
+	// todo UTC/GMT vs normal date??
+	// ?? -0400 ?? $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
+	// ?? $new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value'];
+	
+
+
+	return $new_post;
+
+}, 10, 2 );
+
+
+
 		// Premium filters have extra "p" in name.s
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 
@@ -62,7 +109,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 public function fgd2wp_get_node_types( array $node_types ): array {
 		$types_to_migrate = [
 			'article',
-			'profile',
+			// 'profile', // entity reference (FG plugin add-on required) | db.node__field_by_author
 			// 'book_review',
 			// .. add more node types here.
 		];
@@ -87,7 +134,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			// hard coded
 			if( $last_drupal_id == 0 ) {
-				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(249615)", $sql );
+				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(247725)", $sql );
 			} else {
 				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
 			}
@@ -95,7 +142,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		else if ( $content_type === 'profile' ) {
 			if( $last_drupal_id == 0 ) {
 				// $sql = str_replace( "AND n.nid > '0'", "AND n.nid = 234552", $sql );
-				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(249613,249614)", $sql );
+				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(241195,247417,247726,247727,247728,247729,247730)", $sql );
 			} else {
 				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
 			}	
