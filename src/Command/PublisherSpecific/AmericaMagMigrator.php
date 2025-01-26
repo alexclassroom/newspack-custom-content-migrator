@@ -14,6 +14,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	use WpCliCommandTrait;
 
 	private string $migration_name = 'am_mag';
+	private string $required_timezone = 'America/New_York';
 
 	private array $custom_post_fields;
 
@@ -32,6 +33,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Verify the FG Entity add-on is active.
 		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
 			NMT::exit_with_message( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
+		}
+
+		// Verify ET/-4 timezone:
+		if( wp_timezone_string() !== $this->required_timezone ) {
+			// if we want to set this programatically, the DB must match:
+			// timezone_string	America/New_York	auto
+			// gmt_offset		(null)				on|auto (?)
+			// just do this by hand in wp-admin instead.
+			WP_CLI::error( 'WP > settings > timezone must be set to: ' . $this->required_timezone );
 		}
 
 		// Setup FG plugin's filters.
@@ -54,31 +64,45 @@ add_filter( 'fgd2wp_pre_insert_post', function( $new_post, $node ) {
 	
 	global $fgd2wpp;
 
-	// option 1:
-	// if ( empty( $this->custom_post_fields['publication_date'] ) ) return;
-	// $result_array = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
-	// // todo UTC/GMT vs normal date??
-	// ?? -0400 ?? $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
-	// ?? $new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value'];
-	// $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
+	// option 1: using an FG function.
+	if ( empty( $this->custom_post_fields['publication_date'] ) ) {
+		WP_CLI::error( 'Missing custom post field for: publication_date', true );
+	}
+	$result_array = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
+	// end option 1.
 
-
-	// option 2: via sql.
+	// option 2: via FG drupal query (sql).
 	// $sql = sprintf(
- 	// 	"SELECT DISTINCT field_publication_date_value, f.delta
+	// 	"SELECT DISTINCT field_publication_date_value, f.delta
 	// 	FROM node__field_publication_date f
 	// 	WHERE f.entity_id = '%d'
 	// 	AND f.langcode IN('en', 'und')
 	// 	ORDER BY f.delta", 
 	// 	(int) $node['nid']
 	// );
- 	// $result_array = $fgd2wpp->drupal_query( $sql, true ); // fail on db error.
-	// if ( 1 !== count( $result_array )  ) return $new_post;
+	// $result_array = $fgd2wpp->drupal_query( $sql, true ); // fail on db error.
+	// end option 2.
+
+	// Get value:
+	if ( 1 !== count( $result_array )
+		|| empty( $result_array[0]['field_publication_date_value'] )
+		|| false === strtotime( $result_array[0]['field_publication_date_value'])
+	) {
+		WP_CLI::error( 'Custom post field value is not a valid datetime for: publication_date', true );
+	}
+
 	// todo UTC/GMT vs normal date??
 	// ?? -0400 ?? $new_post['post_date'] = $result_array[0]['field_publication_date_value'];
 	// ?? $new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value'];
 	
-
+	
+	// SET WORDPRESS DATE TO NEW YORK PRIOR TO IMPORT!!!!
+	// below will show correct -0400 in HTML
+	unset( $new_post['post_date'] ); // UNSET THIS SO IT WILL GET CREATED FROM GMT IN WP TIMEZONE (NEW YORK)
+	$new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value']; // this alone will cause WP to create post_date -4/Easten Time.
+	// YES!!!  guid is created from post date so iF GTM is under 4 am, then GUID will be prior day - which is how DRUPAL does it!!
+	
+	WP_CLI::line( $result_array[0]['field_publication_date_value'] );
 
 	return $new_post;
 
@@ -134,7 +158,7 @@ add_filter( 'fgd2wp_pre_insert_post', function( $new_post, $node ) {
 
 			// hard coded
 			if( $last_drupal_id == 0 ) {
-				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(247725)", $sql );
+				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(240610)", $sql );
 			} else {
 				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
 			}
