@@ -7,8 +7,6 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Newspack\MigrationTools\Command\WpCliCommandTrait;
-use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\MigrationTools\Command\ShortcodeReplacementInterface;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Shortcodes;
@@ -16,9 +14,7 @@ use Newspack\MigrationTools\Logic\Shortcodes;
 /**
  * SanDiegoVoiceAndViewpointMigrator.
  */
-class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, ShortcodeReplacementInterface {
-
-	use WpCliCommandTrait;
+class SanDiegoVoiceAndViewpointMigrator implements ShortcodeReplacementInterface {
 
 	/**
 	 * Gutenberg block generator.
@@ -40,14 +36,6 @@ class SanDiegoVoiceAndViewpointMigrator implements RegisterCommandInterface, Sho
 	public function __construct() {
 		$this->blocks     = new GutenbergBlockGenerator();
 		$this->shortcodes = new Shortcodes();
-	}
-
-	/**
-	 * Register commands with WP CLI.
-	 *
-	 * @throws Exception If the command registration fails.
-	 */
-	public static function register_commands(): void {
 	}
 
 	/**
