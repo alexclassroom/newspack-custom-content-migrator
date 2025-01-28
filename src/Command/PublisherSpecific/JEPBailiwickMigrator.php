@@ -243,6 +243,30 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator bw-get-disqus-csv',
+			self::get_command_closure( 'cmd_get_disqus_csv' ),
+			[
+				'shortdesc' => 'Get Disqus CSV.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator bw-qa-urls',
+			self::get_command_closure( 'cmd_qa_urls' ),
+			[
+				'shortdesc' => 'Reads a txt file with URLs and checks if URL response is valid, non-404. Saves output list of successes and failed in txt files.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'input-file',
+						'description' => 'File with URLs, one per line.',
+						'optional'    => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator bw-helper-xml-syntax-check-count-articles',
 			self::get_command_closure( 'cmd_helper_xml_syntax_check_count_articles' ),
 			[
@@ -1291,6 +1315,106 @@ class JEPBailiwickMigrator implements RegisterCommandInterface {
 			);
 		}
 	}
+
+	/**
+	 * Callable for `newspack-content-migrator bw-get-disqus-csv`.
+	 * 
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @return void
+	 */
+	public function cmd_get_disqus_csv( array $pos_args, array $assoc_args ): void {
+
+		$csv_file = 'disqus.csv';
+
+		// Delete file if exists.
+		if ( file_exists( $csv_file ) ) {
+			unlink( $csv_file ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink
+		}
+
+		// Headers.
+		file_put_contents( $csv_file, 'old_url,new_url' . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents
+		
+		// Get data.
+		$post_ids = $this->posts->get_all_posts_ids();
+		foreach ( $post_ids as $key_post_id => $post_id ) {
+			WP_CLI::line( sprintf( 'ID %d (%d/%d)', $post_id, $key_post_id + 1, count( $post_ids ) ) );
+			
+			$old_url = get_post_meta( $post_id, self::META_ORIGINAL_URL, true );
+			$new_url = get_permalink( $post_id );
+			file_put_contents( $csv_file, sprintf( '%s,%s', $old_url, $new_url ) . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents
+		}
+
+		// Message.
+		WP_CLI::success( sprintf( 'CSV file created: %s', $csv_file ) );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator bw-qa-urls`.
+	 * 
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 * @throws \Exception       If failed to open output files for writing.
+	 * @return void
+	 */
+	public function cmd_qa_urls( array $pos_args, array $assoc_args ): void {
+
+		// Input file.
+		$input_file  = $assoc_args['input-file'];
+		$file_handle = fopen( $input_file, 'r' );// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		if ( ! $file_handle ) {
+			throw new Exception( 'Failed to open input file for reading.' );
+		}
+		
+		// Output files.
+		$success_file   = sprintf( '%s__%s', $input_file, 'urls_success.txt' );
+		$fail_file      = sprintf( '%s__%s', $input_file, 'urls_fail.txt' );
+		$success_handle = fopen( $success_file, 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		$fail_handle    = fopen( $fail_file, 'w' ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		if ( ! $success_handle || ! $fail_handle ) {
+			throw new Exception( 'Failed to open output files for writing.' );
+		}
+
+		// Allowed response codes.
+		$allowed_response_codes = [
+			200,
+			301,
+			302,
+		];
+		
+		// Check if URLs are valid.
+		$total_lines_count = count( file( $input_file ) );
+		$i                 = 0;
+		while ( ( $url = fgets( $file_handle ) ) !== false ) {
+			++$i;
+			$url = trim( $url );
+			if ( empty( $url ) ) {
+				continue;
+			}
+
+			// Make a request to $url, and also if it's a redirect follow it. Then check if the final URL is a 200 OK.
+			$response = wp_remote_get( $url, [ 'redirection' => 5 ] ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.wp_remote_get_wp_remote_get
+			$response_code = wp_remote_retrieve_response_code( $response );
+
+			$is_success = in_array( $response_code, $allowed_response_codes );
+			if ( $is_success ) {
+				fwrite( $success_handle, $url . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite
+				WP_CLI::line( sprintf( '%d/%d SUCCESS `%s` %s', $i, $total_lines_count, $response_code, $url ) );
+			} else {
+				fwrite( $fail_handle, $url . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite
+				WP_CLI::line( sprintf( '%d/%d FAIL `%s` %s', $i, $total_lines_count, $response_code, $url ) );
+			}
+		}
+
+		// Close all file handles.
+		fclose( $file_handle );
+		fclose( $success_handle );
+		fclose( $fail_handle );
+
+		WP_CLI::line( sprintf( 'Results saved in %s and %s', $success_file, $fail_file ) );
+	}
+
+
 
 	/**
 	 * Callable for `newspack-content-migrator bw-list-redirects`.
