@@ -41,5 +41,5 @@ if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
 	exit 1
 fi
 
-echo "Hashes match for $REPO, proceeding with push."
+echo "Hashes match for $REPO, proceeding with merge."
 exit 0
