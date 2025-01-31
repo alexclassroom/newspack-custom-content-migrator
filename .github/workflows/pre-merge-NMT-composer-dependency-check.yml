@@ -1,0 +1,16 @@
+name: Pre-Merge NMT Composer dependency check
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  pre-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Run pre-merge script
+        run: |
+          chmod +x hooks/pre-merge.sh
+          ./hooks/pre-merge.sh
