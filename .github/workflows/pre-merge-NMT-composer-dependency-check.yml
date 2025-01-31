@@ -12,5 +12,5 @@ jobs:
 
       - name: Run pre-merge script
         run: |
-          chmod +x hooks/pre-merge.sh
-          ./hooks/pre-merge.sh
+          chmod +x .github/hooks/pre-merge.sh
+          ./.github/hooks/pre-merge.sh
