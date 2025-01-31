@@ -24,7 +24,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 *
 	 * @var int
 	 */
-	private int $batch_max = 9;
+	private int $batch_max = 5;
 
 	/**
 	 * Custom Post Fields holds the related field definitions that are attached to node articles.
@@ -56,6 +56,17 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		WP_CLI::add_command(
 			'newspack-content-migrator am-mag-import',
 			self::get_command_closure( 'cmd_run_import' ),
+			[
+				'shortdesc' => 'America Mag Importer',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch-max',
+						'description' => 'Max nodes to import (per type). Integer. Default: 5',
+						'optional'    => true,
+					],
+				],
+			]
 		);
 	}
 
@@ -64,6 +75,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_run_import( array $pos_args, array $assoc_args ): void {
 		
+		if ( isset( $assoc_args['batch-max'] ) ) $this->batch_max = (int) $assoc_args['batch-max'];
+
 		// Verify the FG Drupal "Entity Reference" add-on is active.
 		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
 			NMT::exit_with_message( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
@@ -97,12 +110,30 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/**
 	 * Batch method to get key for counts.
 	 *
-	 * @param string $content_type Node types: article, page, etc.
-	 * @param string $entity_type  Node, media, user, etc.
-	 * @return void
+	 * @param  string $content_type Node types: article, page, etc.
+	 * @param  string $entity_type  Node, media, user, etc.
+	 * @return string $batch_key    Array key. 
 	 */
 	private function batch_get_key( $content_type, $entity_type ) {
-		return $content_type . '---' . $entity_type;
+		$batch_key = $content_type . '---' . $entity_type;
+		if ( !isset( $this->batch_counts[ $batch_key ] ) ) {
+			$this->batch_counts[ $batch_key ] = 0;
+		}
+		return $batch_key;
+	}
+
+	/**
+	 * Batch increment upon each insert.
+	 */
+	private function batch_increment( $content_type, $entity_type ) {
+		$this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ]++;
+	}
+	
+	/**
+	 * Batch stop when at or over max return true.
+	 */
+	private function batch_stop( $content_type, $entity_type ) {
+		return ( $this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ] >= $this->batch_max );
 	}
 
 	/**
@@ -119,6 +150,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_get_node_types( array $node_types ): array {
 		
+		// @todo remove this filter completely?
 		return $node_types;
 
 		// Always allow the following core node types in this filter. To remove these core node types
@@ -155,40 +187,27 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_get_nodes_sql( $sql, $prefix, $last_drupal_id, $limit, $content_type, $entity_type ) {
 		
-		// Use batching per CLI run.
-		$batch_key = $this->batch_get_key( $content_type, $entity_type );
-		if ( !isset( $this->batch_counts[ $batch_key ] ) ) {
-			$this->batch_counts[ $batch_key ] = 0;
-		}
-
-		// When importing articles, it's easier to test and QA the content when importing the newest articles
-		// first. The default sql will import the lower node ids first so this means the oldest articles will
-		// get imported before the newer articles. The following will change the SQL to import the newest
-		// content first.
-		if ( 'node' === $entity_type && 'article' == $content_type ) {
+		// When importing, it's easier to test and QA the content when importing the newest nodes
+		// first. The default sql will import the lower node ids first so this means the oldest
+		// articles, profiles, etc, will be imported before the newer ones. The following will
+		// change the SQL to import the newest content first.
 			
-			// Order by nid desc to force newest content first.
-			$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
+		// Order by nid desc to force newest content first.
+		$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
 
-			// Where ids are less than the last imported id since we're doing the newest (largest) ids first.
-			// But the first time this is called, the $last_drupal_id will be 0 so don't change the sql.
-			if ( $last_drupal_id > 0 ) {
-				$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
-			}
-			
-			// Stop at batch limit.
-			if ( $this->batch_counts[ $batch_key ] >= $this->batch_max ) {
-				$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 0', $sql );
-			}
-
+		// Where ids are less than the last imported id since we're doing the newest (largest) ids first.
+		// But the first time this is called, the $last_drupal_id will be 0 so don't change the sql.
+		if ( $last_drupal_id > 0 ) {
+			$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
 		}
-		else if ( $content_type === 'profile' ) {
-			if( $last_drupal_id == 0 ) {
-				// $sql = str_replace( "AND n.nid > '0'", "AND n.nid = 234552", $sql );
-				$sql = str_replace( "AND n.nid > '0'", "AND n.nid in(241195,247417,247726,247727,247728,247729,247730)", $sql );
-			} else {
-				$sql = str_replace( "AND n.nid > '" . $last_drupal_id . "'", "AND 1 = 2", $sql );
-			}	
+		
+		// Stop at batch limit.
+		if ( $this->batch_stop( $content_type, $entity_type ) ) {
+			$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 0', $sql );
+		}
+		else {
+			// To make debugging and batching easier, change the limit to just 1 row.
+			$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 1', $sql );
 		}
 
 		return $sql;
@@ -210,7 +229,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public function fgd2wp_post_import_post( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
 
 		// Update batch count.
-		$this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ]++;
+		$this->batch_increment( $content_type, $entity_type );
 
 		WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
 			$new_post_id, $node, $content_type, $post_type, $entity_type,
@@ -300,44 +319,29 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	public function fgd2wp_pre_insert_post( $new_post, $node ) {
 	
-		// return $new_post;
-
 		if ( 'article' !== $node['type'] ) return $new_post;
 		
 		global $fgd2wpp;
 	
-		// option 1: using an FG function.
+		// Verify key.
 		if ( empty( $this->custom_post_fields['publication_date'] ) ) {
 			WP_CLI::error( 'Missing custom post field for: publication_date', true );
 		}
-		$result_array = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
-		// end option 1.
-	
-		// option 2: via FG drupal query (sql).
-		// $sql = sprintf(
-		// 	"SELECT DISTINCT field_publication_date_value, f.delta
-		// 	FROM node__field_publication_date f
-		// 	WHERE f.entity_id = '%d'
-		// 	AND f.langcode IN('en', 'und')
-		// 	ORDER BY f.delta", 
-		// 	(int) $node['nid']
-		// );
-		// $result_array = $fgd2wpp->drupal_query( $sql, true ); // fail on db error.
-		// end option 2.
-	
-		// Get value:
-		if ( 1 !== count( $result_array )
-			|| empty( $result_array[0]['field_publication_date_value'] )
-			|| false === strtotime( $result_array[0]['field_publication_date_value'])
+
+		// Get value.
+		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
+
+		// Verify value.
+		if ( 1 !== count( $pub_date_arr )
+			|| empty( $pub_date_arr[0]['field_publication_date_value'] )
+			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'])
 		) {
 			WP_CLI::error( 'Custom post field value is not a valid datetime for: publication_date', true );
 		}
-	
-		// SET WORDPRESS DATE TO NEW YORK PRIOR TO IMPORT!!!!
-		// below will show correct -0400 in HTML
-		unset( $new_post['post_date'] ); // UNSET THIS SO IT WILL GET CREATED FROM GMT IN WP TIMEZONE (NEW YORK)
-		$new_post['post_date_gmt'] = $result_array[0]['field_publication_date_value']; // this alone will cause WP to create post_date -4/Easten Time.
-		// YES!!!  guid is created from post date so iF GTM is under 4 am, then GUID will be prior day - which is how DRUPAL does it!!
+
+		// Set new_post to use the publication date from field_publication_date_value (which is GMT).		
+		$new_post['post_date'] = get_date_from_gmt( $pub_date_arr[0]['field_publication_date_value'] );
+		$new_post['post_date_gmt'] = $pub_date_arr[0]['field_publication_date_value'];
 	
 		return $new_post;	
 	}
