@@ -17,7 +17,7 @@ GITHUB_REPO="https://github.com/$REPO/tree/trunk"
 # Fetch the current hash from composer.lock.
 LOCAL_HASH=$(jq -r --arg name "$REPO" '.packages[] | select(.name == $name) | .source.reference' "$COMPOSER_LOCK")
 if [ -z "$LOCAL_HASH" ]; then
-    echo "Error: Could not find the $REPO package hash in $COMPOSER_LOCK. Please fix the ./git/hooks/pre-push script before proceeding."
+    echo "Error: Could not find the $REPO package hash in $COMPOSER_LOCK. Please fix the .github/hooks/pre-merge.sh script before proceeding."
     exit 1
 fi
 
@@ -30,7 +30,7 @@ fi
 
 # Compare the hashes.
 if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-	echo "Warning: The local $REPO hash ($LOCAL_HASH) does not match the remote hash ($REMOTE_HASH)."
+	echo "Error: The local $REPO hash ($LOCAL_HASH) does not match the remote hash ($REMOTE_HASH)."
 	echo "Please update the repo dependency before pushing, you can use:"
 	echo "  rm -rf vendor/$REPO && \\"
 	echo "  git checkout trunk && \\"
