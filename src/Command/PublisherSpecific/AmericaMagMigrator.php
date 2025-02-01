@@ -2,9 +2,11 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Newspack\MigrationTools\NMT;
 use Newspack\MigrationTools\Command\DrupalMigrator;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Util\Log\CliLog;
+use Newspack\MigrationTools\Util\Log\FileLog;
+use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 
@@ -27,18 +29,25 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private int $batch_max = 5;
 
 	/**
-	 * Custom Post Fields holds the related field definitions that are attached to node articles.
+	 * Custom Fields holds the related field definitions that are attached to nodes.
 	 *
 	 * @var array
 	 */
-	private array $custom_post_fields;
+	private array $custom_fields;
+
+	/**
+	 * Logger
+	 *
+	 * @var MultiLog
+	 */
+	private $logger;
 
 	/**
 	 * Migration name, used as a unique identifier.
 	 *
 	 * @var string
 	 */
-	private string $migration_name = 'am_mag';
+	private string $migration_name = 'america-mag';
 
 	/**
 	 * Required timezone setting.
@@ -54,8 +63,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public static function register_commands(): void {
 		WP_CLI::add_command(
-			'newspack-content-migrator am-mag-import',
-			self::get_command_closure( 'cmd_run_import' ),
+			'newspack-content-migrator america-mag-import',
+			self::get_command_closure( 'cmd_import' ),
 			[
 				'shortdesc' => 'America Mag Importer',
 				'synopsis'  => [
@@ -73,13 +82,17 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/**
 	 * Run the import.
 	 */
-	public function cmd_run_import( array $pos_args, array $assoc_args ): void {
+	public function cmd_import( array $pos_args, array $assoc_args ): void {
 		
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
 		if ( isset( $assoc_args['batch-max'] ) ) $this->batch_max = (int) $assoc_args['batch-max'];
 
 		// Verify the FG Drupal "Entity Reference" add-on is active.
 		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
-			NMT::exit_with_message( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
+			$this->logger->error( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
+			exit();
 		}
 		
 		// Verify America/New_York (eastern / utc-4 timezone):
@@ -88,18 +101,19 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			//   timezone_string	America/New_York	auto
 			//   gmt_offset		(null)				on|auto (?)
 			// so just force this to be done by-hand in wp-admin instead.  exit if not set.
-			WP_CLI::error( 'WP > settings > timezone must be set to: ' . $this->required_timezone, true );
+			$this->logger->error( 'WP-admin > settings > timezone must be set to: ' . $this->required_timezone );
+			exit();
 		}
 
 		// Setup FG plugin's filters.
-		// add_filter( 'fgd2wp_get_node_types',                [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
-		add_filter( 'fgd2wp_get_nodes_sql',                    [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
-		add_filter( 'fgd2wp_map_taxonomy',                     [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
-		add_filter( 'fgd2wp_post_import_post',                 [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
-		add_action( 'fgd2wp_post_register_custom_post_fields', [ $this, 'fgd2wp_post_register_custom_post_fields' ], 10, 2 );
-		add_filter( 'fgd2wp_pre_insert_post',                  [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
-		add_filter( 'fgd2wp_pre_insert_taxonomy_term',         [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
-		add_filter( 'fgd2wp_pre_register_post_type',           [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
+		// add_filter( 'fgd2wp_get_node_types',           [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
+		add_filter( 'fgd2wp_get_nodes_sql',               [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_map_taxonomy',                [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_post_import_post',            [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
+		add_action( 'fgd2wp_post_register_custom_fields', [ $this, 'fgd2wp_post_register_custom_fields' ] );
+		add_filter( 'fgd2wp_pre_insert_post',             [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
+		add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
+		add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
 		// add_filter( 'fgd2wpp_get_users_sql',          [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
@@ -253,7 +267,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->batch_increment( $content_type, $entity_type );
 
 		// Print logging.
-		WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
+		$this->logger->info( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
 			$new_post_id, $node, $content_type, $post_type, $entity_type,
 		) ) );
 	}
@@ -262,12 +276,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * FG Drupal after drupal custom fields are registered.
 	 * 
 	 * This filter will capture the custom fields into a lookup array for later use.
-	 * An example is publication_date. This is a custom field in drupal that is needed
-	 * before each post is inserted.  See fgd2wp_pre_insert_post below.
+	 * An example is publication_date - this is a custom field in drupal that is needed
+	 * before each post is inserted ( see fgd2wp_pre_insert_post below ).
 	 *
+	 * Format example: $this->custom_fields['node']['article']['publication_date']
+	 * 
 	 */
-	public function fgd2wp_post_register_custom_post_fields( $custom_fields, $post_type ) {
-		if( $post_type === 'post' ) $this->custom_post_fields = $custom_fields;
+	public function fgd2wp_post_register_custom_fields( $custom_fields ) {
+		$this->custom_fields = $custom_fields;
 	}
 
 	/**
@@ -283,24 +299,24 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	
 		// Only do this for article ("post") types.
 		if ( 'article' !== $node['type'] ) return $new_post;
-		
-		// Access the global FG Drupal Premium object (note the extra "p" in the name).
-		global $fgd2wpp;
 	
 		// Verify the custom field key exists.
-		if ( empty( $this->custom_post_fields['publication_date'] ) ) {
-			WP_CLI::error( 'Missing custom post field for: publication_date', true );
+		if ( empty( $this->custom_fields['node']['article']['publication_date'] ) ) {
+			$this->logger->error( 'Missing custom field for: node > article > publication_date' );
+			exit();
 		}
-
-		// Get value.
-		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
+		
+		// Access the global FG Drupal Premium object (note the extra "p" in the name) to get the value.
+		global $fgd2wpp;
+		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_fields['node']['article']['publication_date'] );
 
 		// Verify value.
 		if ( 1 !== count( $pub_date_arr )
 			|| empty( $pub_date_arr[0]['field_publication_date_value'] )
 			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'])
 		) {
-			WP_CLI::error( 'Custom post field value is not a valid datetime for: publication_date', true );
+			$this->logger->error( 'Custom post field value is not a valid datetime for: publication_date' );
+			exit();
 		}
 
 		// Set new_post to use the publication date from field_publication_date_value (which is GMT).		
@@ -318,9 +334,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 *
 	 */
 	public function fgd2wp_pre_insert_taxonomy_term( $args, $term, $wp_taxonomy ) {
-		// Don't use FG Drupal's taxonomy slug since it removes "-" from slugs.
-		// Just let the wordpress's insert term function create the slug naturally.
 		if ( isset( $args['slug'] ) ) {
+			// Undo FG Drupal's taxonomy slug since it removes "-" from slugs.
+			// Just let the wordpress's insert term function create the slug naturally.
 			unset( $args['slug'] );
 		}
 		return $args;
@@ -383,23 +399,25 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wpp_post_init_premium_options( $premium_options ) {
 
-		// Premium options / Default values / FG plugin version 3.85.2
+		// Available Premium options - FG plugin version 3.85.2 (default values)
 		// $this->premium_options = array(
-		// 	'cpt_format'				=> 'acf',
-		// 	'unicode_usernames'			=> false,
-		// 	'links'						=> 'as_links',
-		// 	'url_redirect'				=> true,
-		// 	'skip_taxonomies'			=> false,
-		// 	'skip_nodes'				=> false,
-		// 	'nodes_to_skip'				=> array(),
-		// 	'skip_users'				=> false,
-		// 	'only_authors'				=> false,
-		// 	'skip_menus'				=> false,
-		// 	'skip_comments'				=> false,
-		// 	'skip_blocks'				=> false,
-		// 	'skip_redirects'			=> false,
+		// 	  'cpt_format'        => 'acf',
+		// 	  'unicode_usernames' => false,
+		// 	  'links'             => 'as_links',
+		// 	  'url_redirect'      => true,
+		// 	  'skip_taxonomies'   => false,
+		// 	  'skip_nodes'        => false,
+		// 	  'nodes_to_skip'     => array(),
+		// 	  'skip_users'        => false,
+		// 	  'only_authors'      => false,
+		// 	  'skip_menus'        => false,
+		// 	  'skip_comments'     => false,
+		// 	  'skip_blocks'       => false,
+		// 	  'skip_redirects'    => false,
 		// );
 	
+		// Only import authors.
+		// @todo: remove fgd2wpp_get_users_sql above.
 		$premium_options['only_authors'] = true;
 
 		// By default FG drupal will migrate all core and custom node types.
@@ -438,9 +456,33 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$premium_options['skip_blocks']    = true; // sidebar widgets
 		$premium_options['skip_comments']  = true;
 		$premium_options['skip_menus']     = true;
+
+		// @todo: Redirects?
 		$premium_options['skip_redirects'] = true;
 		$premium_options['url_redirect']   = false;
 
 		return $premium_options;
+	}
+
+
+	/************************************
+	  LOGGING
+	************************************/
+
+	/**
+	 * Logger setup
+	 *
+	 * @param string $caller Calling __FUNCTION__ name.
+	 * @return void
+	 */
+	private function logger_set( $caller ) {
+		$log_slug     = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $caller;
+		$this->logger = MultiLog::get_logger(
+			$log_slug . '-multi',
+			[
+				CliLog::get_logger( $log_slug ),
+				FileLog::get_logger( $log_slug ),
+			] 
+		);
 	}
 }
