@@ -98,14 +98,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_post_import_post',                 [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_action( 'fgd2wp_post_register_custom_post_fields', [ $this, 'fgd2wp_post_register_custom_post_fields' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_post',                  [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
+		add_filter( 'fgd2wp_pre_insert_taxonomy_term',         [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
 		add_filter( 'fgd2wp_pre_register_post_type',           [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
-		add_filter( 'fgd2wpp_post_init_premium_options',       [ $this, 'fgd2wpp_post_init_premium_options' ] );
-
+		// add_filter( 'fgd2wpp_get_users_sql',          [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
+		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
+	
 		// Call NMT's migrator using a unique migration name.
 		DrupalMigrator::cmd_wrap_drupal_import( [ $this->migration_name ], [] );
 	}
+
+	/************************
+	  BATCHING
+	************************/
 
 	/**
 	 * Batch method to get key for counts.
@@ -135,6 +141,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private function batch_stop( $content_type, $entity_type ) {
 		return ( $this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ] >= $this->batch_max );
 	}
+
+	/************************************
+	  FG DRUPAL HOOKS (non-premium)
+	************************************/
 
 	/**
 	 * FG Drupal get nodes types.
@@ -213,46 +223,165 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		return $sql;
 	}
 
+	/**
+	 * FG Drupal map drupal-to-wordpress taxonomies.
+	 */
 	public function fgd2wp_map_taxonomy( $wp_taxonomy, $taxonomy ) {
+
+		// Tell FG Drupal how to migrate taxonomies.
 		switch ( strtolower( $taxonomy ) ) {
-			case 'topics':
-				$wp_taxonomy = 'post_tag';
+			case 'channel':
+				$wp_taxonomy = 'category';
 				break;
 			case 'sections':
 				$wp_taxonomy = 'category';
+				break;
+			case 'topics':
+				$wp_taxonomy = 'post_tag';
 				break;
 		}
 
 		return $wp_taxonomy;
 	}
 
+	/**
+	 * FG Drupal after a post is inserted.
+	 */
 	public function fgd2wp_post_import_post( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
 
 		// Update batch count.
 		$this->batch_increment( $content_type, $entity_type );
 
+		// Print logging.
 		WP_CLI::line( 'fgd2wp_post_import_post (AFTER): ' . json_encode( array( 
 			$new_post_id, $node, $content_type, $post_type, $entity_type,
 		) ) );
 	}
 
+	/**
+	 * FG Drupal after drupal custom fields are registered.
+	 * 
+	 * This filter will capture the custom fields into a lookup array for later use.
+	 * An example is publication_date. This is a custom field in drupal that is needed
+	 * before each post is inserted.  See fgd2wp_pre_insert_post below.
+	 *
+	 */
 	public function fgd2wp_post_register_custom_post_fields( $custom_fields, $post_type ) {
-		// Save drupal's custom post fields to memory so we can look them up later.
 		if( $post_type === 'post' ) $this->custom_post_fields = $custom_fields;
 	}
 
+	/**
+	 * FG Drupal before inserting a post. 
+	 * 
+	 * Use this to make adjustments to a post prior to insertion.
+	 *
+	 * @param  array $new_post The new post array prior to insertion.
+	 * @param  array $node     The drupal node being migrated into new post.
+	 * @return array            The modified $new_post array.
+	 */
+	public function fgd2wp_pre_insert_post( $new_post, $node ) {
+	
+		// Only do this for article ("post") types.
+		if ( 'article' !== $node['type'] ) return $new_post;
+		
+		// Access the global FG Drupal Premium object (note the extra "p" in the name).
+		global $fgd2wpp;
+	
+		// Verify the custom field key exists.
+		if ( empty( $this->custom_post_fields['publication_date'] ) ) {
+			WP_CLI::error( 'Missing custom post field for: publication_date', true );
+		}
+
+		// Get value.
+		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
+
+		// Verify value.
+		if ( 1 !== count( $pub_date_arr )
+			|| empty( $pub_date_arr[0]['field_publication_date_value'] )
+			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'])
+		) {
+			WP_CLI::error( 'Custom post field value is not a valid datetime for: publication_date', true );
+		}
+
+		// Set new_post to use the publication date from field_publication_date_value (which is GMT).		
+		$new_post['post_date'] = get_date_from_gmt( $pub_date_arr[0]['field_publication_date_value'] );
+		$new_post['post_date_gmt'] = $pub_date_arr[0]['field_publication_date_value'];
+	
+		return $new_post;	
+	}
+
+	/**
+	 * FG Drupal before inserting a taxonomy term.
+	 * 
+	 * FG Drupal by default will sanitize taxonomy titles into slugs by removing "-" dashes.
+	 * In WordPress we'd like to keep the dashes. Example: "My Category" should have slug "my-category".
+	 *
+	 */
+	public function fgd2wp_pre_insert_taxonomy_term( $args, $term, $wp_taxonomy ) {
+		// Don't use FG Drupal's taxonomy slug since it removes "-" from slugs.
+		// Just let the wordpress's insert term function create the slug naturally.
+		if ( isset( $args['slug'] ) ) {
+			unset( $args['slug'] );
+		}
+		return $args;
+	}
+
+	// @todo - See CarsonNow migrator.
 	public function fgd2wp_pre_register_post_type( $post_type, $node_type ) {
+		
+		// @todo Look at how CarsonNow migrator will convert a node type to "post"
+		// and then it will add the node type as a category to the post.
+
+		// Example: "book_review" nodes will migrate to posts with category "Book Review"
+
 		// Map to post.
 		// if ( 'book_review' === $node_type ) {
 		// 	$post_type = 'post';
 		// }
+		
+		// See also Carson now for how the category is added during inset post;
+		// $new_post['post_category'][] = self::READER_CONTENT_CATEGORY_ID;
 
 		return $post_type;
 	}
 
-	public function fgd2wpp_post_init_premium_options( $premium_options ) {
+	/************************************
+	  FG DRUPAL HOOKS (premium)
+	************************************/
 
-		// had filter not existed, db option name is get_option('fgd2wpp_options') * note the extra "p" for premium
+	// @todo - remove?
+	public function fgd2wpp_get_users_sql( string $sql ): string {
+		
+		// Replaced with premium option: 'only_authors' => true
+		// @todo remove this filter completely?
+		return $sql;
+
+		$limit        = 10; // Possibly used to "batch" x number at a time?
+		$last_user_id = (int) get_option( 'fgd2wp_last_user_id' ); // to restore the import where it left
+		$prefix       = \Newspack\MigrationTools\Logic\DrupalHelper::get_tables_prefix();
+
+		$sql = "
+			SELECT u.uid, u.name, u.mail, u.pass, u.created, up.user_picture_target_id AS picture
+			FROM {$prefix}users_field_data u
+			LEFT JOIN {$prefix}user__user_picture up ON up.entity_id = u.uid
+			JOIN user__roles ur ON u.uid = ur.entity_id 
+			WHERE ur.roles_target_id IN ('editor', 'web_editor')
+			AND u.uid > '$last_user_id'
+			AND u.status = 1
+			ORDER BY u.uid
+			LIMIT $limit
+		";
+
+		return $sql;
+	}
+
+	/**
+	 * FG Drupal after premium options are initialized.
+	 * 
+	 * Use this to change premuim options in code instead of wp-admin > Tools > Import > Drupal settings.
+	 *
+	 */
+	public function fgd2wpp_post_init_premium_options( $premium_options ) {
 
 		// Premium options / Default values / FG plugin version 3.85.2
 		// $this->premium_options = array(
@@ -284,7 +413,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'america_special_topics',
 			'app_america_today_curated_articl',
 			'app_reels',
-			// allow: 'article',
+			// 'article',
 			'audio_news_update',
 			'audio_prayer',
 			'book',
@@ -297,7 +426,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'photo_gallery',
 			'podcast',
 			'press_release',
-			// allow: 'profile',
+			'profile',
 			'sponsorship',
 			'subscription_offer',
 			'the_word',
@@ -311,63 +440,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$premium_options['skip_menus']     = true;
 		$premium_options['skip_redirects'] = true;
 		$premium_options['url_redirect']   = false;
-		
-
 
 		return $premium_options;
 	}
-
-	public function fgd2wp_pre_insert_post( $new_post, $node ) {
-	
-		if ( 'article' !== $node['type'] ) return $new_post;
-		
-		global $fgd2wpp;
-	
-		// Verify key.
-		if ( empty( $this->custom_post_fields['publication_date'] ) ) {
-			WP_CLI::error( 'Missing custom post field for: publication_date', true );
-		}
-
-		// Get value.
-		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_post_fields['publication_date'] );
-
-		// Verify value.
-		if ( 1 !== count( $pub_date_arr )
-			|| empty( $pub_date_arr[0]['field_publication_date_value'] )
-			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'])
-		) {
-			WP_CLI::error( 'Custom post field value is not a valid datetime for: publication_date', true );
-		}
-
-		// Set new_post to use the publication date from field_publication_date_value (which is GMT).		
-		$new_post['post_date'] = get_date_from_gmt( $pub_date_arr[0]['field_publication_date_value'] );
-		$new_post['post_date_gmt'] = $pub_date_arr[0]['field_publication_date_value'];
-	
-		return $new_post;	
-	}
-
-	/*
-	Replaced with premium option: 'only_authors' => true
-	// add_filter( 'fgd2wpp_get_users_sql',         [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
-	public function fgd2wpp_get_users_sql( string $sql ): string {
-		
-		$limit        = 10; // Possibly used to "batch" x number at a time?
-		$last_user_id = (int) get_option( 'fgd2wp_last_user_id' ); // to restore the import where it left
-		$prefix       = \Newspack\MigrationTools\Logic\DrupalHelper::get_tables_prefix();
-
-		$sql = "
-			SELECT u.uid, u.name, u.mail, u.pass, u.created, up.user_picture_target_id AS picture
-			FROM {$prefix}users_field_data u
-			LEFT JOIN {$prefix}user__user_picture up ON up.entity_id = u.uid
-			JOIN user__roles ur ON u.uid = ur.entity_id 
-			WHERE ur.roles_target_id IN ('editor', 'web_editor')
-			AND u.uid > '$last_user_id'
-			AND u.status = 1
-			ORDER BY u.uid
-			LIMIT $limit
-		";
-
-		return $sql;
-	}
-	*/
 }
