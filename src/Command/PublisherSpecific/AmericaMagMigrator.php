@@ -2,8 +2,8 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Newspack\MigrationTools\Command\DrupalMigrator;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Util\FgHelper;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
@@ -36,18 +36,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private array $custom_fields;
 
 	/**
+	 * FG Helper for simplification.
+	 *
+	 * @var FgHelper FG Helper instance.
+	 */
+	private FgHelper $fg_helper;
+
+	/**
 	 * Logger
 	 *
 	 * @var MultiLog
 	 */
 	private $logger;
-
-	/**
-	 * Migration name, used as a unique identifier.
-	 *
-	 * @var string
-	 */
-	private string $migration_name = 'america-mag';
 
 	/**
 	 * Required timezone setting.
@@ -83,7 +83,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * Run the import.
 	 */
 	public function cmd_import( array $pos_args, array $assoc_args ): void {
-		
+
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
@@ -120,7 +120,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 	
 		// Call NMT's migrator using a unique migration name.
-		DrupalMigrator::cmd_wrap_drupal_import( [ $this->migration_name ], [] );
+		$this->fg_helper = new FgHelper( 'drupal' );
+		$this->fg_helper->import( $pos_args, $assoc_args );
 	}
 
 	/************************
@@ -211,6 +212,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_get_nodes_sql( $sql, $prefix, $last_drupal_id, $limit, $content_type, $entity_type ) {
 		
+		// @todo - testing by profile ids:
+		// if ( 'node' === $entity_type && 'profile' === $content_type ) {
+		// 	$sql = str_replace( 'WHERE ', 'WHERE n.nid IN ( 234552 ) AND ', $sql );
+		// }
+
 		// When importing, it's easier to test and QA the content when importing the newest nodes
 		// first. The default sql will import the lower node ids first so this means the oldest
 		// articles, profiles, etc, will be imported before the newer ones. The following will
@@ -259,7 +265,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * FG Drupal after a post is inserted.
+	 * FG Drupal after a "post" (this could be article, profile, etc) is inserted.
 	 */
 	public function fgd2wp_post_import_post( $new_post_id, $node, $content_type, $post_type, $entity_type ) {
 
@@ -374,7 +380,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$limit        = 10; // Possibly used to "batch" x number at a time?
 		$last_user_id = (int) get_option( 'fgd2wp_last_user_id' ); // to restore the import where it left
-		$prefix       = \Newspack\MigrationTools\Logic\DrupalHelper::get_tables_prefix();
+		
+		// @todo: change this to use a standardized function in NMT Drupal Migrator or NMT FG Helper.
+		$prefix       = FgHelper->get_import_tables_prefix();
 
 		$sql = "
 			SELECT u.uid, u.name, u.mail, u.pass, u.created, up.user_picture_target_id AS picture
@@ -444,7 +452,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'photo_gallery',
 			'podcast',
 			'press_release',
-			'profile',
+			// 'profile',
 			'sponsorship',
 			'subscription_offer',
 			'the_word',
