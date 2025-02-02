@@ -119,6 +119,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// add_filter( 'fgd2wpp_get_users_sql',          [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 	
+		// Filter DB options.
+		add_filter( "option_fgd2wp_options",             [ $this, 'option_fgd2wp_options' ], 11 );
+		add_filter( "default_option_fgd2wp_options",     [ $this, 'option_fgd2wp_options' ], 11 );		
+		
 		// Call NMT's migrator using a unique migration name.
 		$this->fg_helper = new FgHelper( 'drupal' );
 		$this->fg_helper->import( $pos_args, $assoc_args );
@@ -434,7 +438,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Note: if using fgd2wp_get_node_types it is possible to use that filter to skip
 		// custom nodes (but not core nodes).  
 		// to get node types with content: select distinct type from node order by type;
-		// to get node types from config:  select name from config where name like 'node.type.%' order by name;
+		// to get all node types from config:  select name from config where name like 'node.type.%' order by name;
 		$premium_options['nodes_to_skip']  = [ 
 			'america_special_topics',
 			'app_america_today_curated_articl',
@@ -472,7 +476,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		return $premium_options;
 	}
 
-
 	/************************************
 	  LOGGING
 	************************************/
@@ -492,5 +495,66 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				FileLog::get_logger( $log_slug ),
 			] 
 		);
+	}
+
+	/************************************
+	  WP HOOKS
+	************************************/
+
+	/**
+	 * Filter the options for the FG plugin (after FgHelper).
+	 * 
+	 * @param  array|false $options The options array to filter or boolean false if database option doesn't exist.
+	 * @return array                The filtered options.
+	 */
+	public function option_fgd2wp_options( array|false $options ): array {
+		
+		// For when options don't exist yet in the db.
+		if( false === $options ) $options = [];
+
+		// Default values from FG plugin version 3.85.2
+		// $this->plugin_options = array(
+		// 	'automatic_empty'			=> 0,
+		// 	'url'						=> null,
+		// 	'download_protocol'			=> 'http',
+		// 	'base_dir'					=> '',
+		// 	'driver'					=> 'mysql',
+		// 	'hostname'					=> 'localhost',
+		// 	'port'						=> 3306,
+		// 	'database'					=> null,
+		// 	'username'					=> 'root',
+		// 	'password'					=> '',
+		// 	'sqlite_file'				=> '',
+		// 	'prefix'					=> '',
+		// 	'summary'					=> 'in_content',
+		// 	'skip_media'				=> 0,
+		// 	'file_public_path_source'	=> 'default',
+		// 	'file_public_path'			=> 'sites/default/files',
+		// 	'file_private_path_source'	=> 'default',
+		// 	'file_private_path'			=> 'sites/default/private/files',
+		// 	'featured_image'			=> 'featured',
+		// 	'only_featured_image'		=> 0,
+		// 	'remove_first_image'		=> 0,
+		// 	'skip_thumbnails'			=> 0,
+		// 	'import_external'			=> 0,
+		// 	'import_duplicates'			=> 0,
+		// 	'force_media_import'		=> 0,
+		// 	'timeout'					=> 20,
+		// 	'logger_autorefresh'		=> 1,
+		// );
+
+
+		// Keep default: 'force_media_import' => 0 so that already downloaded images aren't fetched again from Live site.
+		$options['force_media_import'] = 0;
+
+		// @todo Should this go into Publisher specific migrator instead?
+		$options['summary'] = 'in_excerpt'; // otherwise excerpt will go in top of content with <!--more--> link
+
+		// @todo should we turn this on for images with the same filenames?
+		// how are these store in drupal? in wordpress the same filename could be used if in different /year/mon/ folders...
+		// but what about if the import was restarted...will images be fetched again and given unique -abc at the end?
+		// import_duplicates = 1;
+
+		return $options;
 	}
 }
