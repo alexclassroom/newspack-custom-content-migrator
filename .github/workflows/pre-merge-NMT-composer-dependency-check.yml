@@ -10,7 +10,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Run pre-merge script
+      - name: Run pre-merge script (only for trunk)
+        if: github.base_ref == 'trunk'
         run: |
           chmod +x .github/scripts/check-composer-dependency-hash.sh
           ./.github/scripts/check-composer-dependency-hash.sh
