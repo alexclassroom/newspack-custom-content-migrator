@@ -28,7 +28,7 @@
     "paquettg/php-html-parser": "^3.1",
     "symfony/dom-crawler": "^5.2",
     "symfony/css-selector": "^5.2",
-    "automattic/newspack-post-image-downloader": "dev-master",
+    "automattic/newspack-post-image-downloader": "dev-trunk",
     "automattic/newspack-content-converter": "dev-master",
     "simplehtmldom/simplehtmldom": "2.0-RC2",
     "automattic/newspack-scraper-migrator": "dev-trunk",

@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.8.1
+ * Version:     1.8.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -74,7 +74,6 @@ PluginSetup::register_command_classes(
 		Command\General\MediaCreditPluginMigrator::class,
 		Command\General\SimplyGuestAuthorNameMigrator::class,
 		Command\General\TagDivThemesPluginsMigrator::class,
-		Command\General\GhostCMSMigrator::class,
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\AmericaMagMigrator::class,
@@ -83,6 +82,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
 		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
+		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
 	]
 );
 
