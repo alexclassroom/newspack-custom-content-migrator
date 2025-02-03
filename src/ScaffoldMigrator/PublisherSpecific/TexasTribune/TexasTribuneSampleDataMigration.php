@@ -38,6 +38,26 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 */
 	private ?array $sponsors_data = null;
 
+	/**
+	 * Cache for tags data.
+	 *
+	 * @var array<int,array{name:string,slug:string}>|null
+	 */
+	private ?array $tags_data = [];
+
+	/**
+	 * Cache for series data.
+	 *
+	 * @var array<int,array{name:string,slug:string,summary:string}>|null
+	 */
+	private ?array $series_data = [];
+
+	/**
+	 * Sponsor post type name.
+	 *
+	 * @var string
+	 */
+	private const SPONSOR_POST_TYPE = 'newspack_spnsrs_cpt';
 
 	/**
 	 * Sponsor taxonomy name.
@@ -91,6 +111,12 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 		$posts_data = new WordPressPostsData();
 		$posts_data->set_migration_object( $migration_object );
+
+		// Fetch all series data.
+		$this->fetch_all_series_data();
+
+		// Fetch all tags data.
+		$this->fetch_all_tags_data();
 
 		// Handle Authors first.
 		foreach ( $migration_object['metadata']['authors'] as $author ) {
@@ -217,6 +243,12 @@ class TexasTribuneSampleDataMigration implements Migration {
 			}
 		}
 
+		// Handle tags if present.
+		$user_facing_tags = $migration_object->metadata->user_facing_tags->get_value() ?? [];
+		if ( ! empty( $user_facing_tags ) ) {
+			$this->handle_post_tags( $maybe_post_id, $user_facing_tags );
+		}
+
 		// Let's handle the featured image here.
 		$featured_image                         = $migration_object->metadata->share_image ?? null;
 		$maybe_featured_image_attachment_object = null;
@@ -250,6 +282,12 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 		if ( $maybe_updated ) {
 			$migration_object->mark_as_processed();
+		}
+
+		// Handle series if present.
+		$series = $migration_object->metadata->series->get_value() ?? [];
+		if ( ! empty( $series ) ) {
+			$this->handle_post_series( $maybe_post_id, $series );
 		}
 
 		return null;
@@ -1037,6 +1075,70 @@ class TexasTribuneSampleDataMigration implements Migration {
 	}
 
 	/**
+	 * Get or create a category term, optionally setting a parent and description.
+	 *
+	 * @param string      $name        The category name.
+	 * @param string      $slug        Optional. The category slug. If not provided, will be generated from name.
+	 * @param int|null    $parent_id   Optional. The parent term ID.
+	 * @param string|null $description Optional. The category description.
+	 *
+	 * @return WP_Term|null The term object if successful, null otherwise.
+	 */
+	private function get_or_create_category( string $name, string $slug = '', ?int $parent_id = null, ?string $description = null ): ?\WP_Term {
+		// First try to get by slug if provided.
+		if ( ! empty( $slug ) ) {
+			$term = get_term_by( 'slug', $slug, 'category' );
+			if ( $term && ! is_wp_error( $term ) ) {
+				// Update parent if different.
+				if ( null !== $parent_id && $term->parent !== $parent_id ) {
+					wp_update_term(
+						$term->term_id,
+						'category',
+						[
+							'parent' => $parent_id,
+						]
+					);
+					$term = get_term( $term->term_id, 'category' );
+				}
+				return $term;
+			}
+		}
+
+		// Then try by name.
+		$term = get_term_by( 'name', $name, 'category' );
+		if ( $term && ! is_wp_error( $term ) ) {
+			// Update parent if different.
+			if ( null !== $parent_id && $term->parent !== $parent_id ) {
+				wp_update_term(
+					$term->term_id,
+					'category',
+					[
+						'parent' => $parent_id,
+					]
+				);
+				$term = get_term( $term->term_id, 'category' );
+			}
+			return $term;
+		}
+
+		// Create new term if not found.
+		$args = [ 'parent' => $parent_id ];
+		if ( ! empty( $slug ) ) {
+			$args['slug'] = $slug;
+		}
+		if ( ! empty( $description ) ) {
+			$args['description'] = $description;
+		}
+
+		$result = wp_insert_term( $name, 'category', $args );
+		if ( is_wp_error( $result ) ) {
+			return null;
+		}
+
+		return get_term( $result['term_id'], 'category' );
+	}
+
+	/**
 	 * Handles getting a custom gutenberg HTML block from a series snippet component.
 	 *
 	 * @param MigrationObjectPropertyWrapper $component Component to process.
@@ -1044,11 +1146,34 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return string
 	 */
 	private function handle_series_snippet_component( MigrationObjectPropertyWrapper $component ): string {
-		// TODO need to update this after we've imported categories/tags. The series_url needs to be updated to the correct category URL.
 		$more_in_series_link = '<a href="' . get_site_url( null, $component->series_url->get_value() ) . '">More in this series</a>';
 		$paragraph_block     = $this->block_generator->get_paragraph(
 			strip_tags( $component->text->get_value(), [ 'a' ] ) . $more_in_series_link
 		);
+
+		// Get or create the series category.
+		$series_data = $this->get_series_data( $component->series_id->get_value() );
+		if ( null !== $series_data ) {
+			// Get or create parent "Series" category.
+			$parent_term = $this->get_or_create_category( 'Series' );
+			if ( $parent_term ) {
+				// Get or create the series category.
+				$series_term = $this->get_or_create_category(
+					$series_data['name'],
+					$series_data['slug'],
+					$parent_term->term_id,
+					$series_data['summary']
+				);
+
+				// Update the more_in_series_link to use the proper category URL.
+				if ( $series_term ) {
+					$more_in_series_link = '<a href="' . get_term_link( $series_term ) . '">More in this series</a>';
+					$paragraph_block     = $this->block_generator->get_paragraph(
+						strip_tags( $component->text->get_value(), [ 'a' ] ) . $more_in_series_link
+					);
+				}
+			}
+		}
 
 		if ( false === $component->show_logo->get_value() ) {
 			return serialize_block( $paragraph_block );
@@ -1584,4 +1709,236 @@ class TexasTribuneSampleDataMigration implements Migration {
 		return $post_id;
 	}
 
+	/**
+	 * Fetch all tags data from the Texas Tribune API and store in cache.
+	 *
+	 * @return void
+	 */
+	private function fetch_all_tags_data(): void {
+		if ( ! empty( $this->tags_data ) ) {
+			return;
+		}
+
+		$this->tags_data = [];
+		$next_url        = 'https://www.texastribune.org/api/v2/tags/?limit=100&is_public=true';
+
+		while ( $next_url ) {
+			$response = wp_remote_get( $next_url );
+
+			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+				ConsoleColor::red( 'Error fetching tags data from ' )
+					->bright_red( $next_url )
+					->red( ':' )
+					->underlined_bright_red( is_wp_error( $response ) ? $response->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code( $response ) )
+					->output();
+				break;
+			}
+
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+
+			if ( ! is_array( $data ) || ! isset( $data['results'] ) ) {
+				ConsoleColor::red( 'Invalid response from tags API.' )->output();
+				break;
+			}
+
+			// Store each tag in our cache, indexed by ID.
+			foreach ( $data['results'] as $tag ) {
+				if ( isset( $tag['id'] ) && isset( $tag['name'] ) && isset( $tag['type'] ) && isset( $tag['is_public'] ) && $tag['is_public'] ) {
+					// Get parent tag name based on type.
+					$parent_name = 'subject' === strtolower( $tag['type'] ) ? 'Topic' : ucfirst( strtolower( $tag['type'] ) );
+
+					$this->tags_data[ $tag['id'] ] = [
+						'name'        => $tag['name'],
+						'parent_name' => $parent_name,
+					];
+				}
+			}
+
+			// Get the next page URL, if any.
+			$next_url = $data['next'] ?? null;
+		}
+
+		ConsoleColor::green( 'Fetched' )
+			->bright_green( count( $this->tags_data ) )
+			->green( 'tags from the API.' )
+			->output();
+	}
+
+	/**
+	 * Get tag data from the Texas Tribune API.
+	 *
+	 * @param int $tag_id The tag ID to fetch.
+	 * @return array{name:string,slug:string,parent_name:string}|null Tag data or null on failure.
+	 */
+	private function get_tag_data( int $tag_id ): ?array {
+		// Return from cache if available.
+		return $this->tags_data[ $tag_id ] ?? null;
+	}
+
+	/**
+	 * Handle tags for a post.
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param array $tag_ids Array of tag IDs.
+	 * @return void
+	 */
+	private function handle_post_tags( int $post_id, array $tag_ids ): void {
+		$tag_names = [];
+		foreach ( $tag_ids as $tag_id ) {
+			$tag_data = $this->get_tag_data( $tag_id );
+			if ( null !== $tag_data ) {
+				// Get or create parent tag.
+				$parent_term = get_term_by( 'name', $tag_data['parent_name'], 'post_tag' );
+				if ( ! $parent_term ) {
+					$parent_result = wp_insert_term( ucfirst( $tag_data['parent_name'] ), 'post_tag' );
+
+					if ( ! is_wp_error( $parent_result ) ) {
+						$parent_term = get_term( $parent_result['term_id'], 'post_tag' );
+					}
+				}
+
+				// Create child tag if parent exists.
+				if ( $parent_term && ! is_wp_error( $parent_term ) ) {
+					$child_term = get_term_by( 'name', $tag_data['name'], 'post_tag' );
+					if ( ! $child_term ) {
+						$child_result = wp_insert_term(
+							$tag_data['name'],
+							'post_tag',
+							[ 'parent' => $parent_term->term_id ]
+						);
+						if ( ! is_wp_error( $child_result ) ) {
+							$child_term = get_term( $child_result['term_id'], 'post_tag' );
+						}
+					} elseif ( $child_term->parent !== $parent_term->term_id ) {
+						// Update parent if it's different.
+						wp_update_term(
+							$child_term->term_id,
+							'post_tag',
+							[
+								'parent' => $parent_term->term_id,
+							]
+						);
+					}
+
+					if ( $child_term && ! is_wp_error( $child_term ) ) {
+						$tag_names[] = $tag_data['name'];
+					}
+				} else {
+					ConsoleColor::red( 'Error creating tag (' )
+						->bright_red( $tag_data['name'] )
+						->red( '):' )
+						->underlined_bright_red( 'Parent term not found' )
+						->output();
+				}
+			}
+		}
+
+		if ( ! empty( $tag_names ) ) {
+			wp_set_post_tags( $post_id, $tag_names, false );
+		}
+	}
+
+	/**
+	 * Fetch all series data from the Texas Tribune API and store in cache.
+	 *
+	 * @return void
+	 */
+	private function fetch_all_series_data(): void {
+		if ( ! empty( $this->series_data ) ) {
+			return;
+		}
+
+		$this->series_data = [];
+		$next_url          = 'https://www.texastribune.org/api/v2/series/?limit=100';
+
+		while ( $next_url ) {
+			$response = wp_remote_get( $next_url );
+
+			if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+				ConsoleColor::red( 'Error fetching series data from ' )
+					->bright_red( $next_url )
+					->red( ':' )
+					->underlined_bright_red( is_wp_error( $response ) ? $response->get_error_message() : 'HTTP ' . wp_remote_retrieve_response_code( $response ) )
+					->output();
+				break;
+			}
+
+			$body = wp_remote_retrieve_body( $response );
+			$data = json_decode( $body, true );
+
+			if ( ! is_array( $data ) || ! isset( $data['results'] ) ) {
+				ConsoleColor::red( 'Invalid response from series API.' )->output();
+				break;
+			}
+
+			// Store each series in our cache, indexed by ID.
+			foreach ( $data['results'] as $series ) {
+				if ( isset( $series['id'] ) ) {
+					$this->series_data[ $series['id'] ] = [
+						'name'    => $series['name'],
+						'slug'    => $series['slug'],
+						'summary' => $series['summary'] ?? '',
+					];
+				}
+			}
+
+			// Get the next page URL, if any.
+			$next_url = $data['next'] ?? null;
+		}
+
+		ConsoleColor::green( 'Fetched' )
+			->bright_green( count( $this->series_data ) )
+			->green( 'series from the API.' )
+			->output();
+	}
+
+	/**
+	 * Get series data from the Texas Tribune API.
+	 *
+	 * @param int $series_id The series ID to fetch.
+	 * @return array{name:string,slug:string,summary:string}|null Series data or null on failure.
+	 */
+	private function get_series_data( int $series_id ): ?array {
+		// Return from cache if available.
+		return $this->series_data[ $series_id ] ?? null;
+	}
+
+	/**
+	 * Handle series for a post.
+	 *
+	 * @param int   $post_id Post ID.
+	 * @param array $series_ids Array of series IDs.
+	 * @return void
+	 */
+	private function handle_post_series( int $post_id, array $series_ids ): void {
+		// Get or create parent "Series" category.
+		$parent_term = $this->get_or_create_category( 'Series' );
+		if ( ! $parent_term ) {
+			ConsoleColor::red( 'Error creating parent Series category' )->output();
+			return;
+		}
+
+		$category_ids = [];
+		foreach ( $series_ids as $series_id ) {
+			$series_data = $this->get_series_data( $series_id );
+			if ( null !== $series_data ) {
+				// Create or get the series category.
+				$series_term = $this->get_or_create_category(
+					$series_data['name'],
+					$series_data['slug'],
+					$parent_term->term_id,
+					$series_data['summary']
+				);
+
+				if ( $series_term ) {
+					$category_ids[] = $series_term->term_id;
+				}
+			}
+		}
+
+		if ( ! empty( $category_ids ) ) {
+			wp_set_post_categories( $post_id, $category_ids );
+		}
+	}
 }
