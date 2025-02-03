@@ -413,6 +413,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 				}
 
 				return $thumbnail_block;
+			case 'legacy data graphic':
 			case 'data graphic':
 				return $this->handle_data_graphic_component( $component, $next_sibling, $post_id );
 			case 'video':
