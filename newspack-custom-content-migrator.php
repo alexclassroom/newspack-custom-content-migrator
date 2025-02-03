@@ -80,6 +80,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
+		Command\PublisherSpecific\TexasTribuneMigrator::class,
 	]
 );
 
