@@ -32,6 +32,21 @@ class TexasTribuneSampleDataMigration implements Migration {
 	private GutenbergBlockGenerator $block_generator;
 
 	/**
+	 * Cache for sponsors data.
+	 *
+	 * @var array<string,array{name:string,url:string}>|null
+	 */
+	private ?array $sponsors_data = null;
+
+
+	/**
+	 * Sponsor taxonomy name.
+	 *
+	 * @var string
+	 */
+	private const SPONSOR_TAXONOMY = 'newspack_spnsrs_tax';
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -189,6 +204,17 @@ class TexasTribuneSampleDataMigration implements Migration {
 			ConsoleColor::red( 'Error creating post (' )->bright_red( $maybe_post_id->get_error_code() )->red( '):' )->underlined_bright_red( $maybe_post_id->get_error_message() )->output();
 			// TODO replace with FailedMigrationState
 			return null;
+		}
+
+		// Handle sponsor if present.
+		$sponsor_id = isset( $migration_object->metadata->sponsor ) ? $migration_object->metadata->sponsor->get_value() : null;
+		if ( $sponsor_id ) {
+			$sponsor_term_id = $this->get_sponsor_data( $sponsor_id );
+
+			if ( $sponsor_term_id ) {
+				// Link the sponsor to the post using the taxonomy.
+				wp_set_object_terms( $maybe_post_id, [ $sponsor_term_id ], self::SPONSOR_TAXONOMY );
+			}
 		}
 
 		// Let's handle the featured image here.
@@ -1443,4 +1469,119 @@ class TexasTribuneSampleDataMigration implements Migration {
 
 		return get_user_by( 'ID', $user_id );
 	}
+
+	/**
+	 * Get sponsor data by ID.
+	 *
+	 * @param int $sponsor_id The sponsor ID.
+	 * @return int|null The sponsor term ID or null if not found.
+	 */
+	private function get_sponsor_data( int $sponsor_id ): ?int {
+		if ( null === $this->sponsors_data ) {
+			$sponsors_file = '/var/www/html/sponsors/sponsors_id_map.json';
+			if ( ! file_exists( $sponsors_file ) ) {
+				return null;
+			}
+
+			$json_content = file_get_contents( $sponsors_file );
+			if ( false === $json_content ) {
+				return null;
+			}
+
+			$decoded_data = json_decode( $json_content, true );
+			if ( ! is_array( $decoded_data ) ) {
+				return null;
+			}
+
+			$this->sponsors_data = $decoded_data;
+		}
+
+		// Convert the integer sponsor_id to string for JSON lookup.
+		$sponsor_id_str = (string) $sponsor_id;
+
+		$sponsor_data = $this->sponsors_data[ $sponsor_id_str ] ?? null;
+
+		if ( ! $sponsor_data ) {
+			return null;
+		}
+
+		// Get or create the sponsor post.
+		$sponsor_post = get_posts(
+			[
+				'post_type'   => self::SPONSOR_POST_TYPE,
+				'meta_key'    => '_newspack_migration_sponsor_id',
+				'meta_value'  => $sponsor_id,
+				'post_status' => 'publish',
+				'numberposts' => 1,
+			]
+		);
+
+		if ( ! empty( $sponsor_post ) ) {
+			$sponsor_post = $sponsor_post[0];
+		} else {
+			// Create the sponsor post.
+			$sponsor_post_id = $this->create_sponsor_post( $sponsor_id, $sponsor_data['name'], $sponsor_data['url'] );
+			if ( ! $sponsor_post_id ) {
+				return null;
+			}
+			$sponsor_post = get_post( $sponsor_post_id );
+		}
+
+		// Get or create the term for this sponsor.
+		$term = get_term_by( 'slug', $sponsor_post->post_name, self::SPONSOR_TAXONOMY );
+		if ( ! $term ) {
+			$term_result = wp_insert_term(
+				$sponsor_post->post_title,
+				self::SPONSOR_TAXONOMY,
+				[
+					'slug' => $sponsor_post->post_name,
+				]
+			);
+			if ( is_wp_error( $term_result ) ) {
+				return null;
+			}
+			$term = get_term( $term_result['term_id'], self::SPONSOR_TAXONOMY );
+		}
+
+		return $term ? $term->term_id : null;
+	}
+
+	/**
+	 * Create a sponsor post.
+	 *
+	 * @param int    $sponsor_id Original sponsor ID.
+	 * @param string $name Sponsor name.
+	 * @param string $url Sponsor URL.
+	 * @return int|null The created sponsor post ID or null on failure.
+	 */
+	private function create_sponsor_post( int $sponsor_id, string $name, string $url ): ?int {
+		$post_data = [
+			'post_title'  => $name,
+			'post_status' => 'publish',
+			'post_type'   => self::SPONSOR_POST_TYPE,
+			'meta_input'  => [
+				'_newspack_migration_sponsor_id'           => $sponsor_id,
+				'newspack_sponsor_url'                     => $url,
+				'newspack_sponsor_sponsorship_scope'       => 'native',
+				'newspack_sponsor_underwriter_style'       => 'simple',
+				'newspack_sponsor_underwriter_placement'   => 'inherit',
+				'newspack_sponsor_native_category_display' => 'inherit',
+				'newspack_sponsor_native_byline_display'   => 'inherit',
+			],
+		];
+
+		$post_id = wp_insert_post( $post_data );
+
+		if ( is_wp_error( $post_id ) || ! $post_id ) {
+			ConsoleColor::red( 'Error creating sponsor post (' )
+				->bright_red( $name )
+				->red( '):' )
+				->underlined_bright_red( is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Unknown error' )
+				->output();
+			return null;
+		}
+
+		return $post_id;
+	}
+
 }
