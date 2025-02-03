@@ -753,7 +753,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 					break;
 				case 'full':
 					$image_size = 'large';
-					$alignment = 'wide';
+					$alignment  = 'wide';
 					break;
 			}
 		}
