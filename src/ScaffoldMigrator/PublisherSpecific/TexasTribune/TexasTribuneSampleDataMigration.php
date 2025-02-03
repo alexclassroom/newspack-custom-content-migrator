@@ -9,6 +9,7 @@ use Newspack\MigrationTools\Scaffold\Contracts\MigrationDataChest;
 use Newspack\MigrationTools\Scaffold\Contracts\MigrationState;
 use Newspack\MigrationTools\Scaffold\Contracts\RunAwareMigrationObject;
 use Newspack\MigrationTools\Scaffold\JSONMigrationDataChest;
+use Newspack\MigrationTools\Scaffold\JSONDirectoryMigrationDataChest;
 use Newspack\MigrationTools\Scaffold\MigrationObject;
 use Newspack\MigrationTools\Scaffold\MigrationObjectPropertyWrapper;
 use Newspack\MigrationTools\Scaffold\RunAwareMigrationObjectWrapper;
@@ -234,7 +235,8 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return MigrationDataChest
 	 */
 	public function get_data_chest(): MigrationDataChest {
-		return new JSONMigrationDataChest( '/var/www/html/2024-11-21_texas_tribune_all_sample_articles.json', 'identifier' );
+		return new JSONDirectoryMigrationDataChest( '/var/www/html/exports/', 'identifier' );
+		// return new JSONDirectoryMigrationDataChest( '/var/www/html/2024-11-21_texas_tribune_all_sample_articles.json', 'identifier' );
 	}
 
 	/**
