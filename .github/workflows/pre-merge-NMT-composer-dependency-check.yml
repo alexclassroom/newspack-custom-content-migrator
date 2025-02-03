@@ -12,5 +12,5 @@ jobs:
 
       - name: Run pre-merge script
         run: |
-          chmod +x .github/hooks/pre-merge.sh
-          ./.github/hooks/pre-merge.sh
+          chmod +x .github/scripts/check-composer-dependency-hash.sh
+          ./.github/scripts/check-composer-dependency-hash.sh
