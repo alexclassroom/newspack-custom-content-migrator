@@ -454,8 +454,6 @@ class TexasTribuneSampleDataMigration implements Migration {
 				return $component->text ? $component->text->get_value() : '';
 			case 'faq container':
 				return $this->handle_faq_container_component( $component );
-			case 'faq entry':
-				return $this->handle_faq_entry_component( $component );
 			case 'newsletter signup':
 				return $this->handle_newsletter_signup_component( $component );
 			case 'divider':
@@ -1256,7 +1254,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return string
 	 */
 	private function handle_faq_container_component( MigrationObjectPropertyWrapper $component ): string {
-		$title = serialize_block(
+		$content = serialize_block(
 			$this->block_generator->get_heading(
 				$component->title->get_value(),
 				'h3',
@@ -1264,15 +1262,55 @@ class TexasTribuneSampleDataMigration implements Migration {
 			)
 		);
 
+		// Handle the FAQ entries.
+		foreach ( $component->components as $sub_component ) {
+			if ( 'faq entry' === $sub_component->role->get_value() ) {
+				$content .= $this->handle_faq_entry_component( $sub_component );
+			}
+		}
+
+		// Handle the sponsor.
 		if ( $component->sponsor_name && ! empty( $component->sponsor_name->get_value() ) ) {
-			$title .= serialize_block(
-				$this->block_generator->get_paragraph(
-					'<a href="' . $component->sponsor_url->get_value() . '">' . $component->sponsor_name->get_value() . '</a>'
+			$heading = $this->block_generator->get_heading( 'Sponsored by', 'h3', '', 'small', 'regular', 'center' );
+
+			$sponsor_content = null;
+			if ( $component->sponsor_logo && ! empty( $component->sponsor_logo->get_value() ) ) {
+				// Import the sponsor logo.
+				$maybe_logo_object = $this->handle_image_import( $component->sponsor_logo->get_value() );
+
+				if ( ! is_wp_error( $maybe_logo_object ) ) {
+					// Create image block with link.
+					$sponsor_content = $this->block_generator->get_image(
+						get_post( $maybe_logo_object->attachment_id ),
+						'medium',
+						false,
+						null,
+						'none',
+						esc_url( $component->sponsor_url->get_value() )
+					);
+				} else {
+					// Fallback to text if logo import fails.
+					$sponsor_content = $this->block_generator->get_paragraph(
+						'<a href="' . esc_url( $component->sponsor_url->get_value() ) . '">' . esc_html( $component->sponsor_name->get_value() ) . '</a>'
+					);
+				}
+			} else {
+				// No logo, use text link.
+				$sponsor_content = $this->block_generator->get_paragraph(
+					'<a href="' . esc_url( $component->sponsor_url->get_value() ) . '">' . esc_html( $component->sponsor_name->get_value() ) . '</a>'
+				);
+			}
+
+			$content .= serialize_block(
+				$this->block_generator->get_row(
+					[ $heading, $sponsor_content ],
+					'horizontal',
+					'center'
 				)
 			);
 		}
 
-		return $title;
+		return $content;
 	}
 
 	/**
