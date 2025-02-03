@@ -913,6 +913,8 @@ class TexasTribuneSampleDataMigration implements Migration {
 				}
 
 				return serialize_block( $youtube_block );
+			case 'livestream':
+				return $this->handle_iframe_component( $component );
 			default:
 				ConsoleColor::bright_magenta( 'Different video type needs attention!' )->output();
 
