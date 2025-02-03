@@ -205,7 +205,16 @@ class TexasTribuneSampleDataMigration implements Migration {
 					$migration_object
 				)
 			),
+			// TODO: Handle articlelink.
+			'articlelink' => ConsoleColor::yellow( 'Skipping articlelink: ' )
+				->bright_yellow( $migration_object->get_data_id() )
+				->output() && null,
 		};
+
+		// TODO: Handle articlelink.
+		if ( 'articlelink' === $migration_object->metadata->type->get_value() ) {
+			return null;
+		}
 
 		try {
 			$posts_data->set_post_date( $migration_object->metadata->date_created );
