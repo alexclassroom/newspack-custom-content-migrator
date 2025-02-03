@@ -497,7 +497,7 @@ class TexasTribuneSampleDataMigration implements Migration {
 	}
 
 	/**
-	 * Handles storing metadata for use with a custom Newspack corrections plugin.
+	 * Handles storing metadata for use with Newspack corrections plugin.
 	 *
 	 * @param MigrationObjectPropertyWrapper $component Component to process.
 	 * @param int                            $post_id Post ID.
@@ -506,58 +506,37 @@ class TexasTribuneSampleDataMigration implements Migration {
 	 * @return void
 	 */
 	private function handle_correction_component( MigrationObjectPropertyWrapper $component, int $post_id, bool $important = false ): void {
-		$correction = [
-			'place_up_top' => $important,
-			'date'         => '',
-			'timestamp'    => '',
-			'correction'   => '',
+		// Format the timestamp to WordPress format (Y-m-d H:i:s).
+		$timestamp      = $component->timestamp->get_value();
+		$date_time      = new \DateTime( $timestamp );
+		$formatted_date = $date_time->format( 'Y-m-d H:i:s' );
+
+		// Create the correction post.
+		$correction_data = [
+			'post_type'    => 'newspack_correction',
+			'post_status'  => 'publish',
+			'post_title'   => sprintf( 'Correction for %s', get_the_title( $post_id ) ),
+			'post_content' => $component->text->get_value(),
+			'post_date'    => $formatted_date,
 		];
 
-		$text = $component->text->get_value();
+		$correction_id = wp_insert_post( $correction_data );
 
-		// TODO - perhaps we can ask TT to provide structured time data for when correction was made instead of this string parsing.
-		$doc = new \DOMDocument();
-
-		$matches = [];
-		$pattern = '/<strong>(.*?)<\/strong>/';
-		preg_match( $pattern, $text, $matches );
-
-		if ( ! empty( $matches ) ) {
-			$doc->loadHTML( $matches[0] );
-		} else {
-			$doc->loadHTML( $text );
+		if ( is_wp_error( $correction_id ) ) {
+			ConsoleColor::red( 'Error creating correction (' )
+				->bright_red( $correction_id->get_error_code() )
+				->red( '):' )
+				->underlined_bright_red( $correction_id->get_error_message() )
+				->output();
+			return;
 		}
 
-		$timestamp = $doc->getElementsByTagName( 'time' )->item( 0 );
+		// Link the correction to the post.
+		update_post_meta( $correction_id, 'newspack_correction-post-id', $post_id );
 
-		if ( $timestamp && $timestamp instanceof \DOMElement ) {
-			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-			$correction['date'] = $timestamp->nodeValue;
-		} else {
-			ConsoleColor::bright_magenta( 'Unable to find date' )->output();
-		}
-
-		if ( $timestamp->getAttribute( 'datetime' ) ) {
-			$correction['timestamp'] = $timestamp->getAttribute( 'datetime' );
-
-			if ( ! empty( $correction['timestamp'] ) && str_contains( $correction['timestamp'], '.' ) ) {
-				$correction['timestamp'] = substr(
-					$correction['timestamp'],
-					0,
-					strpos( $correction['timestamp'], '.' )
-				);
-			}
-		} else {
-			ConsoleColor::bright_magenta( 'Unable to find timestamp' )->output();
-		}
-
-		if ( ! empty( $matches ) ) {
-			$text = str_replace( $matches[0], '', $text );
-		}
-
-		$correction['correction'] = $text;
-		update_post_meta( $post_id, 'has_corrections', true );
-		update_post_meta( $post_id, 'article-corrections', $correction );
+		// Set correction settings on the post.
+		update_post_meta( $post_id, 'newspack_corrections_active', true );
+		update_post_meta( $post_id, 'newspack_corrections_location', $important ? 'top' : 'bottom' );
 	}
 
 	/**
