@@ -31,7 +31,7 @@ fi
 # Compare the hashes.
 if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
 	echo "Error: The local $REPO hash ($LOCAL_HASH) does not match the remote hash ($REMOTE_HASH)."
-	echo "Please update the repo dependency before pushing, you can use:"
+	echo "NMT in your PR is behind live NMT repo. Please update the dependency before pushing, you can use:"
 	echo "  rm -rf vendor/$REPO && \\"
 	echo "  git checkout trunk && \\"
 	echo "  composer update $REPO && \\"
