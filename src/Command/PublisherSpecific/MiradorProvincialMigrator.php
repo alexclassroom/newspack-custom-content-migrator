@@ -7,7 +7,6 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Exception;
 use Newspack\Guest_Contributor_Role;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Posts;
@@ -33,12 +32,26 @@ class MiradorProvincialMigrator implements RegisterCommandInterface {
 	const POST_META_PROCESSED_SKIPPED = 'skipped';
 
 	/**
+	 * Logger
+	 *
+	 * @var MultiLog
+	 */
+	private $logger;
+
+	/**
 	 * Post Logic
 	 *
 	 * @var Posts
 	 */
 	private Posts $posts_logic;
 	
+	/**
+	 * Report
+	 *
+	 * @var array
+	 */
+	private $report = array();
+
 	/**
 	 * Constructor.
 	 */
@@ -52,6 +65,14 @@ class MiradorProvincialMigrator implements RegisterCommandInterface {
 	 * @return void
 	 */
 	public static function register_commands(): void {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator mirador-provincial-dupes',
+			self::get_command_closure( 'cmd_dupes' ),
+			[
+				'shortdesc' => 'Delete duplicate posts.',
+			]
+		);
 
 		WP_CLI::add_command(
 			'newspack-content-migrator mirador-provincial-users',
@@ -68,6 +89,115 @@ class MiradorProvincialMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+	}
+
+	/**
+	 * Command: newspack-content-migrator mirador-provincial-dupes
+	 *
+	 * @param array $pos_args   CLI positional args.
+	 * @param array $assoc_args CLI assoc args.
+	 * 
+	 * @return void
+	 */
+	public function cmd_dupes( array $pos_args, array $assoc_args ): void {
+		
+		$this->set_logger( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		global $wpdb;
+
+		// Select posts grouped by old site url, having count > 1 .
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$group_results = $wpdb->get_results(
+			"
+				SELECT pm.meta_value, GROUP_CONCAT( p.ID ) as dupe_ids, COUNT(*) as counter
+				FROM {$wpdb->postmeta} pm
+				JOIN {$wpdb->posts} p on p.ID = pm.post_id and p.post_type = 'post' and p.post_status = 'publish'
+				WHERE pm.meta_key = '_mirador_old_slug'
+				GROUP BY pm.meta_value
+				HAVING counter > 1
+			"
+		);
+
+		if ( $wpdb->last_error ) {
+			$this->logger->error( 'SQL error: group_results: ' . $wpdb->last_error );
+			exit();
+		}
+
+		if ( empty( $group_results ) ) {
+			$this->logger->info( 'No duplicates found.' );
+			return;
+		}
+
+		$this->logger->info( 'Count of old site slugs with duplicates: ' . count( $group_results ) );
+		$this->report_set( 'old slugs groups found', count( $group_results ) );
+
+		foreach ( $group_results as $group_result ) {
+			
+			$this->logger->info( '-- Old Slug: ' . $group_result->meta_value );
+			$this->report_add( 'old slugs groups processed' );
+
+			// Get the set of posts for the old slug.
+			$dupes_arr = explode( ',', $group_result->dupe_ids );
+			$posts     = get_posts(
+				[
+					'include'       => $dupes_arr,
+					'numberposts'   => -1,
+					'no_found_rows' => true,
+					'orderby'       => 'post_name', // Order by post name so that -2, -3 come after -1.
+					'order'         => 'ASC',
+				]
+			);
+
+			if ( count( $posts ) !== count( $dupes_arr ) ) {
+				$this->logger->error( 'get_posts did not return same group count.' );
+				return; 
+			}
+
+			// Check for duplicates.
+			$is_first_post = true;
+			foreach ( $posts as $post ) {
+				
+				$this->logger->info( 'post_id: ' . $post->ID . ' post_name: ' . $post->post_name );
+
+				// First post in loop.
+				if ( $is_first_post ) {
+					$first_post_name = $post->post_name;
+					$first_hash      = $this->get_post_hash_for_comparisons( $post );
+					$is_first_post   = false;
+					continue;
+				}
+
+				// Additional posts.
+
+				// Check if -2, -3, etc.
+				if ( ! preg_match( '/^-\d+$/', str_replace( $first_post_name, '', $post->post_name ) ) ) {
+					$this->logger->warning( 'Post name did not match -2, -3, etc.' );
+					$this->report_add( 'posts not matching -2, -3' );
+					continue;
+				}
+
+				// Check hash.
+				if ( $first_hash !== $this->get_post_hash_for_comparisons( $post ) ) {
+					$this->logger->warning( 'Hash did not match.' );
+					$this->report_add( 'posts not matching hash' );
+					continue;
+				}
+				
+				// Delete the post.
+				wp_delete_post( $post->ID );
+
+				$this->logger->info( 'Deleted post.' );
+				$this->report_add( 'posts deleted' );
+
+			} // foreach post.
+
+			// phpcs:ignore WordPress.PHP.DevelopmentFunctions.error_log_print_r
+			$this->logger->info( print_r( $this->report, true ) );
+
+		} // foreach group of old slugs.
+
+		$this->logger->info( 'Done.' );
 	}
 
 	/**
@@ -242,6 +372,122 @@ class MiradorProvincialMigrator implements RegisterCommandInterface {
 				$logger->info( 'Updated post to new user id: ' . $user_id );
 			},
 			0
+		);
+	}
+
+	/**
+	 * Get hash of a post with meta and related taxonomies for comparisons.
+	 * 
+	 * @param WP_Post $post Post object.
+	 * @return string
+	 */
+	private function get_post_hash_for_comparisons( $post ) {
+
+		global $wpdb;
+
+		// Get post as string; remove allowed unique fields for the comparison.
+		$json_post = wp_json_encode(
+			array_diff_key( 
+				(array) $post,
+				array( 
+					'ID'                => 1,
+					'post_name'         => 1,
+					'guid'              => 1,
+					'post_modified'     => 1,
+					'post_modified_gmt' => 1,
+				)
+			) 
+		);
+
+		// Get post meta as string; order by meta key then value for consistency.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$postmeta_results = $wpdb->get_results(
+			$wpdb->prepare(
+				"
+					SELECT meta_key, meta_value
+					FROM {$wpdb->postmeta}
+					WHERE post_id = %d
+					ORDER BY meta_key, meta_value
+				",
+				$post->ID 
+			) 
+		);
+
+		if ( $wpdb->last_error ) {
+			$this->logger->error( 'SQL error: postmeta_results: ' . $wpdb->last_error );
+			exit();
+		}
+
+		// No post meta is ok.
+		$json_postmeta = wp_json_encode( $postmeta_results );
+		
+		// Get term relationships as string; order by term_taxonomy_id for consistency.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$taxonomy_results = $wpdb->get_results(
+			$wpdb->prepare(
+				"
+					SELECT term_taxonomy_id
+					FROM {$wpdb->term_relationships}
+					WHERE object_id = %d
+					ORDER BY term_taxonomy_id
+				",
+				$post->ID 
+			) 
+		);
+
+		if ( $wpdb->last_error ) {
+			$this->logger->error( 'SQL error: taxonomy_results: ' . $wpdb->last_error );
+			exit();
+		}
+
+		// No term relationships is ok.
+		$json_taxonomy = wp_json_encode( $taxonomy_results );
+
+		return hash( 'sha256', 'post-' . $json_post . '-postmeta-' . $json_postmeta . '-taxonomy-' . $json_taxonomy );
+	}
+
+	/**
+	 * Report add an increment to key.
+	 * 
+	 * @param string $key       Report array key.
+	 * @param int    $increment Integer to add.
+	 * @return void
+	 */
+	private function report_add( $key, $increment = 1 ) {
+		if ( empty( $this->report[ $key ] ) ) {
+			$this->report[ $key ] = 0;
+		}
+		$this->report[ $key ] += $increment;
+	}
+
+	/**
+	 * Report set a key to a value.
+	 *
+	 * @param string $key   Key for array.
+	 * @param mixed  $value Value to set.
+	 * @return void
+	 */
+	private function report_set( $key, $value ) {
+		if ( empty( $this->report[ $key ] ) ) {
+			$this->report[ $key ] = 0;
+		}
+		$this->report[ $key ] = $value;
+	}
+
+	/**
+	 * Set the logger
+	 *
+	 * @param string $caller Calling __FUNCTION__ name.
+	 * @return void
+	 */
+	private function set_logger( $caller ) {
+		$log_slug     = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $caller;
+		$this->logger = MultiLog::get_logger(
+			$log_slug . '-multi',
+			[
+				CliLog::get_logger( $log_slug ),
+				FileLog::get_logger( $log_slug ),
+			] 
 		);
 	}
 }
