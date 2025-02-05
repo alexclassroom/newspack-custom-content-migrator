@@ -407,13 +407,15 @@ class ContentDiffMigrator {
 				// Get Comment User (if the same User was not already fetched).
 				if ( $comment['user_id'] > 0 && empty( $this->filter_array_elements( $data[ self::DATAKEY_USERS ], 'ID', $comment['user_id'] ) ) ) {
 					$comment_user_row              = $this->select_user_row( $table_prefix, $comment['user_id'] );
-					$data[ self::DATAKEY_USERS ][] = $comment_user_row;
-
-					// Get Get Comment User Metas.
-					$data[ self::DATAKEY_USERMETA ] = array_merge(
-						$data[ self::DATAKEY_USERMETA ],
-						$this->select_usermeta_rows( $table_prefix, $comment_user_row['ID'] )
-					);
+					if ( $comment_user_row ) {
+						$data[ self::DATAKEY_USERS ][] = $comment_user_row;
+	
+						// Get Get Comment User Metas.
+						$data[ self::DATAKEY_USERMETA ] = array_merge(
+							$data[ self::DATAKEY_USERMETA ],
+							$this->select_usermeta_rows( $table_prefix, $comment_user_row['ID'] )
+						);
+					}
 				}
 			}
 		}
@@ -1009,19 +1011,23 @@ class ContentDiffMigrator {
 				if ( ! is_null( $comment_user_row ) ) {
 					$comment_usermeta_rows = $this->filter_array_elements( $data[ self::DATAKEY_USERMETA ], 'user_id', $comment_user_row['ID'] );
 					$comment_user_existing = $this->get_user_by( 'login', $comment_user_row['user_login'] );
-				}
-				if ( $comment_user_existing instanceof WP_User ) {
-					$comment_user_id_new = (int) $comment_user_existing->ID;
-				} else {
-					// Insert a new Comment User.
-					try {
-						$comment_user_id_new = $this->insert_user( $comment_user_row );
-						foreach ( $comment_usermeta_rows as $comment_usermeta_row ) {
-							$this->insert_usermeta_row( $comment_usermeta_row, $comment_user_id_new );
+
+					if ( $comment_user_existing instanceof WP_User ) {
+						$comment_user_id_new = (int) $comment_user_existing->ID;
+					} else {
+						// Insert a new Comment User.
+						try {
+							$comment_user_id_new = $this->insert_user( $comment_user_row );
+							foreach ( $comment_usermeta_rows as $comment_usermeta_row ) {
+								$this->insert_usermeta_row( $comment_usermeta_row, $comment_user_id_new );
+							}
+						} catch ( \Exception $e ) {
+							$error_messages[] = $e->getMessage();
 						}
-					} catch ( \Exception $e ) {
-						$error_messages[] = $e->getMessage();
 					}
+				} else {
+					// Handle exception when wp_comment.user_id is not found in wp_users.
+					$comment_user_id_new = 0;
 				}
 			}
 
@@ -1096,9 +1102,9 @@ class ContentDiffMigrator {
 					
 					if ( is_wp_error( $term_insert_result ) ) {
 						$error_messages[] = sprintf(
-							"Error occurred while inserting %s '%s' live_term_id=%s at live_post_ID=%s :%s",
-							$live_term_taxonomy_row['taxonomy'],
+							"Warning, could not insert term='%s' taxonomy='%s' live_term_id=%s for live_post_ID=%s . This is totally OK if you did not wish to migrate this term taxonomy. Message: %s",
 							$live_term_name,
+							$live_term_taxonomy_row['taxonomy'],
 							$live_term_id,
 							$post_id,
 							$term_insert_result->get_error_message()
@@ -1223,6 +1229,7 @@ class ContentDiffMigrator {
 			if ( $dry_run ) {
 				$updated = 1;
 			} else {
+				// phpcs:disable WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 				$updated = $this->wpdb->update(
 					$this->wpdb->postmeta,
 					[ 'meta_value' => $new_thumbnail_id ],
@@ -1231,11 +1238,12 @@ class ContentDiffMigrator {
 						'meta_key' => '_thumbnail_id',
 					]
 				);
+				// phpcs:enable
 			}
 
 			// Log.
 			if ( false != $updated && $updated > 0 && ! is_null( $log_file_path ) ) {
-				$msg = json_encode(
+				$msg = wp_json_encode(
 					[
 						'post_id' => (int) $new_post_id,
 						'id_old'  => (int) $current_thumbnail_id,
@@ -1369,7 +1377,7 @@ class ContentDiffMigrator {
 					);
 				}
 
-				$this->log( $log_file_path, json_encode( $log_entry ) );
+				$this->log( $log_file_path, wp_json_encode( $log_entry ) );
 			}
 		}
 	}
@@ -2748,7 +2756,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->posts, $insert_post_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, json_encode( $post_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting post, ID %d, post row %s', $orig_id, wp_json_encode( $post_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2771,7 +2779,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->postmeta, $insert_postmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, json_encode( $postmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error in insert_postmeta_row, post_id %s, postmeta_row %s', $post_id, wp_json_encode( $postmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2794,13 +2802,14 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->users, $insert_user_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], json_encode( $user_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting user, ID %d, user_row %s', $user_row['ID'], wp_json_encode( $user_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		// Last inserted ID.
 		$new_user_id = $this->wpdb->insert_id;
 
 		// Save original user ID as usermeta.
+		// phpcs:disable WordPress.DB.SlowDBQuery.slow_db_query_meta_value
 		$this->wpdb->insert(
 			$this->wpdb->usermeta,
 			[
@@ -2809,6 +2818,7 @@ class ContentDiffMigrator {
 				'meta_value' => $old_user_id,
 			]
 		);
+		// phpcs:enable
 
 		return $new_user_id;
 	}
@@ -2830,7 +2840,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->usermeta, $insert_usermeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, json_encode( $usermeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting user meta, user_id %d, $usermeta_row %s', $user_id, wp_json_encode( $usermeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2855,7 +2865,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->comments, $insert_comment_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, json_encode( $comment_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting comment, $new_post_id %d, $new_user_id %d, $comment_row %s', $new_post_id, $new_user_id, wp_json_encode( $comment_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2878,7 +2888,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->commentmeta, $insert_commentmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, json_encode( $commentmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting comment meta, $new_comment_id %d, $commentmeta_row %s', $new_comment_id, wp_json_encode( $commentmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2920,7 +2930,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->terms, $insert_term_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term, $term_row %s', json_encode( $term_row ) ) );
+			throw new \RuntimeException( sprintf( 'Error inserting term, $term_row %s', wp_json_encode( $term_row ) ) );
 		}
 
 		return $this->wpdb->insert_id;
@@ -2969,7 +2979,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->termmeta, $insert_termmeta_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, json_encode( $termmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting term meta, $term_id %d, $termmeta_row %s', $term_id, wp_json_encode( $termmeta_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -2994,7 +3004,7 @@ class ContentDiffMigrator {
 
 		$inserted = $this->wpdb->insert( $this->wpdb->term_taxonomy, $insert_term_taxonomy_row );
 		if ( 1 != $inserted ) {
-			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, json_encode( $term_taxonomy_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
+			throw new \RuntimeException( sprintf( 'Error inserting term_taxonomy, $new_term_id %d, term_taxonomy_id %s', $new_term_id, wp_json_encode( $term_taxonomy_row ) ) ); // phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
 		}
 
 		return $this->wpdb->insert_id;
@@ -3333,7 +3343,7 @@ class ContentDiffMigrator {
 	 * @return string Cleaned URL.
 	 */
 	public function clean_attachment_url_for_query( $url ) {
-		$parsed_url = parse_url( $url );
+		$parsed_url = wp_parse_url( $url );
 
 		$url_cleaned = sprintf(
 			'%s://%s%s',
@@ -3355,7 +3365,7 @@ class ContentDiffMigrator {
 	 * @return bool Should this URL be queried as local attachment.
 	 */
 	public function should_url_be_queried_as_local_attachment( $url, $local_hostname_aliases ) {
-		$url_parsed = parse_url( $url );
+		$url_parsed = wp_parse_url( $url );
 		$url_host   = $url_parsed['host'];
 
 		$siteurl        = get_option( 'siteurl' );
@@ -3395,14 +3405,14 @@ class ContentDiffMigrator {
 	/**
 	 * Filters a multidimensional array and searches for a subarray with a key and value.
 	 *
-	 * @param array $array Array being searched and filtered.
+	 * @param array $data  Array being searched and filtered.
 	 * @param mixed $key   Array key to search for.
 	 * @param mixed $value Array value to search for.
 	 *
 	 * @return null|array The array which matches the $key $value filter, or null.
 	 */
-	public function filter_array_element( $array, $key, $value ) {
-		foreach ( $array as $subarray ) {
+	public function filter_array_element( $data, $key, $value ) {
+		foreach ( $data as $subarray ) {
 			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
 				return $subarray;
 			}
@@ -3414,15 +3424,15 @@ class ContentDiffMigrator {
 	/**
 	 * Filters a multidimensional array and searches for all subarray elemens containing a key and value.
 	 *
-	 * @param array $array Array being searched and filtered.
+	 * @param array $data  Array being searched and filtered.
 	 * @param mixed $key   Array key to search for.
 	 * @param mixed $value Array value to search for.
 	 *
 	 * @return array An array with sub-arrays which match the $key $value filter, or an empty array if nothing is found.
 	 */
-	public function filter_array_elements( $array, $key, $value ) {
+	public function filter_array_elements( $data, $key, $value ) {
 		$found = [];
-		foreach ( $array as $subarray ) {
+		foreach ( $data as $subarray ) {
 			if ( isset( $subarray[ $key ] ) && $value == $subarray[ $key ] ) {
 				$found[] = $subarray;
 			}
@@ -3501,6 +3511,6 @@ class ContentDiffMigrator {
 	 * @param string $msg  Error message.
 	 */
 	public function log( $file, $msg ) {
-		file_put_contents( $file, $msg . "\n", FILE_APPEND );
+		file_put_contents( $file, $msg . "\n", FILE_APPEND ); // phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents
 	}
 }

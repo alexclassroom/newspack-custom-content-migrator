@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.7.2
+ * Version:     1.8.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -83,6 +83,8 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\MiradorProvincialMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
+		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
+		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
 	]
 );
 
