@@ -25,7 +25,12 @@ git push
 ```
 
 ### Working on the NMT and this repository at the same time
-It's likely that you'll have changes to both the NMT and the branch you are working in on the NCCM (this repo) too. To avoid working in the `vendor` directory, an easy way is to create a directory called `dev` in the root of this repository, go into that directory and then clone the NMT so you end up with a structure like: `dev/newspack-migration-tools`. Once you have that checked out into the `dev` directory, then (from the root of this repo) run `composer run-script update-with-nmt-symlinked`. This will symlink the NMT into the `vendor` directory so you can work on both at the same time. If you need to update the NMT, then go into the `dev/newspack-migration-tools` directory and do your work there. Once you have merged your changes to `trunk` in the NMT, then come back to this repo and run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT.
+It's likely that you'll have changes to both the NMT and the branch you are working in on the NCCM (this repo) too. To avoid working in the `vendor` directory, an easy way is to create a directory called `dev` in the root of this repository, go into that directory and then clone the NMT so you end up with a structure like: `dev/newspack-migration-tools`. Once you have that checked out into the `dev` directory, you are ready to switch back and forth between using the plain `vendor/newspack-migration-tools` dir and your repo checked out to `dev/newspack-migration-tools` with these two commands. (Call from the root of this repo).
+
+- **To use your NMT in `dev/..`,** run `composer run-script update-with-nmt-symlinked`. This will symlink the NMT into the `vendor` directory.
+- **To use a "normal" composer installed version of the NMT**, run `composer install --no-dev --optimize-autoloader` (the `--no-dev --optimize-autoloader` is not necessary, but it will give you a smaller vendor dir). It will _not_ delete your checked out NMT in `dev`.
+
+If you need to update the NMT, then go into the `dev/newspack-migration-tools` directory and do your work there. Once you have merged your changes to `trunk` in the NMT, then come back to this repo and run `composer update automattic/newspack-migration-tools ` to update the lockfile and get the latest from the NMT.
 
 ## Usage
 
