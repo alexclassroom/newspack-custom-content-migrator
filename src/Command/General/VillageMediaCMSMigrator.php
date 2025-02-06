@@ -1078,6 +1078,16 @@ class VillageMediaCMSMigrator implements RegisterCommandInterface {
 			}
 		}
 
+		// Ensure user_email is not blank.
+		if ( empty( $author_data['user_email'] ) ) {
+			if ( ! empty( $author_data['user_login'] ) ) {
+				$author_data['user_email'] = $author_data['user_login'] . '@example.com';
+			} else {
+				// If user_login is also empty, generate a random email.
+				$author_data['user_email'] = 'author_' . wp_generate_password( 8, false ) . '@example.com';
+			}
+		}
+
 		return $author_data;
 	}
 
