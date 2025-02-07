@@ -16,12 +16,14 @@ Run `composer install`.
 ## Working with the NMT (newspack-migration-tools)
 We are aiming to have all re-usable logic in the NMT. We pull in the NMT with composer, so that means that you need to keep your branch updated. Whenever code has been merged to trunk in the NMT, do a `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT into this repository. We point to the `dev-trunk` branch in this repo's composer file so run `composer update automattic/newspack-migration-tools` to update the lockfile and get the latest from the NMT. If nothing happens when you update, then run `composer clear-cache` and try again.
 
-Here is a oneliner (well – there are three lines for readability) that is safe to use even if you have the NMT symlinked into the `vendor` directory:
+Here is a oneliner (well – there are multiple lines for readability) that is safe to use even if you have the NMT symlinked into the `vendor` directory. From your PR's branch run:
 
 ```bash
-rm -rf vendor/automattic/newspack-migration-tools && git checkout trunk && composer update automattic/newspack-migration-tools && git add composer.lock 
+rm -rf vendor/automattic/newspack-migration-tools
+composer update automattic/newspack-migration-tools
+git add composer.lock 
 git commit -m 'Updating NMT composer pointer'
-git push 
+git push origin $(git symbolic-ref --short HEAD)
 ```
 
 ### Working on the NMT and this repository at the same time
