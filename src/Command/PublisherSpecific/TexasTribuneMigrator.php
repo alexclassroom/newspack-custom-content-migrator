@@ -417,6 +417,12 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			if ( $sponsor_term_id ) {
 				wp_set_object_terms( $post_id, [ $sponsor_term_id ], self::SPONSOR_TAXONOMY );
 			}
+
+			// Add "Paid Post" category.
+			$paid_post_category = $this->get_or_create_category( 'Paid Post' );
+			if ( $paid_post_category ) {
+				wp_set_object_terms( $post_id, [ $paid_post_category->term_id ], 'category', true );
+			}
 		}
 
 		// Handle tags.
