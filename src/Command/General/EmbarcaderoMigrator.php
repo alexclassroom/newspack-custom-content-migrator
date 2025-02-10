@@ -1238,6 +1238,58 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-import-blog-posts',
+			self::get_command_closure( 'cmd_embarcadero_import_blog_posts' ),
+			[
+				'shortdesc' => 'Import blog posts from Embarcadero\'s legacy system.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-topics-csv',
+						'description' => 'Path to the blog_topics.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-bloggers-csv',
+						'description' => 'Path to the blog_bloggers.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-blogs-csv',
+						'description' => 'Path to the blog_blogs.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-photos-csv',
+						'description' => 'Path to the blog_photos.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-sites-csv',
+						'description' => 'Path to the blog_sites.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-site',
+						'description' => 'The target site domain (e.g. paloaltoonline.com)',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -6577,5 +6629,233 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		fwrite( STDOUT, "$question: " );
 
 		return strtolower( trim( fgets( STDIN ) ) );
+	}
+
+	/**
+	 * Import blog posts from Embarcadero's legacy system.
+	 *
+	 * ## OPTIONS
+	 *
+	 * --blog-topics-csv=<path>
+	 * : Path to the blog_topics.csv file
+	 *
+	 * --blog-bloggers-csv=<path>
+	 * : Path to the blog_bloggers.csv file
+	 *
+	 * --blog-blogs-csv=<path>
+	 * : Path to the blog_blogs.csv file
+	 *
+	 * --blog-photos-csv=<path>
+	 * : Path to the blog_photos.csv file
+	 *
+	 * --blog-sites-csv=<path>
+	 * : Path to the blog_sites.csv file
+	 *
+	 * --blog-site=<domain>
+	 * : The target site domain (e.g. paloaltoonline.com)
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_embarcadero_import_blog_posts( $args, $assoc_args ) {
+		global $wpdb;
+
+		// Required parameters.
+		$blog_topics_csv   = $assoc_args['blog-topics-csv'] ?? null;
+		$blog_bloggers_csv = $assoc_args['blog-bloggers-csv'] ?? null;
+		$blog_blogs_csv    = $assoc_args['blog-blogs-csv'] ?? null;
+		$blog_photos_csv   = $assoc_args['blog-photos-csv'] ?? null;
+		$blog_sites_csv    = $assoc_args['blog-sites-csv'] ?? null;
+		$blog_site         = $assoc_args['blog-site'] ?? null;
+
+		// Validate all required parameters are provided.
+		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_photos_csv || ! $blog_sites_csv || ! $blog_site ) {
+			WP_CLI::error( 'Missing required parameters. Please provide all required CSV files and the blog site domain.' );
+		}
+
+		// Validate all CSV files exist.
+		foreach ( [ $blog_topics_csv, $blog_bloggers_csv, $blog_blogs_csv, $blog_photos_csv, $blog_sites_csv ] as $csv_file ) {
+			if ( ! file_exists( $csv_file ) ) {
+				WP_CLI::error( sprintf( 'CSV file not found: %s', $csv_file ) );
+			}
+		}
+
+		// Read all CSV files.
+		$blog_sites    = $this->get_data_from_csv_or_tsv( $blog_sites_csv );
+		$blog_blogs    = $this->get_data_from_csv_or_tsv( $blog_blogs_csv );
+		$blog_bloggers = $this->get_data_from_csv_or_tsv( $blog_bloggers_csv );
+		$blog_photos   = $this->get_data_from_csv_or_tsv( $blog_photos_csv );
+
+		// Index blog sites by domain.
+		$blogs = [];
+		foreach ( $blog_sites as $site ) {
+			$blogs[ $site['blog_site'] ][] = $site['blog_id'];
+		}
+
+		// Validate the target site exists in the data.
+		if ( ! isset( $blogs[ $blog_site ] ) ) {
+			WP_CLI::error( sprintf( 'Blog site %s not found in the blog_sites.csv file.', $blog_site ) );
+		}
+
+		// Get blog IDs for the target site.
+		$target_blog_ids = $blogs[ $blog_site ];
+
+		// Get already migrated topic IDs.
+		$already_migrated_topic_ids = $wpdb->get_col( "SELECT DISTINCT meta_value FROM $wpdb->postmeta WHERE meta_key = 'topic_id'" );
+
+		// Read and filter topics.
+		$blog_topics = $this->get_data_from_csv_or_tsv( $blog_topics_csv );
+		$topics      = array_values(
+			array_filter(
+				$blog_topics,
+				function ( $topic ) use ( $target_blog_ids, $already_migrated_topic_ids, &$skipped_topics ) {
+					if ( in_array( $topic['topic_id'], $already_migrated_topic_ids ) ) {
+						$this->logger->log( self::LOG_FILE, sprintf( 'Skipping topic %s (ID: %s) because it has already been migrated', $topic['headline'], $topic['topic_id'] ) );
+						return false;
+					}
+					// Migrate only posts for this site.
+					return in_array( $topic['blog_id'], $target_blog_ids );
+				}
+			)
+		);
+
+		$total_topics = count( $topics );
+		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d topics to migrate for site %s (excluding %d already migrated)', $total_topics, $blog_site, count( $already_migrated_topic_ids ) ) );
+
+		// Process each topic.
+		foreach ( $topics as $index => $topic ) {
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing topic %d/%d (ID: %s)', $index + 1, $total_topics, $topic['topic_id'] ) );
+
+			// Find the blogger info.
+			$blogger_index = array_search( $topic['blogger_user_id'], array_column( $blog_bloggers, 'blogger_user_id' ) );
+
+			if ( ! $blogger_index ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Blogger %s (ID: %s) not found for the topic %d. Skipping...', $topic['blogger_user_name'], $topic['blogger_user_id'], $topic['topic_id'] ) );
+				continue;
+			}
+
+			// Create or get the author.
+			$author_id = $this->get_or_create_user(
+				$blog_bloggers[ $blogger_index ]['blogger_user_name'],
+				$blog_bloggers[ $blogger_index ]['blogger_email'],
+				'author'
+			);
+
+			// Find the blog info.
+			$blog_index = array_search( $topic['blog_id'], array_column( $blog_blogs, 'blog_id' ) );
+
+			if ( ! $blog_index ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Blog %s (ID: %s) not found for the topic %d. Skipping...', $topic['blog_name'], $topic['blog_id'], $topic['topic_id'] ) );
+			}
+
+			// Create or get the blog category.
+			$category_id = ( false !== $blog_index ) ? $this->get_or_create_category( $blog_blogs[ $blog_index ]['blog_name'] ) : '';
+
+			// Handle post content.
+			// phpcs:ignore
+			$post_content = str_replace( "\n", "</p>\n<p>", '<p>' . $topic['topic'] . '</p>' );
+
+			// Migrate URLs from [https://example.com Link Text] to <a href="https://example.com">Link Text</a>.
+			$post_content = $this->migrate_links( $post_content );
+
+			// Migrate text styling.
+			$post_content = $this->migrate_text_styling( $post_content );
+
+			// Create the post.
+			$post_data = [
+				'post_title'     => $topic['headline'],
+				'post_name'      => $this->migrate_post_slug( $topic['seo_link'] ),
+				'post_content'   => $post_content,
+				'post_author'    => $author_id,
+				'post_date'      => $this->get_post_date_from_timestamp( $topic['posted_epoch'] ),
+				'post_status'    => 'yes' === $topic['hide'] ? 'private' : 'publish',
+				'comment_status' => 'yes' === $topic['locked'] ? 'closed' : 'open',
+				'ping_status'    => 'closed',
+				'post_type'      => 'post',
+				'post_category'  => [ $category_id ],
+			];
+
+			// Insert the post.
+			$post_id = wp_insert_post( $post_data );
+
+			if ( is_wp_error( $post_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Failed to create post for topic %s: %s', $topic['topic_id'], $post_id->get_error_message() ) );
+				continue;
+			}
+
+			// Migrate images.
+			$post_content_with_images = $this->migrate_blog_topic_images( $post_content, $post_id, $topic['blog_id'] );
+
+			if ( $post_content_with_images !== $post_content ) {
+				wp_update_post(
+					[
+						'ID'           => $post_id,
+						'post_content' => make_clickable( $post_content_with_images ),
+					]
+				);
+			}
+
+			// Set post meta.
+			update_post_meta( $post_id, '_newspack_migrated_topic_id', $topic['topic_id'] );
+			update_post_meta( $post_id, 'topic_id', $topic['topic_id'] );
+			update_post_meta( $post_id, 'blog_id', $topic['blog_id'] );
+
+			// Update modification date directly in the database.
+			if ( ! empty( $topic['updated_date'] ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_modified'     => $topic['updated_date'],
+						'post_modified_gmt' => get_gmt_from_date( $topic['updated_date'] ),
+					],
+					[ 'ID' => $post_id ]
+				);
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Successfully created post %d for topic %s', $post_id, $topic['topic_id'] ) );
+		}
+
+		WP_CLI::success( sprintf( 'Completed blog posts migration for site %s', $blog_site ) );
+	}
+
+	/**
+	 * Migrate blog topic images.
+	 *
+	 * @param string $post_content Post content.
+	 * @param int    $post_id      Post ID.
+	 * @param int    $blog_id      Blog ID.
+	 * @return string Post content with images migrated.
+	 */
+	private function migrate_blog_topic_images( $post_content, $post_id, $blog_id ) {
+		// The images are in the format {IMG 12.jpg} and we need to replace them with the actual image.
+		preg_match_all( '/(?<shortcode>{IMG (?<filename>\d+\.jpg)})/', $post_content, $matches );
+
+		foreach ( $matches['shortcode'] as $index => $shortcode ) {
+			$filename = $matches['filename'][ $index ];
+
+			if ( ! $filename ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'No filename found for the shortcode: %s', $shortcode ) );
+				continue;
+			}
+
+			$photo_url = 'https://danielabrown.com/embarcadero/blogs/blog_photos/' . $blog_id . '/' . $filename;
+
+			$attachment_id = Attachments::import_attachment_for_post( $post_id, $photo_url );
+
+			if ( is_wp_error( $attachment_id ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Failed to import attachment for the post %d: %s', $post_id, $attachment_id->get_error_message() ) );
+				continue;
+			}
+
+			$image_url    = wp_get_attachment_url( $attachment_id );
+			$post_content = str_replace( $shortcode, ' <img src="' . $image_url . '" />', $post_content );
+
+			if ( $index === 0 ) {
+				set_post_thumbnail( $post_id, $attachment_id );
+			}
+		}
+
+		return $post_content;
 	}
 }
