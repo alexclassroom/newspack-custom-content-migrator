@@ -580,25 +580,25 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			'newspack-content-migrator embarcadero-list-posts-from-blog',
 			self::get_command_closure( 'cmd_embarcadero_list_posts_from_blog' ),
 			[
-				'shortdesc' => "Helper dev command. Lists post IDs imported from blog CSV. Does content validation and logs debugging info.",
+				'shortdesc' => 'Helper dev command. Lists post IDs imported from blog CSV. Does content validation and logs debugging info.',
 				'synopsis'  => [
 					[
-						'type'        => 'assoc',
-						'name'        => 'blogs-topics-csv-path',
-						'optional'    => false,
-						'repeating'   => false,
+						'type'      => 'assoc',
+						'name'      => 'blogs-topics-csv-path',
+						'optional'  => false,
+						'repeating' => false,
 					],
 					[
-						'type'        => 'assoc',
-						'name'        => 'blogs-photos-csv-path',
-						'optional'    => false,
-						'repeating'   => false,
+						'type'      => 'assoc',
+						'name'      => 'blogs-photos-csv-path',
+						'optional'  => false,
+						'repeating' => false,
 					],
 					[
-						'type'        => 'assoc',
-						'name'        => 'blogs-photos-dir-path',
-						'optional'    => false,
-						'repeating'   => false,
+						'type'      => 'assoc',
+						'name'      => 'blogs-photos-dir-path',
+						'optional'  => false,
+						'repeating' => false,
 					],
 				],
 			]
@@ -892,10 +892,10 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'Fix post dates on separate blogs/topic CSV to match timezone.',
 				'synopsis'  => [
 					[
-						'type'        => 'assoc',
-						'name'        => 'topics-csv-path',
-						'optional'    => false,
-						'repeating'   => false,
+						'type'      => 'assoc',
+						'name'      => 'topics-csv-path',
+						'optional'  => false,
+						'repeating' => false,
 					],
 				],
 			]
@@ -1134,7 +1134,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						'name'        => 'csv-path',
 						'description' => 'Path to the CSV file containing the categories that exist per site.',
 						'optional'    => false,
-						'repeating' => false,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -1209,7 +1209,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						'name'        => 'story-csv-path',
 						'description' => 'Path to the CSV file containing the stories.',
 						'optional'    => false,
-						'repeating' => false,
+						'repeating'   => false,
 					],
 				],
 			]
@@ -1324,7 +1324,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			}
 
 			if ( ! empty( $post['date_updated_epoch'] ) ) {
-				$post_data['post_modified'] = $this->get_post_date_from_timestamp( $post['date_updated_epoch'] );
+				$post_data['post_modified'] = $this->get_post_date_from_timestamp( $post['updated_epoch'] );
 			}
 
 			// Create or get the post.
@@ -1766,7 +1766,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			$this->logger->log( self::TAGS_LOG_FILE, sprintf( 'Imported tags for post %d with the original ID %d: %s', $wp_post_id, $story_id, implode( ', ', $tags ) ), Logger::SUCCESS );
 		}
 	}
-	
+
 	/**
 	 * Callable for `newspack-content-migrator embarcadero-list-posts-from-blog`.
 	 *
@@ -1777,16 +1777,16 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	public function cmd_embarcadero_list_posts_from_blog( $args, $assoc_args ) {
 		global $wpdb;
 
-		$topics_csv_file_path  = $assoc_args['blogs-topics-csv-path'];
-		$photos_csv_file_path  = $assoc_args['blogs-photos-csv-path'];
-		$photos_dir            = $assoc_args['blogs-photos-dir-path'];
+		$topics_csv_file_path = $assoc_args['blogs-topics-csv-path'];
+		$photos_csv_file_path = $assoc_args['blogs-photos-csv-path'];
+		$photos_dir           = $assoc_args['blogs-photos-dir-path'];
 
 		$topics = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
 		$photos = $this->get_data_from_csv_or_tsv( $photos_csv_file_path );
 
-		$post_ids_found = [];
-		$post_ids_not_same = [];
-		$topic_ids_not_found = [];
+		$post_ids_found        = [];
+		$post_ids_not_same     = [];
+		$topic_ids_not_found   = [];
 		$debug_titles_not_same = [];
 
 		foreach ( $topics as $key_topic => $topic ) {
@@ -1804,38 +1804,38 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 			foreach ( $post_ids as $post_id ) {
 				// Validate post is the same as topic. Looks like this isn't needed, but just in case since this is retroactive.
-				$post = get_post( $post_id, ARRAY_A );
-				$blog_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
-				$is_same_type = $post['post_type'] == 'post';
-				$is_same_title = $post['post_title'] == $topic["headline"];
+				$post          = get_post( $post_id, ARRAY_A );
+				$blog_id       = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
+				$is_same_type  = $post['post_type'] == 'post';
+				$is_same_title = $post['post_title'] == $topic['headline'];
 				if ( ! $is_same_title ) {
-					$encoded_title = str_replace( '"', '&quot;', $topic["headline"] );
+					$encoded_title = str_replace( '"', '&quot;', $topic['headline'] );
 					$is_same_title = $post['post_title'] == $encoded_title;
 				}
 				if ( ! $is_same_title ) {
-					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic["headline"] );
+					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic['headline'] );
 				}
 				// Allow +-1 day for timezone differences.
-				$publish_plus1day = date("Y-m-d", strtotime($post['post_date'] . " +1 day"));
-				$publish_minus1day = date("Y-m-d", strtotime($post['post_date'] . " -1 day"));
-				$is_same_date = ( substr( $post['post_date'], 0, 10 ) == $topic["posted_date"] )
-					|| ( $publish_plus1day == $topic["posted_date"] )
-					|| ( $publish_minus1day == $topic["posted_date"] );
-				$is_same_blog = $blog_id == $topic["blog_id"];
+				$publish_plus1day  = date( 'Y-m-d', strtotime( $post['post_date'] . ' +1 day' ) );
+				$publish_minus1day = date( 'Y-m-d', strtotime( $post['post_date'] . ' -1 day' ) );
+				$is_same_date      = ( substr( $post['post_date'], 0, 10 ) == $topic['posted_date'] )
+					|| ( $publish_plus1day == $topic['posted_date'] )
+					|| ( $publish_minus1day == $topic['posted_date'] );
+				$is_same_blog      = $blog_id == $topic['blog_id'];
 				if (
 					! $is_same_type ||
 					! $is_same_title ||
-					! $is_same_date || 
+					! $is_same_date ||
 					! $is_same_blog
 				) {
 					WP_CLI::line( sprintf( 'WARNING DEBUG post_id %d is not the same as topic_id %d (type:%s, title:%s, date:%s, blog:%s)', $post_id, $topic['topic_id'], (string) $is_same_type, (string) $is_same_title, (string) $is_same_date, (string) $is_same_blog ) );
 					$post_ids_not_same[] = $post_id;
 					if ( ! $is_same_title ) {
 						$debug_titles_not_same[] = [
-							$topic["headline"],
+							$topic['headline'],
 							$post['post_title'],
-							'topic_id: ' . $topic['topic_id'], 
-							'post_id: ' . $post_id
+							'topic_id: ' . $topic['topic_id'],
+							'post_id: ' . $post_id,
 						];
 					}
 					continue;
@@ -1846,9 +1846,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			}
 		}
 
-		file_put_contents( 'cmd_found-post-ids.csv', implode( ",", $post_ids_found ) );
-		file_put_contents( 'cmd_post-ids-not-same.csv', implode( ",", $post_ids_not_same ) );
-		file_put_contents( 'cmd_topic-ids-not-found.csv', implode( ",", $topic_ids_not_found ) );
+		file_put_contents( 'cmd_found-post-ids.csv', implode( ',', $post_ids_found ) );
+		file_put_contents( 'cmd_post-ids-not-same.csv', implode( ',', $post_ids_not_same ) );
+		file_put_contents( 'cmd_topic-ids-not-found.csv', implode( ',', $topic_ids_not_found ) );
 		file_put_contents( 'cmd_debug_titles_not_same.json', json_encode( $debug_titles_not_same ) );
 		WP_CLI::line( 'Done, saved CSVs' );
 	}
@@ -1942,7 +1942,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_fix_post_times( array $args, array $assoc_args ): void {
 		global $wpdb;
-		
+
 		$story_csv_file_path = $assoc_args['story-csv-file-path'];
 		$index_from          = isset( $assoc_args['index-from'] ) ? intval( $assoc_args['index-from'] ) : 0;
 		$index_to            = isset( $assoc_args['index-to'] ) ? intval( $assoc_args['index-to'] ) : -1;
@@ -1963,7 +1963,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		// Explain usage and confirm.
 		WP_CLI::warning( "The way to run this command is to feed it story_1.csv first (if it exists), and after that run it the second time with story.csv. That's because story_1.csv might contain newer versions of posts than story.csv so we want to run it first. SECOND IMPORTANT NOTE -- the file $log_detailed_csv_file created by this command is being used to track what has previously been updated, i.e. first importing posts from story_1.csv and second skipping the same story if an older version is found in story.csv. So MAKE SURE TO DELETE $log_detailed_csv_file when you begin to run this command with story_1.csv, and keep $log_detailed_csv_file when running it again with story.csv. Use start/end from index as usual." );
 		WP_CLI::confirm( 'Continue?' );
-		
+
 		// Get selected posts.
 		$posts = $this->get_data_from_csv_or_tsv( $story_csv_file_path );
 		if ( -1 !== $index_to ) {
@@ -1972,7 +1972,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 		// GMT offset.
 		$gmt_offset = get_option( 'gmt_offset' );
-		
+
 		$total_posts = count( $posts );
 		foreach ( $posts as $post_index => $post ) {
 
@@ -2072,7 +2072,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					$change['post_modified_new'] ?? '',
 					$change['post_modified_gmt_old'] ?? '',
 					$change['post_modified_gmt_new'] ?? '',
-				] 
+				]
 			);
 		}
 		WP_CLI::success( 'Changes saved to ' . $log_detailed_csv_file );
@@ -2089,15 +2089,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	public function cmd_fix_post_times_for_blogs_topics( array $pos_args, array $assoc_args ): void {
 		global $wpdb;
 
-		$topics_csv_file_path  = $assoc_args['topics-csv-path'];
-		$topics = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
+		$topics_csv_file_path = $assoc_args['topics-csv-path'];
+		$topics               = $this->get_data_from_csv_or_tsv( $topics_csv_file_path );
 
 		// GMT offset.
 		$gmt_offset = get_option( 'gmt_offset' );
 
-		$post_ids_found = [];
-		$debug_titles_not_same = [];
-		$changes = [];
+		$post_ids_found           = [];
+		$debug_titles_not_same    = [];
+		$changes                  = [];
 		$log_detailed_changes_csv = 'fix-post-times-blogs-topics.csv';
 
 		// Loop through topics.
@@ -2113,41 +2113,41 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			}
 			// Account for multiple posts for same topic (dupes should not have been imported, but if they exist, we need them to have correct data).
 			foreach ( $post_ids as $key_post_id => $post_id ) {
-				
+
 				/**
 				 * Validate post is the same as topic. This probably isn't needed, but just in case since this is retroactive.
 				 */
-				$post = get_post( $post_id, ARRAY_A );
-				$blog_id = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
-				$is_same_type = $post['post_type'] == 'post';
-				$is_same_title = $post['post_title'] == $topic["headline"];
+				$post          = get_post( $post_id, ARRAY_A );
+				$blog_id       = $wpdb->get_var( $wpdb->prepare( "SELECT meta_value FROM $wpdb->postmeta WHERE meta_key = %s AND post_id = %d", 'blog_id', $post_id ) );
+				$is_same_type  = $post['post_type'] == 'post';
+				$is_same_title = $post['post_title'] == $topic['headline'];
 				if ( ! $is_same_title ) {
-					$encoded_title = str_replace( '"', '&quot;', $topic["headline"] );
+					$encoded_title = str_replace( '"', '&quot;', $topic['headline'] );
 					$is_same_title = $post['post_title'] == $encoded_title;
 				}
 				if ( ! $is_same_title ) {
-					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic["headline"] );
+					$is_same_title = $post['post_title'] == htmlspecialchars_decode( $topic['headline'] );
 				}
 				// Allow +-1 day for timezone differences.
-				$publish_plus1day = date("Y-m-d", strtotime($post['post_date'] . " +1 day"));
-				$publish_minus1day = date("Y-m-d", strtotime($post['post_date'] . " -1 day"));
-				$is_same_date = ( substr( $post['post_date'], 0, 10 ) == $topic["posted_date"] )
-					|| ( $publish_plus1day == $topic["posted_date"] )
-					|| ( $publish_minus1day == $topic["posted_date"] );
-				$is_same_blog = $blog_id == $topic["blog_id"];
+				$publish_plus1day  = date( 'Y-m-d', strtotime( $post['post_date'] . ' +1 day' ) );
+				$publish_minus1day = date( 'Y-m-d', strtotime( $post['post_date'] . ' -1 day' ) );
+				$is_same_date      = ( substr( $post['post_date'], 0, 10 ) == $topic['posted_date'] )
+					|| ( $publish_plus1day == $topic['posted_date'] )
+					|| ( $publish_minus1day == $topic['posted_date'] );
+				$is_same_blog      = $blog_id == $topic['blog_id'];
 				if (
 					! $is_same_type ||
 					! $is_same_title ||
-					! $is_same_date || 
+					! $is_same_date ||
 					! $is_same_blog
 				) {
 					WP_CLI::line( sprintf( 'WARNING DEBUG post_id %d is not the same as topic_id %d (type:%s, title:%s, date:%s, blog:%s)', $post_id, $topic['topic_id'], (string) $is_same_type, (string) $is_same_title, (string) $is_same_date, (string) $is_same_blog ) );
 					if ( ! $is_same_title ) {
 						$debug_titles_not_same[] = [
-							$topic["headline"],
+							$topic['headline'],
 							$post['post_title'],
-							'topic_id: ' . $topic['topic_id'], 
-							'post_id: ' . $post_id
+							'topic_id: ' . $topic['topic_id'],
+							'post_id: ' . $post_id,
 						];
 					}
 					continue;
@@ -2175,7 +2175,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				$topic_date_published_gmt = gmdate( 'Y-m-d H:i:s', strtotime( $topic_date_published ) - $gmt_offset * HOUR_IN_SECONDS );
 
 				// Get topic modified date from 'YYYY-MM-DD' string.
-				$updated_date = \DateTime::createFromFormat( 'Y-m-d', $topic['updated_date'] );
+				$updated_date       = \DateTime::createFromFormat( 'Y-m-d', $topic['updated_date'] );
 				$is_date_yyyy_mm_dd = $updated_date && ( $updated_date->format( 'Y-m-d' ) === $topic['updated_date'] );
 				if ( $is_date_yyyy_mm_dd ) {
 					// Since all we have is a YYYY-MM-DD string, we need to add a time to it.
@@ -2223,12 +2223,12 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					'post_modified_gmt_new' => $topic_modified_gmt,
 				];
 
-				$d=1;
+				$d = 1;
 			}
 		}
 
 		// Logs.
-		file_put_contents( 'cmd_found-post-ids.csv', implode( ",", $post_ids_found ) );
+		file_put_contents( 'cmd_found-post-ids.csv', implode( ',', $post_ids_found ) );
 		file_put_contents( 'cmd_debug_titles_not_same.json', json_encode( $debug_titles_not_same ) );
 		// Log detailed changes to CSV.
 		$csv = fopen( $log_detailed_changes_csv, 'w' );
@@ -2247,11 +2247,11 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					$change['post_modified_new'] ?? '',
 					$change['post_modified_gmt_old'] ?? '',
 					$change['post_modified_gmt_new'] ?? '',
-				] 
+				]
 			);
 		}
 		WP_CLI::success( 'Changes saved to ' . $log_detailed_changes_csv );
-		
+
 		WP_CLI::line( 'Done, saved CSVs' );
 	}
 
@@ -3821,27 +3821,27 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$duplicate_cats_tags       = $wpdb->get_results(
-			"SELECT 
-				sub.slug, 
-				sub.name, 
-				GROUP_CONCAT(sub.taxonomy) as taxonomies, 
-				COUNT(DISTINCT sub.term_taxonomy_id) as counter 
+			"SELECT
+				sub.slug,
+				sub.name,
+				GROUP_CONCAT(sub.taxonomy) as taxonomies,
+				COUNT(DISTINCT sub.term_taxonomy_id) as counter
 			FROM (
-				SELECT 
+				SELECT
 				    ROW_NUMBER() over ( PARTITION BY t.slug ORDER BY tt.taxonomy ) as row_num,
-					t.term_id, 
-					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name, 
-					t.slug, 
-					tt.taxonomy, 
-					tt.term_taxonomy_id 
-				FROM $wpdb->terms t 
-					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-				WHERE tt.taxonomy IN ( 'category', 'post_tag' ) 
+					t.term_id,
+					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
+					t.slug,
+					tt.taxonomy,
+					tt.term_taxonomy_id
+				FROM $wpdb->terms t
+					LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+				WHERE tt.taxonomy IN ( 'category', 'post_tag' )
 				  AND tt.parent = 0
 				ORDER BY FIELD( tt.taxonomy, 'category', 'post_tag' )
-			) as sub 
-			GROUP BY sub.slug 
-			HAVING counter > 1 
+			) as sub
+			GROUP BY sub.slug
+			HAVING counter > 1
 			ORDER BY counter DESC"
 		);
 		$count_duplicate_cats_tags = count( $duplicate_cats_tags );
@@ -3860,15 +3860,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$category       = $wpdb->get_results(
 					$wpdb->prepare(
-						"SELECT 
-    						t.term_id, 
-    						t.name, 
-    						t.slug, 
-    						tt.taxonomy, 
-    						tt.term_taxonomy_id 
-						FROM $wpdb->terms t 
-						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-						WHERE t.slug = %s 
+						"SELECT
+    						t.term_id,
+    						t.name,
+    						t.slug,
+    						tt.taxonomy,
+    						tt.term_taxonomy_id
+						FROM $wpdb->terms t
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+						WHERE t.slug = %s
 						  AND tt.taxonomy = 'category'
 						  AND tt.parent = 0",
 						$duplicate->slug
@@ -3887,15 +3887,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$tags = $wpdb->get_results(
 					$wpdb->prepare(
-						"SELECT 
-							t.term_id, 
-							t.name, 
-							t.slug, 
-							tt.taxonomy, 
-							tt.term_taxonomy_id 
-						FROM $wpdb->terms t 
-						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-						WHERE t.slug = %s 
+						"SELECT
+							t.term_id,
+							t.name,
+							t.slug,
+							tt.taxonomy,
+							tt.term_taxonomy_id
+						FROM $wpdb->terms t
+						    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+						WHERE t.slug = %s
 						  AND tt.taxonomy = 'post_tag'",
 						$duplicate->slug
 					)
@@ -3952,11 +3952,11 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post = $wpdb->get_row(
 				$wpdb->prepare(
-					"SELECT 
-    					p.* 
-						FROM $wpdb->posts p 
-						    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id 
-						WHERE meta_key = %s 
+					"SELECT
+    					p.*
+						FROM $wpdb->posts p
+						    INNER JOIN $wpdb->postmeta pm ON p.ID = pm.post_id
+						WHERE meta_key = %s
 						  AND meta_value = %d",
 					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
 					$row['story_id']
@@ -3973,16 +3973,16 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_tags = $wpdb->get_results(
 				$wpdb->prepare(
-					"SELECT 
-    					t.term_id, 
+					"SELECT
+    					t.term_id,
     					REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
-    					t.slug, 
-    					tt.taxonomy, 
-    					tt.term_taxonomy_id 
-					FROM $wpdb->terms t 
-					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-					    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id 
-					WHERE tr.object_id = %d 
+    					t.slug,
+    					tt.taxonomy,
+    					tt.term_taxonomy_id
+					FROM $wpdb->terms t
+					    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+					    INNER JOIN $wpdb->term_relationships tr ON tt.term_taxonomy_id = tr.term_taxonomy_id
+					WHERE tr.object_id = %d
 					  AND tt.taxonomy = 'post_tag'",
 					$post->ID
 				)
@@ -4026,15 +4026,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$tags = $wpdb->get_results(
-			"SELECT 
-    			t.term_id, 
+			"SELECT
+    			t.term_id,
     			REGEXP_REPLACE( t.name, '\\\[|\\\]', '' ) as name,
-    			t.slug, 
-    			tt.taxonomy, 
+    			t.slug,
+    			tt.taxonomy,
     			tt.term_taxonomy_id,
     			tt.description
-			FROM $wpdb->terms t 
-			    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			FROM $wpdb->terms t
+			    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			WHERE tt.taxonomy = 'post_tag'"
 		);
 
@@ -4048,8 +4048,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$tag->post_ids = $wpdb->get_col(
 					$wpdb->prepare(
-						"SELECT tr.object_id 
-						FROM $wpdb->term_relationships tr 
+						"SELECT tr.object_id
+						FROM $wpdb->term_relationships tr
 						WHERE tr.term_taxonomy_id = %d",
 						$tag->term_taxonomy_id
 					)
@@ -4124,19 +4124,19 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$posts_without_primary_category       = $wpdb->get_results(
-			"SELECT 
-    				p.ID 
-				FROM $wpdb->posts p 
+			"SELECT
+    				p.ID
+				FROM $wpdb->posts p
 				WHERE p.ID IN (
-				  SELECT post_id 
-				  FROM $wpdb->postmeta 
+				  SELECT post_id
+				  FROM $wpdb->postmeta
 				  WHERE meta_key IN ( '_newspack_import_id', 'original_article_id' )
-				  ) 
+				  )
 				  AND p.ID NOT IN (
-					SELECT post_id 
-					FROM $wpdb->postmeta 
-					WHERE meta_key = '_yoast_wpseo_primary_category' 
-					  AND meta_value <> '' 
+					SELECT post_id
+					FROM $wpdb->postmeta
+					WHERE meta_key = '_yoast_wpseo_primary_category'
+					  AND meta_value <> ''
 				)"
 		);
 		$posts_without_primary_category_count = count( $posts_without_primary_category );
@@ -4445,15 +4445,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		$user_console_output = new UserConsoleOutput();
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$author_terms = $wpdb->get_results(
-			"SELECT 
-    			t.term_id, 
-    			tt.term_taxonomy_id, 
+			"SELECT
+    			t.term_id,
+    			tt.term_taxonomy_id,
     			t.name,
     			t.slug,
     			tt.taxonomy,
     			tt.description
-			FROM $wpdb->terms t 
-			    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+			FROM $wpdb->terms t
+			    INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 			WHERE tt.taxonomy = 'author'"
 		);
 
@@ -4622,7 +4622,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		// phpcs:enable
 
 		$manual_slug_map_override = [
-			/* Palo Alto Online
+			/*
+			Palo Alto Online
 			'cap-chris-kenrick'    => 'cap-christina-kenrick',
 			'cap-by-chris-kenrick' => 'cap-christina-kenrick',
 			'cap-rebecca-wallace'  => 'cap-rwallace',
@@ -4631,8 +4632,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			'cap-gennady-sheyner'  => 'gennady-sheyner',
 			'cap-kelly-jones'      => 'cap-kelly-jones-2',*/
 			/* Pleasanton Weekly */
-			'cap-jeb-bing'      => 'cap-jbingembarcaderopublishing-com',
-			'cap-staff-reports' => 'cap-staff',
+			'cap-jeb-bing'        => 'cap-jbingembarcaderopublishing-com',
+			'cap-staff-reports'   => 'cap-staff',
 			'cap-gennady-sheyner' => 'cap-gsheyner',
 			'cap-sue-dremann'     => 'cap-sdremannembarcaderopublishing-com',
 		];
@@ -4665,11 +4666,11 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$author_terms          = $wpdb->get_results(
 				$wpdb->prepare(
-					"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-					FROM $wpdb->terms t 
-					    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-					    LEFT JOIN $wpdb->term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id 
-					WHERE tt.taxonomy = 'author' 
+					"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+					FROM $wpdb->terms t
+					    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+					    LEFT JOIN $wpdb->term_relationships tr ON tr.term_taxonomy_id = tt.term_taxonomy_id
+					WHERE tt.taxonomy = 'author'
 					  AND tr.object_id = %d",
 					$post->ID
 				)
@@ -4712,13 +4713,13 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				$console->bright_magenta( 'Byline is not empty, but there are no authors assigned to the post' )->underlined_bright_magenta( $row['byline'] )->output();
 				// Check if there is an exact match for the byline as is.
 				$cap_byline = 'cap-' . sanitize_title( $row['byline'] );
-				$cap_byline       = $manual_slug_map_override[ $cap_byline ] ?? $cap_byline;
+				$cap_byline = $manual_slug_map_override[ $cap_byline ] ?? $cap_byline;
 				ConsoleColor::white( 'Direct Search Slug:' )->bright_white( $cap_byline )->output();
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$author_term = $wpdb->get_row(
 					$wpdb->prepare(
-						"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-						FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+						FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 						WHERE tt.taxonomy = 'author' AND t.slug = %s",
 						$cap_byline
 					)
@@ -4814,9 +4815,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 					$regex_author_term = $wpdb->get_row(
 						$wpdb->prepare(
-							"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-							FROM $wpdb->terms t 
-								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+							"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+							FROM $wpdb->terms t
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 							WHERE REGEXP_LIKE( t.slug, %s ) ORDER BY t.slug ASC",
 							$slug . '[-\d+]?'
 						)
@@ -4839,9 +4840,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 						$author_term_by_post_author = $wpdb->get_row(
 							$wpdb->prepare(
-								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-								FROM $wpdb->terms t 
-									LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+								FROM $wpdb->terms t
+									LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 								WHERE tt.taxonomy = 'author' AND t.slug LIKE %s AND tt.description LIKE %s",
 								'%' . $wpdb->esc_like( $post_author_user->user_nicename ) . '%',
 								'% ' . $post_author_user->ID . ' %'
@@ -4906,12 +4907,12 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 									tt.term_taxonomy_id,
 									tt.taxonomy,
 									tt.description,
-    							FROM $wpdb->terms t 
-    							    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
-    							WHERE tt.taxonomy = 'author' AND 
+    							FROM $wpdb->terms t
+    							    LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
+    							WHERE tt.taxonomy = 'author' AND
     							      tt.term_taxonomy_id IN (
-    									SELECT term_taxonomy_id 
-    									FROM $wpdb->term_relationships 
+    									SELECT term_taxonomy_id
+    									FROM $wpdb->term_relationships
     									WHERE object_id = %d
     							)",
 								$post->ID
@@ -5045,7 +5046,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 					$byline_author = array_shift( $byline_authors );
 
-					/*$author_post_author_slug_comparison           = $this->compare_values(
+					/*
+					$author_post_author_slug_comparison           = $this->compare_values(
 						$byline_author['cap-name'],
 						! str_starts_with( $post_author->user_nicename, 'cap-' ) ? "cap-$post_author->user_nicename" : $post_author->user_nicename ?? 'Not Found'
 					);
@@ -5066,7 +5068,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						$this->cap_data_fixer->get_author_term_description( $user ),
 						$author_term->description
 					);
-					$author_author_term_slug_nicename_comparison = $this->compare_values( $byline_author['cap-name'], $author_term->slug );
+					$author_author_term_slug_nicename_comparison  = $this->compare_values( $byline_author['cap-name'], $author_term->slug );
 
 					ConsoleTable::output_comparison(
 						[
@@ -5081,7 +5083,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 							'slug/nicename' => $byline_author['cap-name'],
 							'description'   => $row['byline'],
 						],
-						/*[
+						/*
+						[
 							'_'             => '-',
 							'name/email'    => '-',
 							'slug/nicename' => $author_post_author_slug_comparison->as_string,
@@ -5127,7 +5130,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 					// Happy Path.
 					$all_good = [
-						/*$author_post_author_slug_comparison->as_bool,
+						/*
+						$author_post_author_slug_comparison->as_bool,
 						$post_author_wp_user_name_email_comparison->as_bool,
 						$post_author_wp_user_slug_nicename_comparison->as_bool,
 						$post_author_wp_user_description_comparison->as_bool,*/
@@ -5142,7 +5146,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 							// Sometimes the author term description is not correct, but if everything else is all good,
 							// we should consider the record properly set and validated.
 							$all_good = [
-								/*$author_post_author_slug_comparison->as_bool,
+								/*
+								$author_post_author_slug_comparison->as_bool,
 								$post_author_wp_user_name_email_comparison->as_bool,
 								$post_author_wp_user_slug_nicename_comparison->as_bool,
 								$post_author_wp_user_description_comparison->as_bool,*/
@@ -5161,7 +5166,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					}
 
 					if (
-						/*! $author_post_author_slug_comparison->as_bool &&
+						/*
+						! $author_post_author_slug_comparison->as_bool &&
 						$post_author_wp_user_slug_nicename_comparison->as_bool &&*/
 						$wp_user_author_term_slug_nicename_comparison->as_bool
 					) {
@@ -5169,9 +5175,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 						$close_match_author_term = $wpdb->get_row(
 							$wpdb->prepare(
-								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-							FROM $wpdb->terms t 
-								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+								"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+							FROM $wpdb->terms t
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 							WHERE tt.taxonomy = 'author' AND t.slug = %s",
 								$byline_author['cap-name']
 							)
@@ -5181,9 +5187,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 							// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 							$close_match_author_term = $wpdb->get_row(
 								$wpdb->prepare(
-									"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description 
-							FROM $wpdb->terms t 
-								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+									"SELECT t.term_id, t.name, t.slug, tt.taxonomy, tt.term_taxonomy_id, tt.description
+							FROM $wpdb->terms t
+								LEFT JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 							WHERE tt.taxonomy = 'author' AND REGEXP_LIKE( t.slug, %s ) ORDER BY t.slug ASC",
 									$byline_author['cap-name'] . '[-\d+]?'
 								)
@@ -5214,8 +5220,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 								}
 
 								$authors_validated[] = false;
-							} else {
-								if ( 'y' === $prompt ) {
+							} elseif ( 'y' === $prompt ) {
 									// Need to assign user to wp_posts, delete old author term rel record, insert new author term rel record.
 									// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 									$perhaps_post_author_updated = $wpdb->update(
@@ -5228,49 +5233,48 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 										]
 									);
 
-									if ( $perhaps_post_author_updated ) {
-										ConsoleColor::green( 'Post Author Updated' )->output();
+								if ( $perhaps_post_author_updated ) {
+									ConsoleColor::green( 'Post Author Updated' )->output();
+									// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+									$maybe_rel_deleted = $wpdb->delete(
+										$wpdb->term_relationships,
+										[
+											'object_id' => $post->ID,
+											'term_taxonomy_id' => $author_term->term_taxonomy_id,
+										]
+									);
+
+									if ( false !== $maybe_rel_deleted ) {
+										ConsoleColor::green( 'Old Author Term Relationship Deleted' )->output();
 										// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-										$maybe_rel_deleted = $wpdb->delete(
+										$maybe_new_rel_inserted = $wpdb->insert(
 											$wpdb->term_relationships,
 											[
 												'object_id'        => $post->ID,
-												'term_taxonomy_id' => $author_term->term_taxonomy_id,
+												'term_taxonomy_id' => $close_match_author_term->term_taxonomy_id,
 											]
 										);
 
-										if ( false !== $maybe_rel_deleted ) {
-											ConsoleColor::green( 'Old Author Term Relationship Deleted' )->output();
-											// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
-											$maybe_new_rel_inserted = $wpdb->insert(
-												$wpdb->term_relationships,
-												[
-													'object_id'        => $post->ID,
-													'term_taxonomy_id' => $close_match_author_term->term_taxonomy_id,
-												]
-											);
-
-											if ( false !== $maybe_new_rel_inserted ) {
-												ConsoleColor::green( 'New Author Term Relationship Successfully Inserted' )->output();
-												$authors_validated[] = true;
-												continue;
-											} else {
-												ConsoleColor::red( 'New Author Term Relationship Insertion Failed' )->output();
-											}
+										if ( false !== $maybe_new_rel_inserted ) {
+											ConsoleColor::green( 'New Author Term Relationship Successfully Inserted' )->output();
+											$authors_validated[] = true;
+											continue;
 										} else {
-											ConsoleColor::red( 'Old Author Term Relationship Deletion Failed' )->output();
+											ConsoleColor::red( 'New Author Term Relationship Insertion Failed' )->output();
 										}
 									} else {
-										ConsoleColor::red( 'Post Author Update Failed' )->output();
+										ConsoleColor::red( 'Old Author Term Relationship Deletion Failed' )->output();
 									}
-									$authors_validated[] = false;
-								} elseif ( 's' === $prompt ) {
-									ConsoleColor::yellow( 'Skipping...' )->output();
-									update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
-									continue 2;
-								} elseif ( 'c' === $prompt ) {
-									$authors_validated[] = false;
+								} else {
+									ConsoleColor::red( 'Post Author Update Failed' )->output();
 								}
+									$authors_validated[] = false;
+							} elseif ( 's' === $prompt ) {
+								ConsoleColor::yellow( 'Skipping...' )->output();
+								update_post_meta( $post->ID, $validation_meta_key, 'skipped' );
+								continue 2;
+							} elseif ( 'c' === $prompt ) {
+								$authors_validated[] = false;
 							}
 						} else {
 							$prompt = $this->ask( 'Would you like to (s)kip this record, (c)ontinue, or (h)alt execution?' );
@@ -5292,14 +5296,15 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					} elseif (
 						$count_of_author_terms > 1 &&
 						$author_author_term_slug_nicename_comparison->as_bool &&
-						//						! $author_post_author_slug_comparison->as_bool &&
+						// ! $author_post_author_slug_comparison->as_bool &&
 						$wp_user_author_term_slug_nicename_comparison->as_bool
 					) {
 						ConsoleColor::yellow_with_blue_background( 'Multiple authors assigned to post, and CSV Byline Author match' )->output();
 						$authors_validated[] = true;
 					} elseif (
 						1 === $count_of_author_terms &&
-						$author_author_term_slug_nicename_comparison->as_bool /*&&
+						$author_author_term_slug_nicename_comparison->as_bool /*
+					&&
 						! $author_post_author_slug_comparison->as_bool*/
 					) {
 
@@ -5338,7 +5343,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 							$post_author_author_term = $wpdb->get_row(
 								$wpdb->prepare(
 									"SELECT t.term_id, tt.term_taxonomy_id, tt.description
-										FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+										FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id
 										WHERE tt.taxonomy = 'author' AND t.slug = %s",
 									$post_author_slug
 								)
@@ -5370,7 +5375,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 										$wpdb->term_relationships,
 										[
 											'term_taxonomy_id' => $author_term->term_taxonomy_id,
-											'object_id'        => $post->ID,
+											'object_id' => $post->ID,
 										]
 									);
 
@@ -5426,9 +5431,9 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$iterable = $wpdb->get_results(
 				$wpdb->prepare(
-					"SELECT post_id 
-					FROM $wpdb->postmeta 
-					WHERE meta_key = %s 
+					"SELECT post_id
+					FROM $wpdb->postmeta
+					WHERE meta_key = %s
 					  AND meta_value IN ('validated')",
 					'_newspack_embarcadero_cap_data_validation_status',
 				)
@@ -5558,7 +5563,6 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 * @throws Exception If QA file cannot be found.
 	 * @see cmd_qa_cap_validation and assigns the author specified in the original
 	 * author to the post. The QA file must only contain rows where the current author does not match the original author.
-	 *
 	 */
 	public function cmd_match_original_byline_to_post( array $args, array $assoc_args ) {
 		$file_path      = $assoc_args['qa-file-path'];
@@ -5599,7 +5603,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		$max_user_id = $wpdb->get_var( "SELECT MAX(ID) FROM $wpdb->users" );
 
 		foreach ( ( new FileImportFactory() )->get_file( $file_path )->getIterator() as $row ) {
-			$row['original_byline']              = trim( $row['original_byline'] );
+			$row['original_byline'] = trim( $row['original_byline'] );
 			unset( $row['discrepancy'] );
 			unset( $row['col'] );
 
@@ -5688,7 +5692,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 				$qa_row['new_author_nicename']     = $co_author_nicenames;
 				$qa_row['new_author_display_name'] = $co_author_display_names;
-				$qa_row['successfully_assigned'] = strtolower( $co_author_display_names ) === strtolower( $qa_row['original_byline'] ) ? 'Yes' : 'No';
+				$qa_row['successfully_assigned']   = strtolower( $co_author_display_names ) === strtolower( $qa_row['original_byline'] ) ? 'Yes' : 'No';
 				fputcsv( $qa_file, $qa_row );
 				continue;
 			}
@@ -5738,7 +5742,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			$co_author_display_names           = implode( ', ', array_map( fn( $a ) => $a->display_name, $cap_coauthors ) );
 			$qa_row['new_author_nicename']     = $co_author_nicenames;
 			$qa_row['new_author_display_name'] = $co_author_display_names;
-			$qa_row['successfully_assigned'] = strtolower( $co_author_display_names ) === strtolower( $qa_row['original_byline'] ) ? 'Yes' : 'No';
+			$qa_row['successfully_assigned']   = strtolower( $co_author_display_names ) === strtolower( $qa_row['original_byline'] ) ? 'Yes' : 'No';
 			fputcsv( $qa_file, $qa_row );
 		}
 
