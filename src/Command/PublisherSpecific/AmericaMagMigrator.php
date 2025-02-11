@@ -470,7 +470,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$premium_options['skip_menus']     = true;
 
 		// @todo: Redirects?
-		$premium_options['skip_redirects'] = true;
+		// keep default: 'skip_redirects'    => false, so that redirects are added to wp_fg_redirects
+		// but possibly don't use FG to do the redirects or not? This is after the site is launched.
 		$premium_options['url_redirect']   = false;
 
 		return $premium_options;
