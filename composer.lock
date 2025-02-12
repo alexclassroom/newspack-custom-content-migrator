@@ -5343,15 +5343,15 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-content-converter": 20,
-        "simplehtmldom/simplehtmldom": 5,
+        "automattic/newspack-migration-tools": 20,
+        "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-scraper-migrator": 20,
-        "automattic/newspack-migration-tools": 20
+        "simplehtmldom/simplehtmldom": 5
     },
     "prefer-stable": false,
     "prefer-lowest": false,
-    "platform": [],
-    "platform-dev": [],
-    "plugin-api-version": "2.2.0"
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
 }
