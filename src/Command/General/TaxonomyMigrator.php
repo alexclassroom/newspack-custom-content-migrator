@@ -73,8 +73,29 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'parent-category-id',
+						'description' => 'Category ID to use as parent for all newly created categories. Cannot be used together with create-parent-category.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'term_ids',
 						'description' => 'CSV of Terms IDs. If provided, the command will only convert these specific Terms.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'delete-old-terms',
+						'description' => 'If this flag is set, the original taxonomy terms will be deleted after successful conversion to categories.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'replace-uncategorized',
+						'description' => 'If this flag is set, posts that only have the "uncategorized" category will have it replaced with the newly converted category.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -486,12 +507,12 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 
 		$query = new \WP_Query(
 			array_merge(
-                $query_base,
-                [
+				$query_base,
+				[
 					'paged'          => $batch,
 					'posts_per_page' => $posts_per_batch,
 				]
-            )
+			)
 		);
 
 		$posts = $query->get_posts();
@@ -505,15 +526,15 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $primary_categry_id );
 		}
 
-        wp_cache_flush();
+		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
 	}
 
 	/**
 	 * Callable for terms-with-taxonomy-to-categories command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_terms_with_taxonomy_to_categories( $args, $assoc_args ) {
 		$taxonomy = isset( $assoc_args['taxonomy'] ) ? $assoc_args['taxonomy'] : null;
@@ -522,18 +543,31 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 		}
 
 		$create_parent_category = isset( $assoc_args['create-parent-category'] ) ? true : false;
+		$parent_category_id     = isset( $assoc_args['parent-category-id'] ) ? intval( $assoc_args['parent-category-id'] ) : 0;
+		$delete_old_terms       = isset( $assoc_args['delete-old-terms'] );
+		$replace_uncategorized  = isset( $assoc_args['replace-uncategorized'] );
+
+		// Validate that both parent options are not used together.
+		if ( $create_parent_category && $parent_category_id > 0 ) {
+			WP_CLI::error( 'Cannot use both --create-parent-category and --parent-category-id parameters together.' );
+		}
 
 		$term_ids_for_conversion = isset( $assoc_args['term_ids'] ) ? explode( ',', $assoc_args['term_ids'] ) : [];
 
 		WP_CLI::line( sprintf( 'Converting Terms with Taxonomy %s to Categories...', $taxonomy ) );
 
-		// Create Parent Category if so specified.
+		// Create Parent Category if so specified, or get existing parent category.
 		$parent_category = null;
 		if ( $create_parent_category ) {
 			$parent_category = $this->create_category_from_taxonomy( $taxonomy );
 			if ( is_wp_error( $parent_category ) || null === $parent_category ) {
 				$err_msg = is_wp_error( $parent_category ) ? $parent_category->get_error_message() : 'null';
 				WP_CLI::error( sprintf( 'Error creating Category from Taxonomy %s: %s', $taxonomy, $err_msg ) );
+			}
+		} elseif ( $parent_category_id > 0 ) {
+			$parent_category = get_category( $parent_category_id );
+			if ( ! $parent_category ) {
+				WP_CLI::error( sprintf( 'Parent category with ID %d not found.', $parent_category_id ) );
 			}
 		}
 
@@ -555,6 +589,7 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 			exit;
 		}
 
+		$converted_terms = [];
 		foreach ( $terms as $term ) {
 			// If `term_ids` argument is provided, only convert those Terms.
 			if ( ! empty( $term_ids_for_conversion ) && ! in_array( $term->term_id, $term_ids_for_conversion ) ) {
@@ -577,8 +612,34 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 			// Add Category to post objects.
 			WP_CLI::line( sprintf( "Adding Category '%s' to all post objects...", $category->name ) );
 			foreach ( $posts as $post ) {
+				if ( $replace_uncategorized ) {
+					$post_categories = wp_get_post_categories( $post->ID );
+					if ( count( $post_categories ) === 1 && in_array( 1, $post_categories ) ) { // 1 is the ID of uncategorized
+						// Remove uncategorized and set only the new category
+						wp_set_post_terms( $post->ID, [ $category->term_id ], 'category', false );
+						WP_CLI::line( sprintf( "Replaced 'uncategorized' with '%s' for post ID %d.", $category->name, $post->ID ) );
+						continue;
+					}
+				}
+
+				// Add the new category while keeping existing ones.
 				wp_set_post_terms( $post->ID, [ $category->term_id ], 'category', true );
 				WP_CLI::line( sprintf( "Updated ID %d with Category '%s.'", $post->ID, $category->name ) );
+			}
+
+			$converted_terms[] = $term;
+		}
+
+		// Delete old terms if requested.
+		if ( $delete_old_terms && ! empty( $converted_terms ) ) {
+			WP_CLI::line( 'Deleting old taxonomy terms...' );
+			foreach ( $converted_terms as $term ) {
+				$result = wp_delete_term( $term->term_id, $taxonomy );
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( sprintf( "Failed to delete term '%s': %s", $term->name, $result->get_error_message() ) );
+				} else {
+					WP_CLI::line( sprintf( "Deleted term '%s'", $term->name ) );
+				}
 			}
 		}
 
@@ -794,7 +855,7 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 
 		$term_taxonomy_count = 0;
 		foreach ( $results as $row ) {
-			$term_taxonomy_count ++;
+			++$term_taxonomy_count;
 			$term_taxonomy_ids[] = $row->term_taxonomy_id;
 			$term_ids[]          = $row->term_id;
 		}
@@ -1176,7 +1237,7 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 
 		if ( ! empty( $dupes ) ) {
 			$object_ids = array_map(
-				function( $dupe ) {
+				function ( $dupe ) {
 					return $dupe->object_id;
 				},
 				$dupes
@@ -1599,7 +1660,7 @@ class TaxonomyMigrator implements RegisterCommandInterface {
 		}
 
 		return array_map(
-			function( $duplicate_slug ) {
+			function ( $duplicate_slug ) {
 				unset( $duplicate_slug->taxonomies );
 				return $duplicate_slug;
 			},
