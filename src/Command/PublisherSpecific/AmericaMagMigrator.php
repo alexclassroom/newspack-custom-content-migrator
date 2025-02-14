@@ -2,7 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
+use Newspack\Guest_Contributor_Role;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\FgHelper;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
@@ -13,6 +15,8 @@ use WP_CLI;
 class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
+
+	const META_KEY_PROFILE_POST_ID = '_np_migration_profile_post_id';
 
 	/**
 	 * Batch counts of imported nodes per type per CLI run.
@@ -77,6 +81,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-profiles',
+			self::get_command_closure( 'cmd_profiles' ),
+			[
+				'shortdesc' => 'America Mag Profiles (to guest contributors)',
+			]
+		);
 	}
 
 	/**
@@ -126,6 +138,131 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Call NMT's migrator using a unique migration name.
 		$this->fg_helper = new FgHelper( 'drupal' );
 		$this->fg_helper->import( $pos_args, $assoc_args );
+	}
+
+	/**
+	 * Run command Profiles to guest contributor.
+	 * 			
+	 * Note: profile post's post_name is imported from Drupal (it's not just the sanitized post_title).
+	 * Instead it will match to the old_url in fg redirects. We could try to use this as the 
+	 * "user_nicename" (url slug) so that redirect are easier, or we can re-sanitized the wordpress
+	 * way. Hmm...we're doing to have to do redirects anyway, and wp_fg_redirects has the old_urls
+	 * and the P2 Guest Contributors standization project recommends to have nice urls so that CAP
+	 * co-authors taxonomies match to the user better, so let's build from the pretty post_title instead of 
+	 * using the old post_name from drupal.
+	 * 
+	 */
+	public function cmd_profiles( array $pos_args, array $assoc_args ): void {
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		// Newspack Plugin is required.
+		if ( ! defined( '\Newspack\Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME' ) ) {
+			$this->logger->error( 'Newspack Plugin Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME not found.' );
+			exit();
+		}
+
+		// Loop through all profile post type rows.
+		(new Posts())->throttled_posts_loop( 
+			[
+				'post_type' => 'profile',
+			], 
+			function( $post ) {
+				
+				$this->logger->info( '-- Profile Post ID: ' . $post->ID );
+
+				// -- Check for existing user.
+
+				$existing_check = new \WP_User_Query([
+					'meta_key'   => self::META_KEY_PROFILE_POST_ID,
+					'meta_value' => $post->ID
+				]);
+
+				if ( ! empty( $existing_check->get_results() ) ) {
+					$this->logger->notice( 'Skip: Already migrated.' );
+					return;
+				}
+
+				// -- New User.
+
+				$userdata = [];
+
+				// Use the pretty post title for the display name.
+				// core bug if display name is not cut to 250 chars: https://core.trac.wordpress.org/ticket/53109
+				$userdata['display_name'] = trim( mb_substr( trim( $post->post_title ), 0, 250 ) ); // trim and cut to db max.
+				if ( empty( $userdata['display_name'] ) ) {
+					$this->logger->warning( 'Skip: Profile display_name must not be empty.' );
+					return;
+				}
+
+				// build this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
+				$userdata['nickname'] = $userdata['display_name'];
+
+				// build the user_nicename using the pretty title and the wp_insert_user functions. Try to pre-catch insert errors.
+				// build this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
+				$userdata['user_nicename'] = trim( mb_substr( sanitize_title( sanitize_user( trim( $post->post_title ), true ) ), 0, 50 ) );
+				if ( empty( $userdata['user_nicename'] ) ) {
+					$this->logger->warning( 'Skip: Profile user_nicename must not be empty.' );
+					return;
+				}
+
+				// cut down on errors by getting a unique user login with random value for better security (P2 Guest Contributors standization).
+				$userdata['user_login'] = $this->util_user_login_unique_with_random( $post->post_title );
+				
+				// Build email from the unique user_login. 
+				$userdata['user_email'] = $this->util_user_dummy_email_unique_with_random( $post->post_title );
+				
+				// Other user values.
+				$userdata['user_pass']     = wp_generate_password(); // generate else wp will write to debug.log.
+				$userdata['description']   = $post->post_content;
+				$userdata['role']          = Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME;
+
+				// User meta.
+				$userdata['meta_input'] = [];
+				$userdata['meta_input'][ self::META_KEY_PROFILE_POST_ID ] = $post->ID;
+
+				// Insert.
+				$user_id = wp_insert_user( $userdata );
+
+				// Fail on any errors.
+				if ( is_wp_error( $user_id ) ) {
+					$this->logger->error( "wp_insert_user failed with wp_error: " . json_encode( $user_id ) );
+					exit();
+				}
+				// Fail if wp_insert_user didn't return a positive int (return of 0 can happen on other failures...)
+				// core bug that results in 0 integer value: https://core.trac.wordpress.org/ticket/53109
+				if ( ! is_int( $user_id ) || ! ( $user_id > 0 ) ) {
+					// encode error incase type isn't a scalar.
+					$this->logger->error( "wp_insert_user returned a non-positive integer: " . json_encode( $user_id ) );
+					exit();
+				}
+
+				// Simple Local Avatars.
+				$thumbnail_id = get_post_meta( $post->ID, '_thumbnail_id', true );
+				if ( is_numeric( $thumbnail_id ) && $thumbnail_id > 0 ) {
+					$simple_local_avatar = [
+						'media_id' => $thumbnail_id,
+						'full'     => wp_get_attachment_url( $thumbnail_id ),
+						'blog_id'  => get_current_blog_id(),
+					];
+					update_user_meta( $user_id, 'simple_local_avatar', $simple_local_avatar );
+				}
+
+				exit();
+
+			},
+			0,
+			1
+		);
+
+
+
+// after profiles are created, need to loop through postmeta for posts and assign new users to posts...
+
+
+
+
 	}
 
 	/************************
@@ -558,4 +695,69 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		return $options;
 	}
+
+	/************************************
+	  UTILS
+	************************************/
+
+	// Guest_Contributor_Role::get_dummy_email_address() doesn't use unique check.
+	private function util_user_dummy_email_unique_with_random( $username_in ) {
+
+		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
+
+		$suffix = '-' . rand( 11111, 99999 ) . '@' . Guest_Contributor_Role::get_dummy_email_domain();
+
+		$maxlen = 100 - mb_strlen( $suffix ); // hard coded from sql structure.
+
+		$email_prefix = trim( mb_substr( $username_in, 0, $maxlen ) );
+		
+		$append_count = 1; // use 1 so that the first duplicate starts on "-2" for the 2nd user.
+		
+		while( \email_exists( $email_prefix . $suffix ) ) {
+			
+			if( $append_count > 9999 ) {
+				// if we've tried email_exists() too many times, stop. this could cause ininite loop.
+				throw new Error( 'util_user_unique_email could be in an infinite loop.' );
+			}
+
+			$append = '-' . ( ++$append_count );
+			
+			// make room for the appended value if needed. trim any ending spaces from cut.
+			$email_prefix = trim( mb_substr( $username_in, 0, $maxlen - mb_strlen( $append ) ) ) . $append;
+			
+		} 
+				
+		return $email_prefix . $suffix;
+	}
+
+	// dont use Guest_Contributor_Role::generate_username() - fails if post_name is 60+ chars.
+	private function util_user_login_unique_with_random( $username_in ) {
+
+		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
+
+		$suffix = '-' . rand( 11111, 99999 );
+
+		$maxlen = 60 - mb_strlen( $suffix ); // hard coded from sql structure.
+
+		$username_prefix = trim( mb_substr( $username_in, 0, $maxlen ) );
+		
+		$append_count = 1; // use 1 so that the first duplicate starts on "-2" for the 2nd user.
+		
+		while( \username_exists( $username_prefix . $suffix ) ) {
+			
+			if( $append_count > 9999 ) {
+				// if we've tried username_exists() too many times, stop. this could cause ininite loop.
+				throw new Error( 'util_user_unique_username could be in an infinite loop.' );
+			}
+
+			$append = '-' . ( ++$append_count );
+			
+			// make room for the appended value if needed. trim any ending spaces from cut.
+			$username_prefix = trim( mb_substr( $username_in, 0, $maxlen - mb_strlen( $append ) ) ) . $append;
+			
+		} 
+				
+		return $username_prefix . $suffix;
+	}
+
 }
