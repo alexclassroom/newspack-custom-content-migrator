@@ -67,6 +67,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * @return void
 	 */
 	public static function register_commands(): void {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-co-authors',
+			self::get_command_closure( 'cmd_co_authors' ),
+			[
+				'shortdesc' => 'Set co-authors per post.',
+			]
+		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-import',
 			self::get_command_closure( 'cmd_import' ),
@@ -90,6 +99,89 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
 			]
 		);
+	}
+
+	/**
+	 * Run co-authors per post.
+	 */
+	public function cmd_co_authors( array $pos_args, array $assoc_args ): void {
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		// CAP Plugin is required.
+		if ( ! is_plugin_active( "co-authors-plus/co-authors-plus.php" ) ) {
+			$this->logger->error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+		
+		global $coauthors_plus;
+
+		// Loop through all posts.
+		(new Posts())->throttled_posts_loop( 
+			[], 
+			function( $post ) use ( $coauthors_plus ) {
+				
+				$this->logger->info( '-- Post ID: ' . $post->ID );
+
+				if ( $coauthors_plus->has_author_terms( $post->ID ) ) {
+					$this->logger->notice( 'Authors already set.' );
+					return;
+				}
+
+				// Migrated author list points to profile post type.
+				$by_author = get_post_meta( $post->ID, 'by_author', true );
+				if ( empty( $by_author ) ) {
+					$this->logger->warning( 'Skip: No by_author value.' );
+					return;
+				}
+				if ( ! is_array( $by_author ) ) {
+					$this->logger->warning( 'Skip: by_author value is not array.' );
+					return;
+				}
+
+				// The migration seemed to insert the same profile post id multiple times.
+				// - keep order so "first" author is still "first" in byline.
+				$by_author = array_unique( $by_author );
+
+				// Match each profile post id to user meta id
+				$co_authors = [];
+				foreach( $by_author as $profile_post_id ) {
+
+					$this->logger->info( 'Profile post id: ' . $profile_post_id );
+
+					$users = get_users([
+						'meta_key' => self::META_KEY_PROFILE_POST_ID,
+   						'meta_value' => $profile_post_id,
+						'fields' => 'ids',
+					]);
+					if ( empty( $users ) ) {
+						$this->logger->warning( 'Skip: No user matched to meta.' );
+						return;
+					}
+					if ( 1 !==  count( $users ) ) {
+						$this->logger->warning( 'Skip: user match count <> 1.' );
+						return;
+					}
+
+					// Get, print, and add user_id to co authors
+					$user_id = reset( $users );
+					$this->logger->info( 'User ID is: ' . $user_id );
+					$co_authors[] = $user_id;
+				}
+
+				// Add co-authors to post
+				$this->logger->info( 'co-authors (wp_users): ' . implode( ",", $co_authors ) );
+				
+				if ( ! $coauthors_plus->add_coauthors( $post->ID, $co_authors, false, 'id' ) ) {
+					$this->logger->warning( 'Skip: unable to assign co-authors.' );
+					return;
+				}
+
+			} // callback function
+		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
 	}
 
 	/**
