@@ -11,6 +11,7 @@ use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
+use WP_Error;
 
 class AmericaMagMigrator implements RegisterCommandInterface {
 
@@ -163,12 +164,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			exit();
 		}
 
+		// Simple Local Avatars is required..
+		if ( ! is_plugin_active( "simple-local-avatars/simple-local-avatars.php" ) ) {
+			$this->logger->error( 'Simple Local Avatars plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+		
+		$simple_avatars = new \Simple_Local_Avatars();
+
 		// Loop through all profile post type rows.
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type' => 'profile',
 			], 
-			function( $post ) {
+			function( $post ) use( $simple_avatars ) {
 				
 				$this->logger->info( '-- Profile Post ID: ' . $post->ID );
 
@@ -196,22 +205,30 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					return;
 				}
 
-				// build this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
+				// Set this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
 				$userdata['nickname'] = $userdata['display_name'];
 
-				// build the user_nicename using the pretty title and the wp_insert_user functions. Try to pre-catch insert errors.
-				// build this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
+				// Build the user_nicename using the pretty title and the wp_insert_user functions. Try to pre-catch insert errors.
+				// Do this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
 				$userdata['user_nicename'] = trim( mb_substr( sanitize_title( sanitize_user( trim( $post->post_title ), true ) ), 0, 50 ) );
 				if ( empty( $userdata['user_nicename'] ) ) {
 					$this->logger->warning( 'Skip: Profile user_nicename must not be empty.' );
 					return;
 				}
 
-				// cut down on errors by getting a unique user login with random value for better security (P2 Guest Contributors standization).
+				// Cut down on errors by getting a unique user login with random value for better security (P2 Guest Contributors standization).
 				$userdata['user_login'] = $this->util_user_login_unique_with_random( $post->post_title );
-				
-				// Build email from the unique user_login. 
+				if( is_wp_error( $userdata['user_login'] ) ) {
+					$this->logger->error( "util_user_login_unique_with_random failed with wp_error: " . json_encode( $userdata['user_login'] ) );
+					exit();
+				}
+
+				// Cut down on errors by getting a unique user email with random value for better security (P2 Guest Contributors standization).
 				$userdata['user_email'] = $this->util_user_dummy_email_unique_with_random( $post->post_title );
+				if( is_wp_error( $userdata['user_email'] ) ) {
+					$this->logger->error( "util_user_dummy_email_unique_with_random failed with wp_error: " . json_encode( $userdata['user_email'] ) );
+					exit();
+				}
 				
 				// Other user values.
 				$userdata['user_pass']     = wp_generate_password(); // generate else wp will write to debug.log.
@@ -238,31 +255,19 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					exit();
 				}
 
+				$this->logger->info( 'Inserted wp user id: ' . $user_id );
+
 				// Simple Local Avatars.
 				$thumbnail_id = get_post_meta( $post->ID, '_thumbnail_id', true );
 				if ( is_numeric( $thumbnail_id ) && $thumbnail_id > 0 ) {
-					$simple_local_avatar = [
-						'media_id' => $thumbnail_id,
-						'full'     => wp_get_attachment_url( $thumbnail_id ),
-						'blog_id'  => get_current_blog_id(),
-					];
-					update_user_meta( $user_id, 'simple_local_avatar', $simple_local_avatar );
+					$simple_avatars->assign_new_user_avatar( $thumbnail_id, $user_id );
+					$this->logger->info( 'Avatar set to thumbnail_id: ' . $thumbnail_id ); 
 				}
 
-				exit();
+			} // callback function
+		); // throttled posts
 
-			},
-			0,
-			1
-		);
-
-
-
-// after profiles are created, need to loop through postmeta for posts and assign new users to posts...
-
-
-
-
+		$this->logger->info( 'Done.' ); 
 	}
 
 	/************************
@@ -700,64 +705,64 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	  UTILS
 	************************************/
 
-	// Guest_Contributor_Role::get_dummy_email_address() doesn't use unique check.
-	private function util_user_dummy_email_unique_with_random( $username_in ) {
+	private function util_user_dummy_email_unique_with_random( $username_in ): string|WP_Error {
 
+		// sanitize since input could be "Pretty Name".
 		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
 
-		$suffix = '-' . rand( 11111, 99999 ) . '@' . Guest_Contributor_Role::get_dummy_email_domain();
+		// hard code char length from db.
+		$db_max_chars = 100; 
 
-		$maxlen = 100 - mb_strlen( $suffix ); // hard coded from sql structure.
+		$email_suffix = '@' . Guest_Contributor_Role::get_dummy_email_domain();
 
-		$email_prefix = trim( mb_substr( $username_in, 0, $maxlen ) );
-		
-		$append_count = 1; // use 1 so that the first duplicate starts on "-2" for the 2nd user.
-		
-		while( \email_exists( $email_prefix . $suffix ) ) {
-			
-			if( $append_count > 9999 ) {
-				// if we've tried email_exists() too many times, stop. this could cause ininite loop.
-				throw new Error( 'util_user_unique_email could be in an infinite loop.' );
+		// stop infinite loops.
+		$attempts = 0;
+
+		do {
+
+			if( ++$attempts > 9999 ) {
+				// stop...this could cause an ininite loop.
+				return new WP_Error( 'Might be in an infinite loop.' );
 			}
 
-			$append = '-' . ( ++$append_count );
-			
-			// make room for the appended value if needed. trim any ending spaces from cut.
-			$email_prefix = trim( mb_substr( $username_in, 0, $maxlen - mb_strlen( $append ) ) ) . $append;
-			
-		} 
+			// try a different random suffix on each loop
+			$suffix = '-' . rand( 11111, 99999 ) . $email_suffix;
+
+			// make room in the username if needed for the random suffix, then add it to the string.
+			$username_out = trim( mb_substr( $username_in, 0, $db_max_chars - mb_strlen( $suffix ) ) ) . $suffix;
+
+		} while( \username_exists( $username_out ) );
 				
-		return $email_prefix . $suffix;
+		return $username_out;
 	}
 
-	// dont use Guest_Contributor_Role::generate_username() - fails if post_name is 60+ chars.
-	private function util_user_login_unique_with_random( $username_in ) {
+	private function util_user_login_unique_with_random( $username_in ): string|WP_Error {
 
+		// sanitize since input could be "Pretty Name".
 		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
 
-		$suffix = '-' . rand( 11111, 99999 );
+		// hard code char length from db.
+		$db_max_chars = 60; 
 
-		$maxlen = 60 - mb_strlen( $suffix ); // hard coded from sql structure.
+		// stop infinite loops.
+		$attempts = 0;
 
-		$username_prefix = trim( mb_substr( $username_in, 0, $maxlen ) );
-		
-		$append_count = 1; // use 1 so that the first duplicate starts on "-2" for the 2nd user.
-		
-		while( \username_exists( $username_prefix . $suffix ) ) {
-			
-			if( $append_count > 9999 ) {
-				// if we've tried username_exists() too many times, stop. this could cause ininite loop.
-				throw new Error( 'util_user_unique_username could be in an infinite loop.' );
+		do {
+
+			if( ++$attempts > 9999 ) {
+				// stop...this could cause an ininite loop.
+				return new WP_Error( 'Might be in an infinite loop.' );
 			}
 
-			$append = '-' . ( ++$append_count );
-			
-			// make room for the appended value if needed. trim any ending spaces from cut.
-			$username_prefix = trim( mb_substr( $username_in, 0, $maxlen - mb_strlen( $append ) ) ) . $append;
-			
-		} 
+			// try a different random suffix on each loop
+			$suffix = '-' . rand( 11111, 99999 );
+
+			// make room in the username if needed for the random suffix, then add it to the string.
+			$username_out = trim( mb_substr( $username_in, 0, $db_max_chars - mb_strlen( $suffix ) ) ) . $suffix;
+
+		} while( \username_exists( $username_out ) );
 				
-		return $username_prefix . $suffix;
+		return $username_out;
 	}
 
 }
