@@ -1238,6 +1238,30 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-blog-author-qa',
+			self::get_command_closure( 'cmd_blog_author_qa' ),
+			[
+				'shortdesc' => 'Generates a QA File which compares blog authors with their actual post authors.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'topics',
+						'description' => 'Path to topics.csv file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'bloggers',
+						'description' => 'Path to bloggers.csv file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
 	}
 
 	/**
@@ -5740,6 +5764,138 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			$qa_row['new_author_display_name'] = $co_author_display_names;
 			$qa_row['successfully_assigned'] = strtolower( $co_author_display_names ) === strtolower( $qa_row['original_byline'] ) ? 'Yes' : 'No';
 			fputcsv( $qa_file, $qa_row );
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
+		fclose( $qa_file );
+	}
+
+	/**
+	 * Using original import CSV files, verify that the author's nicename matches the original author's name. Log the
+	 * results to a CSV file for review.
+	 *
+	 * @param array $args Command arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 */
+	public function cmd_blog_author_qa( array $args, array $assoc_args ) {
+		$topics_csv   = $assoc_args['topics'];
+		$bloggers_csv = $assoc_args['bloggers'];
+
+		$bloggers_by_id    = [];
+		$bloggers_iterable = ( new FileImportFactory() )->get_file( $bloggers_csv )->getIterator();
+		foreach ( $bloggers_iterable as $row ) {
+			$bloggers_by_id[ $row['blogger_user_id'] ] = [
+				'blogger_user_name' => $row['blogger_user_name'],
+				'blogger_email'     => $row['blogger_email'],
+			];
+		}
+
+		$topics_iterable = ( new FileImportFactory() )->get_file( $topics_csv )->getIterator();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- just need a quick and easy way to do this.
+		$qa_file = fopen( 'blog_author_qa.csv', 'w' );
+		$header  = [
+			'topic_id'                 => null,
+			'original_byline'          => null,
+			'original_posted_by'       => null,
+			'original_author_email'    => null,
+			'post_id'                  => null,
+			'post_author_id'           => null,
+			'post_author_nicename'     => null,
+			'post_author_email'        => null,
+			'post_author_display_name' => null,
+			'author_nicename'          => null,
+			'author_email'             => null,
+			'author_display_name'      => null,
+		];
+		fputcsv(
+			$qa_file,
+			array_keys( $header )
+		);
+
+		global $wpdb;
+
+		foreach ( $topics_iterable as $row ) {
+			echo "\n";
+			$qa_row             = $header;
+			$qa_row['topic_id'] = $row['topic_id'];
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'topic_id' AND meta_value = %d",
+					$row['topic_id']
+				)
+			);
+
+			if ( empty( $post_ids ) ) {
+				ConsoleColor::bright_magenta( 'No post IDs found for topic ID: ' . $row['topic_id'] )->output();
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			if ( count( $post_ids ) > 1 ) {
+				ConsoleColor::cyan( 'Multiple post IDs found for topic ID: ' . $row['topic_id'] )->output();
+			} else {
+				ConsoleColor::underlined_white( 'Topic ID:' )->underlined_bright_white( $row['topic_id'] )->output();
+			}
+
+			foreach ( $post_ids as $post_id ) {
+				$qa_row_copy            = $qa_row;
+				$qa_row_copy['post_id'] = $post_id;
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts WHERE ID = %d",
+						$post_id
+					)
+				);
+
+				$qa_row_copy['post_author_id'] = $post->post_author;
+
+				ConsoleColor::white( 'Post ID: ' )
+							->bright_white( $post_id )
+							->white( 'Status:' )
+							->bright_white( $post->post_status )
+							->white( 'Type:' )
+							->bright_white( $post->post_type )
+							->output();
+
+				if ( ! empty( $row['old_site'] ) ) {
+					ConsoleColor::white( 'Site:' )->bright_white( $row['old_site'] )->output();
+				} else {
+					ConsoleColor::white( 'Site:' )->bright_yellow( 'NO SITE INDICATED' )->output();
+				}
+
+
+				$qa_row_copy['original_byline'] = $row['blogger_user_name'];
+
+				if ( array_key_exists( $row['blogger_user_id'], $bloggers_by_id ) ) {
+					$qa_row_copy['original_author_email'] = $bloggers_by_id[ $row['blogger_user_id'] ]['blogger_email'];
+				}
+
+				$post_author = get_user_by( 'id', $post->post_author );
+
+				if ( $post_author ) {
+					$qa_row_copy['post_author_nicename']     = $post_author->user_nicename;
+					$qa_row_copy['post_author_email']        = $post_author->user_email;
+					$qa_row_copy['post_author_display_name'] = $post_author->display_name;
+				}
+
+				$authors = get_coauthors( $post_id );
+				if ( empty( $authors ) ) {
+					ConsoleColor::bright_magenta( 'No authors found for post ID: ' . $post_id )->output();
+					fputcsv( $qa_file, $qa_row_copy );
+					continue;
+				}
+
+				$author                             = reset( $authors );
+				$qa_row_copy['author_nicename']     = $author->user_nicename;
+				$qa_row_copy['author_email']        = $author->user_email;
+				$qa_row_copy['author_display_name'] = $author->display_name;
+
+				fputcsv( $qa_file, $qa_row_copy );
+			}
 		}
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
