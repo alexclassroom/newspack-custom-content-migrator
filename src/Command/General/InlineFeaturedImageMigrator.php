@@ -1,4 +1,9 @@
 <?php
+/**
+ * Featured Image Migrator.
+ * 
+ * @package NewspackCustomContentMigrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\General;
 
@@ -139,6 +144,13 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-status',
+						'description' => 'Optional CSV of post statuses to process (e.g. publish,draft). If not provided, will process publish,future,draft,pending,private,inherit.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -167,6 +179,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 		$post_ids                 = isset( $assoc_args['post-ids-csv'] ) && ! empty( $assoc_args['post-ids-csv'] ) ? explode( ',', $assoc_args['post-ids-csv'] ) : null;
 		$post_id_from             = isset( $assoc_args['post-id-from'] ) && ! empty( $assoc_args['post-id-from'] ) ? $assoc_args['post-id-from'] : null;
 		$post_id_to               = isset( $assoc_args['post-id-to'] ) && ! empty( $assoc_args['post-id-to'] ) ? $assoc_args['post-id-to'] : null;
+		$post_statuses            = isset( $assoc_args['post-status'] ) && ! empty( $assoc_args['post-status'] ) ? explode( ',', $assoc_args['post-status'] ) : [ 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ];
 		// If --post-ids-csv, can't use --post-id-from and --post-id-to.
 		if ( $post_ids && ( $post_id_from || $post_id_to ) ) {
 			WP_CLI::error( "Can't use both --post-ids-csv and --post-id-from/--post-id-to." );
@@ -182,18 +195,21 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 		// Get post ID range if specified.
 		if ( ! $post_ids && ( $post_id_from && $post_id_to ) ) {
 			WP_CLI::line( sprintf( 'Fetching post IDs in range between %d and %d...', $post_id_from, $post_id_to ) );
-			$post_ids = $wpdb->get_col(
+			$post_status_placeholders = implode( ',', array_fill( 0, count( $post_statuses ), '%s' ) );
+			// phpcs:disable -- variable is sanitized WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$post_ids                 = $wpdb->get_col(
 				$wpdb->prepare(
 					"select ID
 					from {$wpdb->posts}
 					where post_type = 'post'
-					and post_status IN ( 'publish', 'future', 'draft', 'pending', 'private', 'inherit' ) 
+					and post_status IN ( $post_status_placeholders )
 					and ID >= %d
 					and ID <= %d ;",
 					$post_id_from,
 					$post_id_to
 				)
 			);
+			// phpcs:enable
 			if ( empty( $post_ids ) ) {
 				WP_CLI::error( 'No post IDs found in range.' );
 			}
@@ -205,7 +221,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 		}
 
 		// Timestamp log.
-		$this->logger->log( $log, sprintf( 'Starting %s', date( 'Y-m-d H:I:s' ) ) );
+		$this->log( $log, sprintf( 'Starting %s', gmdate( 'Y-m-d H:I:s' ) ) );
 
 		// Go through IDs.
 		foreach ( $post_ids as $key_post_id => $post_id ) {
@@ -256,7 +272,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 				$image_blocks = $this->get_image_blocks_from_post_content_blocks( parse_blocks( $post_content ) );
 				foreach ( $image_blocks as $image_block ) {
 					if ( $image_block['attrs']['id'] == $thumbnail_id ) {
-						$this->logger->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
+						$this->log( $log, sprintf( 'Post ID %d — Featured image used in image block.', $post_id ), $this->logger::SUCCESS );
 						$featured_image_used_in_post_content = true;
 
 						break;
@@ -268,7 +284,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
+					$this->log( $log, sprintf( 'Post ID %d -- featured image hidden, image used somewhere in post_content', $post_id ), $this->logger::SUCCESS );
 					continue;
 				}           
 			} else {
@@ -350,7 +366,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 					if ( ! $dry_run ) {
 						update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 					}
-					$this->logger->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
+					$this->log( $log, sprintf( 'Post ID %d -- featured image hidden, post_content starts with same image', $post_id ), $this->logger::SUCCESS );
 					continue;
 				}           
 			}
@@ -417,7 +433,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 				}
 			}
 
-			// Check if Featured Image was set from Gutenberg Blocks. If so, continue with the next post
+			// Check if Featured Image was set from Gutenberg Blocks. If so, continue with the next post.
 			if ( $has_set_featured_image_from_blocks ) {
 				WP_CLI::line( sprintf( '✓ Updated Featured Image from core/image Gutenberg block. Attachment ID %d', $image_block['attrs']['id'] ) );
 				continue;
@@ -614,7 +630,7 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 
 		$this->post_logic->throttled_posts_loop(
 			$query_args, 
-			function ( $post_id ) use( $log_file, &$counter ) {
+			function ( $post_id ) use ( $log_file, &$counter ) {
 
 				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 
@@ -634,12 +650,15 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 	/**
 	 * Returns an array of all "core/image" blocks from the given
 	 * array of post content blocks.
+	 * 
+	 * @param array $post_content_blocks Array of post content blocks.
+	 * @return array Array of image blocks.
 	 */
 	private function get_image_blocks_from_post_content_blocks( array $post_content_blocks ): array {
 		$image_blocks = [];
 
 		foreach ( $post_content_blocks as $block ) {
-			if ( $block['blockName'] === 'core/image' && ! empty( $block['attrs']['id'] ) ) {
+			if ( 'core/image' === $block['blockName'] && ! empty( $block['attrs']['id'] ) ) {
 				$image_blocks[] = $block;
 			} elseif ( ! empty( $block['innerBlocks'] ) ) {
 				$image_blocks = array_merge( $image_blocks, $this->get_image_blocks_from_post_content_blocks( $block['innerBlocks'] ) );
@@ -647,5 +666,15 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 		}
 
 		return $image_blocks;
+	}
+
+	/**
+	 * Logs error message to file.
+	 *
+	 * @param string $file Full file path.
+	 * @param string $msg  Error message.
+	 */
+	public function log( $file, $msg ) {
+		file_put_contents( $file, $msg . "\n", FILE_APPEND );
 	}
 }
