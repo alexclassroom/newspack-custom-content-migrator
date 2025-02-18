@@ -675,6 +675,6 @@ class InlineFeaturedImageMigrator implements RegisterCommandInterface {
 	 * @param string $msg  Error message.
 	 */
 	public function log( $file, $msg ) {
-		file_put_contents( $file, $msg . "\n", FILE_APPEND );
+		file_put_contents( $file, $msg . "\n", FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
 	}
 }
