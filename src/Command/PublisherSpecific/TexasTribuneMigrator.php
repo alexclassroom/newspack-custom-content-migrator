@@ -16,7 +16,6 @@ use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
 use Newspack\MigrationTools\Logic\UsersHelper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
-use Newspack\MigrationTools\Logic\UsersHelper;
 use CoAuthors_Plus;
 use WP_CLI;
 use WP_Error;
@@ -112,6 +111,28 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * @var string
 	 */
 	private const SPONSOR_TAXONOMY = 'newspack_spnsrs_tax';
+
+	/**
+	 * List of tags that should be treated as categories under "Topics".
+	 *
+	 * @var array<string>
+	 */
+	private const TAGS_AS_TOPICS = [
+		'congress',
+		'courts',
+		'criminal justice',
+		'demographics',
+		'economy',
+		'energy',
+		'environment',
+		'health care',
+		'higher education',
+		'immigration',
+		'politics',
+		'public education',
+		'state government',
+		'transportation',
+	];
 
 	/**
 	 * Staff organization.
@@ -449,11 +470,12 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		// Handle tags.
 		if ( ! empty( $article_data['metadata']['user_facing_tags'] ) ) {
 			$this->handle_post_tags( $post_id, $article_data['metadata']['user_facing_tags'] );
+			$this->handle_post_topics( $post_id, $article_data['metadata']['user_facing_tags'] );
 		}
 
 		// Handle series.
 		if ( ! empty( $article_data['metadata']['series'] ) ) {
-			$this->handle_post_series( $post_id, $article_data['metadata']['series'] );
+			$this->handle_post_series( $post_id, $article_data['metadata']['series'], $article_data['metadata']['series_kicker']['name'] ?? null );
 		}
 
 		// Handle featured image.
@@ -497,23 +519,24 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			]
 		);
 
-		// Update modification date directly in the database.
-		if ( ! empty( $article_data['metadata']['date_modified'] ) ) {
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-			$wpdb->update(
-				$wpdb->posts,
-				[
-					'post_modified'     => $article_data['metadata']['date_modified'],
-					'post_modified_gmt' => get_gmt_from_date( $article_data['metadata']['date_modified'] ),
-				],
-				[ 'ID' => $post_id ]
-			);
-		}
-
 		// Handle articlelink.
 		if ( 'articlelink' === $article_data['metadata']['type'] ) {
 			$this->handle_articlelink( $post_id, $article_data['metadata']['headline'], $article_data['metadata']['url_override'] );
 		}
+
+		// Handle authors and contributors.
+		$this->handle_authors_and_contributors( $post_id, $article_data['metadata']['authors'], $article_data['metadata']['contributors'] );
+
+		// Update modification date directly in the database.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$wpdb->update(
+			$wpdb->posts,
+			[
+				'post_modified'     => $article_data['metadata']['date_modified'] ?? $article_data['metadata']['date_published'],
+				'post_modified_gmt' => get_gmt_from_date( $article_data['metadata']['date_modified'] ?? $article_data['metadata']['date_published'] ),
+			],
+			[ 'ID' => $post_id ]
+		);
 
 		ConsoleColor::green( sprintf( 'MIGRATED_POST,%s,%s', $article_data['metadata']['article_url'], get_permalink( $post_id ) ) )->output();
 	}
@@ -1065,10 +1088,16 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 */
 	private function handle_post_tags( int $post_id, array $tag_ids ): void {
 		$tag_ids_to_set = [];
+
 		foreach ( $tag_ids as $tag_id ) {
 			$tag_data = $this->get_tag_data( $tag_id );
 			if ( null !== $tag_data ) {
-				// Get or create parent tag.
+				// Skip if this tag should be treated as a topic category.
+				if ( in_array( $tag_data['name'], self::TAGS_AS_TOPICS, true ) ) {
+					continue;
+				}
+
+				// Handle regular tags.
 				$parent_term = get_term_by( 'name', $tag_data['parent_name'], 'post_tag' );
 				if ( ! $parent_term ) {
 					$parent_result = wp_insert_term( ucfirst( $tag_data['parent_name'] ), 'post_tag' );
@@ -1115,19 +1144,60 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			}
 		}
 
+		// Set regular tags.
 		if ( ! empty( $tag_ids_to_set ) ) {
 			wp_set_post_tags( $post_id, $tag_ids_to_set, false );
 		}
 	}
 
 	/**
-	 * Handle series for a post.
+	 * Handle topic categories for a post.
 	 *
 	 * @param int   $post_id Post ID.
-	 * @param array $series_ids Array of series IDs.
+	 * @param array $tag_ids Array of tag IDs.
 	 * @return void
 	 */
-	private function handle_post_series( int $post_id, array $series_ids ): void {
+	private function handle_post_topics( int $post_id, array $tag_ids ): void {
+		$category_ids_to_set = [];
+
+		// Get or create parent "Topics" category.
+		$topics_parent_term = $this->get_or_create_category( 'Topics' );
+		if ( ! $topics_parent_term ) {
+			ConsoleColor::red( 'Error creating parent Topics category' )->output();
+			return;
+		}
+
+		foreach ( $tag_ids as $tag_id ) {
+			$tag_data = $this->get_tag_data( $tag_id );
+			if ( null !== $tag_data && in_array( strtolower( $tag_data['name'] ), self::TAGS_AS_TOPICS, true ) ) {
+				// Create or get the topic category.
+				$topic_term = $this->get_or_create_category(
+					$tag_data['name'],
+					'',
+					$topics_parent_term->term_id
+				);
+
+				if ( $topic_term ) {
+					$category_ids_to_set[] = $topic_term->term_id;
+				}
+			}
+		}
+
+		// Set topic categories (append to existing categories).
+		if ( ! empty( $category_ids_to_set ) ) {
+			wp_set_post_categories( $post_id, $category_ids_to_set );
+		}
+	}
+
+	/**
+	 * Handle series for a post.
+	 *
+	 * @param int         $post_id Post ID.
+	 * @param array       $series_ids Array of series IDs.
+	 * @param string|null $series_kicker Optional. Series kicker.
+	 * @return void
+	 */
+	private function handle_post_series( int $post_id, array $series_ids, ?string $series_kicker = null ): void {
 		// Get or create parent "Series" category.
 		$parent_term = $this->get_or_create_category( 'Series' );
 		if ( ! $parent_term ) {
@@ -1154,7 +1224,18 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		}
 
 		if ( ! empty( $category_ids ) ) {
-			wp_set_post_categories( $post_id, $category_ids );
+			wp_set_post_categories( $post_id, $category_ids, true );
+		}
+
+		// Handle primary category.
+		if ( $series_kicker ) {
+			$primary_category = $this->get_or_create_category( $series_kicker );
+			if ( $primary_category ) {
+				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $primary_category->term_id );
+			}
+		} else {
+			// If no series_kicker, set the first category as primary.
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $category_ids[0] );
 		}
 	}
 
@@ -2484,6 +2565,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * @param string $url_override The URL override.
 	 */
 	private function handle_articlelink( int $post_id, string $post_title, string $url_override ): void {
+		// TODO: Check if both URLs are the same.
 		$post_url_relative = $this->get_post_url_relative( $post_id );
 		$this->redirection->create_redirection_rule_in_group(
 			$post_title,
