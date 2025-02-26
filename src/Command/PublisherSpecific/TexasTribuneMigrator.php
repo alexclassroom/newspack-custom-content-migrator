@@ -12,6 +12,8 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Redirection;
+use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
+use Newspack\MigrationTools\Logic\UsersHelper;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use Newspack\MigrationTools\Logic\UsersHelper;
@@ -49,11 +51,25 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	private Redirection $redirection;
 
 	/**
+	 * Instance of SimpleLocalAvatars.
+	 *
+	 * @var null|SimpleLocalAvatars
+	 */
+	private $simple_local_avatars_logic;
+
+	/**
 	 * Cache for sponsors data.
 	 *
 	 * @var array<string,array{name:string,url:string}>|null
 	 */
 	private ?array $sponsors_data = null;
+
+	/**
+	 * Cache for author map.
+	 *
+	 * @var array<string,array{name:string,slug:string}>|null
+	 */
+	private ?array $author_map = null;
 
 	/**
 	 * Cache for tags data.
@@ -98,6 +114,13 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	private const SPONSOR_TAXONOMY = 'newspack_spnsrs_tax';
 
 	/**
+	 * Staff organization.
+	 *
+	 * @var string
+	 */
+	private const STAFF_ORGANIZATION = 'The Texas Tribune';
+
+	/**
 	 * Track if height adjustment script has been added.
 	 *
 	 * @var bool
@@ -108,9 +131,10 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * Constructor.
 	 */
 	public function __construct() {
-		$this->block_generator = new GutenbergBlockGenerator();
-		$this->redirection     = new Redirection();
-		$this->co_authors_plus = new CoAuthors_Plus();
+		$this->block_generator            = new GutenbergBlockGenerator();
+		$this->redirection                = new Redirection();
+		$this->co_authors_plus            = new CoAuthors_Plus();
+		$this->simple_local_avatars_logic = new SimpleLocalAvatars();
 	}
 
 	/**
@@ -136,6 +160,12 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 					],
 					[
+						'type'        => 'assoc',
+						'name'        => 'author-map',
+						'description' => 'Path to the author map JSON file',
+						'optional'    => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'skip-imported',
 						'description' => 'Skip articles that have already been imported',
@@ -155,6 +185,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	public function cmd_migrate_data( $args, $assoc_args ): void {
 		$json_folder       = $assoc_args['json-folder'];
 		$sponsor_data_file = $assoc_args['sponsor-data'];
+		$author_map_file   = $assoc_args['author-map'];
 		$skip_imported     = isset( $assoc_args['skip-imported'] );
 
 		// Reset skipped counter.
@@ -168,11 +199,18 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			WP_CLI::error( sprintf( 'Sponsor data file not found: %s', $sponsor_data_file ) );
 		}
 
+		if ( ! file_exists( $author_map_file ) ) {
+			WP_CLI::error( sprintf( 'Author map file not found: %s', $author_map_file ) );
+		}
+
 		// Fetch all legacy IDs.
 		$this->fetch_all_legacy_ids();
 
 		// Load sponsor data (sponsors, etc.).
 		$this->load_sponsor_data( $sponsor_data_file );
+
+		// Load author map.
+		$this->load_author_map( $author_map_file );
 
 		// Fetch all series data.
 		$this->fetch_all_series_data();
@@ -190,6 +228,9 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 		// Process JSON files.
 		$processed = 0;
+
+		// Set default domain for email.
+		add_filter( 'nmt_user_email_default_domain', fn () => 'texastribune.org' );
 
 		foreach ( $this->json_directory_iterator( $json_folder, $skip_imported ) as $article_data ) {
 			try {
@@ -282,6 +323,46 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Load author map from JSON file.
+	 *
+	 * @param string $file_path Path to author map JSON file.
+	 */
+	private function load_author_map( string $file_path ): void {
+		$handle = fopen( $file_path, 'r' );
+		if ( ! $handle ) {
+			WP_CLI::error( sprintf( 'Could not open author map file: %s', $file_path ) );
+		}
+
+		$buffer = '';
+		while ( ! feof( $handle ) ) {
+			$buffer .= fgets( $handle );
+		}
+		fclose( $handle );
+
+		$data = json_decode( $buffer, true );
+		if ( JSON_ERROR_NONE !== json_last_error() ) {
+			WP_CLI::error( sprintf( 'Invalid JSON in author map file: %s', json_last_error_msg() ) );
+		}
+
+		if ( ! isset( $data['results'] ) || ! is_array( $data['results'] ) ) {
+			WP_CLI::error( 'Author map file does not contain a valid results array.' );
+		}
+
+		// Store authors indexed by their ID.
+		$this->author_map = [];
+		foreach ( $data['results'] as $author ) {
+			if ( isset( $author['id'] ) ) {
+				$this->author_map[ $author['id'] ] = $author;
+			}
+		}
+
+		ConsoleColor::green( 'Loaded' )
+			->bright_green( count( $this->author_map ) )
+			->green( 'authors from the author map.' )
+			->output();
+	}
+
+	/**
 	 * Process a single article.
 	 *
 	 * @param array $article_data Article data from JSON.
@@ -289,51 +370,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	private function process_article( array $article_data ): void {
 		global $wpdb;
 
-		// Process authors.
-		$post_author = null;
-		$authors     = [];
-
-		// Set default domain for email.
-		add_filter( 'nmt_user_email_default_domain', 'texastribune.org' );
-
-		// Process authors.
-		foreach ( $article_data['metadata']['authors'] as $author ) {
-			$user_data = [
-				'display_name' => $author['name'],
-			];
-
-			// Special case for Texas Tribune Staff.
-			if ( 1547 === intval( $author['id'] ) ) {
-				$user_data['user_email']    = 'multiple-staffs@example.com';
-				$user_data['user_login']    = 'multiple-staffs';
-				$user_data['user_nicename'] = 'texas-tribune-newsroom-fort-worth-amarillo-staffs';
-			} else {
-				$user_data['user_email'] = sanitize_title( $author['name'] ) . '@texastribune.org';
-				$user_data['user_login'] = sanitize_title( $author['name'] );
-			}
-
-			try {
-				$user = UsersHelper::create_or_get_user( $user_data, $author['id'] );
-			} catch ( Exception $e ) {
-				ConsoleColor::red( 'Error creating author (' )
-					->bright_red( $e->getCode() )
-					->red( '):' )
-					->underlined_bright_red( $e->getMessage() )
-					->output();
-				continue;
-			}
-
-			if ( null === $post_author ) {
-				$post_author = $user->ID;
-			}
-			$authors[ $user->ID ] = array_merge( [ 'wp_user_id' => $user->ID ], $author );
-		}
-
 		// Create post data.
 		$post_data = [
 			'post_title'   => $article_data['metadata']['headline'],
 			'post_status'  => $article_data['metadata']['is_published'] ? 'publish' : 'draft',
-			'post_author'  => $post_author,
+			// 'post_author'  => $post_author,
 			'post_excerpt' => $article_data['metadata']['summary'] ?? '',
 		];
 
@@ -383,26 +424,6 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 				->underlined_bright_red( $post_id->get_error_message() )
 				->output();
 			return;
-		}
-
-		// Handle co-authors and custom byline.
-		if ( ! empty( $authors ) ) {
-			// Co-authors.
-			$maybe_coauthors_have_been_set = $this->co_authors_plus->add_coauthors(
-				$post_id,
-				array_keys( $authors ),
-				false,
-				'id'
-			);
-
-			if ( ! $maybe_coauthors_have_been_set ) {
-				ConsoleColor::red( 'Error setting co-authors for post: ' )
-					->bright_red( $post_id )
-					->output();
-			}
-
-			// Custom byline.
-			$this->set_custom_byline( $post_id, $authors, $article_data['components'] );
 		}
 
 		// Show updated date.
@@ -519,28 +540,288 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get a user by display name.
+	 * Handle authors and contributors.
 	 *
-	 * @param string $display_name Display name.
-	 *
-	 * @return WP_User|null
+	 * @param int   $post_id The post ID.
+	 * @param array $authors_data The authors.
+	 * @param array $contributors_data The contributors.
 	 */
-	private function get_user_by_display_name( string $display_name ): ?WP_User {
-		global $wpdb;
+	private function handle_authors_and_contributors( int $post_id, array $authors_data, array $contributors_data ): void {
+		$authors      = [];
+		$contributors = [];
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
-		$user_id = $wpdb->get_var(
-			$wpdb->prepare(
-				"SELECT ID FROM $wpdb->users WHERE display_name = %s",
-				$display_name
+		// WP Users and co-authors.
+		foreach ( $authors_data as $author ) {
+			$authors[] = $this->handle_user_by_role( $author, 'author' );
+		}
+
+		foreach ( $contributors_data as $contributor ) {
+			$contributors[] = $this->handle_user_by_role( $contributor, 'contributor' );
+		}
+
+		// Set post author and co-authors.
+		$post_author = $authors[0]['wp_user_id'] ?? null;
+		if ( $post_author ) {
+			wp_update_post(
+				[
+					'ID'          => $post_id,
+					'post_author' => $post_author,
+				]
+			);
+		}
+
+		// Co-authors.
+		$filtered_authors = array_values(
+			array_filter(
+				$authors,
+				function ( $author ) {
+					// Skip "Texas Tribune Staff" (id = 16) from the co-authors list.
+					return 16 !== $author['id'];
+				}
 			)
 		);
 
-		if ( ! $user_id ) {
-			return null;
+		$co_authors = array_merge( $filtered_authors, $contributors );
+
+		if ( ! empty( $co_authors ) ) {
+			// Co-authors.
+			$maybe_coauthors_have_been_set = $this->co_authors_plus->add_coauthors(
+				$post_id,
+				array_column( $co_authors, 'wp_user_id' ),
+				false,
+				'id'
+			);
+
+			if ( ! $maybe_coauthors_have_been_set ) {
+				ConsoleColor::red( 'Error setting co-authors for post: ' )
+					->bright_red( $post_id )
+					->output();
+			}
 		}
 
-		return get_user_by( 'ID', $user_id );
+		// Custom authors byline.
+		$this->set_custom_authors_byline( $post_id, $authors );
+		// Custom contributors byline.
+		$this->set_custom_contributors_byline( $post_id, $contributors );
+	}
+
+	/**
+	 * Handle a user by role.
+	 *
+	 * @param array  $user_raw_data The user raw data.
+	 * @param string $role The role.
+	 * @return bool|array User data if the user was created, false otherwise.
+	 */
+	private function handle_user_by_role( array $user_raw_data, string $role ): bool|array {
+		$mapped_author = $this->author_map[ $user_raw_data['id'] ] ?? null;
+
+		$user_data = [
+			'display_name' => $user_raw_data['name'],
+			'role'         => $role,
+		];
+
+		// Special case for Texas Tribune Staff.
+		if ( 1547 === intval( $user_raw_data['id'] ) ) {
+			$user_data['user_email']    = 'multiple-staffs@example.com';
+			$user_data['user_login']    = 'multiple-staffs';
+			$user_data['user_nicename'] = 'texas-tribune-newsroom-fort-worth-amarillo-staffs';
+		} else {
+			$user_data['user_email'] = $mapped_author['email'] ?? sanitize_title( $user_raw_data['name'] ) . '@texastribune.org';
+			$user_data['user_login'] = sanitize_title( $user_raw_data['name'] );
+		}
+
+		if ( $mapped_author ) {
+			$user_data['meta_input'] = [
+				'twitter'               => $mapped_author['twitter'],
+				'facebook'              => $mapped_author['facebook'],
+				'newspack_phone_number' => $mapped_author['phone'],
+				'newspack_job_title'    => $mapped_author['job_title'],
+				'description'           => $mapped_author['bio'],
+			];
+		} else {
+			echo 1;
+		}
+
+		try {
+			$user = UsersHelper::create_or_get_user( $user_data, $user_raw_data['id'] );
+		} catch ( Exception $e ) {
+			ConsoleColor::red( 'Error creating author (' )
+				->bright_red( $e->getCode() )
+				->red( '):' )
+				->underlined_bright_red( $e->getMessage() )
+				->output();
+			return false;
+		}
+
+		// Handle avatar.
+		if ( $mapped_author && ! empty( $mapped_author['mug'] ) ) {
+			$avatar_attachment_id = Attachments::import_external_file( $mapped_author['mug'] );
+			$this->simple_local_avatars_logic->assign_avatar( $user->ID, $avatar_attachment_id );
+		}
+
+		return array_merge( [ 'wp_user_id' => $user->ID ], $user_raw_data );
+	}
+
+	/**
+	 * Sets a custom byline for a post based on author data.
+	 *
+	 * @param int   $post_id The ID of the post to set the byline for.
+	 * @param array $authors Array of author objects containing id, name, affiliation, role_display.
+	 * @return void
+	 */
+	private function set_custom_authors_byline( int $post_id, array $authors ): void {
+		// Group authors by affiliation.
+		$authors_by_affiliation = [];
+
+		// Set prefix based on first author's role_display.
+		$prefix = ! empty( $authors[0]['role_display'] ) ? '' : 'By';
+
+		// Group authors by their affiliation.
+		foreach ( $authors as $author ) {
+			$affiliation_key = 'The Texas Tribune'; // Default affiliation for staff.
+
+			if ( ! empty( $author['affiliation'] ) && ! empty( $author['affiliation']['name'] ) ) {
+				$affiliation_key = $author['affiliation']['name'];
+			}
+
+			if ( ! isset( $authors_by_affiliation[ $affiliation_key ] ) ) {
+				$authors_by_affiliation[ $affiliation_key ] = [];
+			}
+			$authors_by_affiliation[ $affiliation_key ][] = $author;
+		}
+
+		// Start building the byline.
+		$byline_parts = [];
+		if ( $prefix ) {
+			$byline_parts[] = $prefix;
+		}
+		$first_group = true;
+
+		foreach ( $authors_by_affiliation as $affiliation => $group_authors ) {
+			// Create author links for this group.
+			$author_links = [];
+			foreach ( $group_authors as $author ) {
+				$author_text = '';
+
+				// Add role_display if present.
+				if ( ! empty( $author['role_display'] ) ) {
+					$author_text .= $author['role_display'] . ' ';
+				}
+
+				if ( ! empty( $author['wp_user_id'] ) ) {
+					$author_text .= sprintf(
+						'<a href="%s">%s</a>',
+						get_author_posts_url( $author['wp_user_id'] ),
+						$author['name']
+					);
+				} else {
+					$author_text .= $author['name'];
+				}
+
+				$author_links[] = $author_text;
+			}
+
+			// Join authors in this group with proper grammar.
+			if ( ! $first_group ) {
+				$byline_parts[] = 'and';
+			}
+			$byline_parts[] = $this->join_with_oxford_comma( $author_links );
+
+			// Add affiliation if it's not the default Texas Tribune staff.
+			if ( 'The Texas Tribune' !== $affiliation || count( $authors_by_affiliation ) > 1 ) {
+				if ( $first_group ) {
+					$byline_parts[] = ',';
+				}
+				$byline_parts[] = $affiliation;
+			}
+
+			$first_group = false;
+		}
+
+		// Store the custom byline.
+		$custom_byline = implode( ' ', $byline_parts );
+		$custom_byline = str_replace( ' ,', ',', $custom_byline );
+		update_post_meta( $post_id, '_newspack_byline_active', true );
+		update_post_meta( $post_id, '_newspack_byline', $custom_byline );
+	}
+
+	/**
+	 * Sets a custom contributors byline for a post based on contributor data.
+	 *
+	 * @param int   $post_id      The ID of the post to set the contributors byline for.
+	 * @param array $contributors Array of contributor objects containing id, name, affiliation, and wp_user_id.
+	 * @return void
+	 */
+	private function set_custom_contributors_byline( int $post_id, array $contributors ): void {
+		if ( empty( $contributors ) ) {
+			return;
+		}
+
+		// Process each contributor.
+		$contributor_parts = [];
+		foreach ( $contributors as $contributor ) {
+			if ( ! empty( $contributor['wp_user_id'] ) ) {
+				// WP user - create link.
+				$contributor_parts[] = sprintf(
+					'<a href="%s">%s</a>',
+					get_author_posts_url( $contributor['wp_user_id'] ),
+					$contributor['name']
+				);
+			} else {
+				// External contributor or no WP user - just use name.
+				$contributor_parts[] = $contributor['name'];
+			}
+		}
+
+		// Join contributors with proper grammar.
+		$contributors_string = $this->join_with_oxford_comma( $contributor_parts );
+
+		// Create the complete contributors line.
+		$contributors_line = sprintf( '%s contributed to this report.', $contributors_string );
+
+		// Get current post content.
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return;
+		}
+
+		// Create contributors paragraph block.
+		$contributors_block = serialize_block(
+			$this->block_generator->get_paragraph( $contributors_line )
+		);
+
+		// Append contributors block to post content.
+		$updated_content = $post->post_content . "\n\n" . $contributors_block;
+
+		// Update the post.
+		wp_update_post(
+			[
+				'ID'           => $post_id,
+				'post_content' => $updated_content,
+			]
+		);
+	}
+
+	/**
+	 * Joins an array of strings with commas and 'and' for the last item.
+	 *
+	 * @param array $items Array of strings to join.
+	 * @return string The joined string.
+	 */
+	private function join_with_oxford_comma( array $items ): string {
+		$count = count( $items );
+		if ( 0 === $count ) {
+			return '';
+		}
+		if ( 1 === $count ) {
+			return $items[0];
+		}
+		if ( 2 === $count ) {
+			return $items[0] . ' and ' . $items[1];
+		}
+
+		$last_item = array_pop( $items );
+		return implode( ', ', $items ) . ' and ' . $last_item;
 	}
 
 	/**
@@ -2181,46 +2462,9 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 *
 	 * @param int   $post_id The post ID.
 	 * @param array $authors_data The authors data from the article metadata.
-	 * @param array $components The article components containing the original byline.
 	 */
-	private function set_custom_byline( int $post_id, array $authors_data, array $components ): void {
-		// Get original byline from components.
-		$original_byline = '';
-		foreach ( $components as $component ) {
-			if ( 'header' === $component['role'] ) {
-				foreach ( $component['components'] as $header_component ) {
-					if ( 'byline' === $header_component['role'] ) {
-						$original_byline = $header_component['text'];
-						break 2;
-					}
-				}
-			}
-		}
+	private function set_custom_byline( int $post_id, array $authors_data ): void {
 
-		if ( empty( $original_byline ) ) {
-			return;
-		}
-
-		// Remove the date part (everything after the last author/affiliation).
-		// This handles both regular spaces (\s) and &nbsp; entities.
-		$original_byline = preg_replace( '/(?:\s|&nbsp;)*(?:Jan\.|Feb\.|Mar\.|Apr\.|May|June|July|Aug\.|Sept\.|Oct\.|Nov\.|Dec\.) \d{1,2}, \d{4}.*$/i', '', $original_byline );
-
-		// Replace author URLs in the byline.
-		$custom_byline = $original_byline;
-		foreach ( $authors_data as $author ) {
-			if ( ! isset( $author['wp_user_id'] ) ) {
-				continue;
-			}
-
-			// Create a pattern that matches the entire author link structure.
-			$author_name = preg_quote( $author['name'], '/' );
-			$pattern     = '/<a href="[^"]*?\/about\/staff\/[^"]*?">(' . $author_name . ')<\/a>/';
-
-			// Replace with WordPress author URL.
-			$author_url    = get_author_posts_url( $author['wp_user_id'] );
-			$replacement   = '<a href="' . $author_url . '">$1</a>';
-			$custom_byline = preg_replace( $pattern, $replacement, $custom_byline );
-		}
 
 		// Store the custom byline.
 		update_post_meta( $post_id, '_newspack_byline_active', true );
