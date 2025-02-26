@@ -475,6 +475,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			} else {
 				set_post_thumbnail( $post_id, $maybe_featured_image_attachment_object->attachment_id );
 			}
+
+			// Featured image position.
+			if ( 'featured' === $article_data['metadata']['layout'] ) {
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'above' );
+			}
 		}
 
 		// Process content components.
