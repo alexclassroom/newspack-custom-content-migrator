@@ -1290,6 +1290,108 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-blog-author-qa',
+			self::get_command_closure( 'cmd_blog_author_qa' ),
+			[
+				'shortdesc' => 'Generates a QA File which compares blog authors with their actual post authors.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'topics',
+						'description' => 'Path to topics.csv file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'bloggers',
+						'description' => 'Path to bloggers.csv file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-tabulate-duplicated-posts-from-original-import',
+			self::get_command_closure( 'cmd_tabulate_duplicated_posts_from_original_import' ),
+			[
+				'hortdesc' => 'This command will help identify posts that are likely duplicate, using original import files as a baseline.',
+				'synopsis' => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file containing the posts.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'skip-to-story-id',
+						'description' => 'Story ID to skip to.',
+						'optional'    => 'true',
+						'repeating'   => false,
+						'default'     => 0,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-tabulate-posts-with-no-author-assigned',
+			self::get_command_closure( 'cmd_tabulate_posts_with_no_author_assigned' ),
+			[
+				'shortdesc' => 'For various posts without `post_author`, this command will attempt to assign the author from metadata.',
+
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-assign-author-using-network-sites',
+			self::get_command_closure( 'cmd_assign_author_using_network_sites' ),
+			[
+				'shortdesc' => 'This command will make use of wp-json API to try and find authors from network sites.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'Comma-separated list of post IDs to target.',
+						'optional'    => true,
+						'repeating'   => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'sites-and-passwords',
+						'description' => 'Comma-separated list of network site URLs, pipe-separated with passwords if applicable.',
+						'optional'    => false,
+						'repeating'   => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'author-nicename-map',
+						'description' => 'Path to JSON file containing author nicenames to their corresponding nicename on the site where the update is required.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'admin-username',
+						'description' => 'Admin username on site which needs to be updated.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'If present, the command will not make any changes to the database.',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -2415,7 +2517,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				'excerpt' => $record->post_excerpt,
 				'meta' => $record->meta_value
 			};
-			\WP_CLI::line( sprintf( '%s %d/%d (%d)', $type, $index + 1, $total_records, $identifier ) );
+			WP_CLI::line( sprintf( '%s %d/%d (%d)', $type, $index + 1, $total_records, $identifier ) );
 
 			$new_content = $this->migrate_text_styling( $text );
 
@@ -5800,6 +5902,719 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
 		fclose( $qa_file );
+	}
+
+	/**
+	 * Using original import CSV files, verify that the author's nicename matches the original author's name. Log the
+	 * results to a CSV file for review.
+	 *
+	 * @param array $args Command arguments.
+	 * @param array $assoc_args Command associative arguments.
+	 */
+	public function cmd_blog_author_qa( array $args, array $assoc_args ) {
+		$topics_csv   = $assoc_args['topics'];
+		$bloggers_csv = $assoc_args['bloggers'];
+
+		$bloggers_by_id    = [];
+		$bloggers_iterable = ( new FileImportFactory() )->get_file( $bloggers_csv )->getIterator();
+		foreach ( $bloggers_iterable as $row ) {
+			$bloggers_by_id[ $row['blogger_user_id'] ] = [
+				'blogger_user_name' => $row['blogger_user_name'],
+				'blogger_email'     => $row['blogger_email'],
+			];
+		}
+
+		$topics_iterable = ( new FileImportFactory() )->get_file( $topics_csv )->getIterator();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- just need a quick and easy way to do this.
+		$qa_file = fopen( 'blog_author_qa.csv', 'w' );
+		$header  = [
+			'topic_id'                 => null,
+			'original_byline'          => null,
+			'original_posted_by'       => null,
+			'original_author_email'    => null,
+			'post_id'                  => null,
+			'post_author_id'           => null,
+			'post_author_nicename'     => null,
+			'post_author_email'        => null,
+			'post_author_display_name' => null,
+			'author_nicename'          => null,
+			'author_email'             => null,
+			'author_display_name'      => null,
+		];
+		fputcsv(
+			$qa_file,
+			array_keys( $header )
+		);
+
+		global $wpdb;
+
+		foreach ( $topics_iterable as $row ) {
+			echo "\n";
+			$qa_row             = $header;
+			$qa_row['topic_id'] = $row['topic_id'];
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$post_ids = $wpdb->get_col(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'topic_id' AND meta_value = %d",
+					$row['topic_id']
+				)
+			);
+
+			if ( empty( $post_ids ) ) {
+				ConsoleColor::bright_magenta( 'No post IDs found for topic ID: ' . $row['topic_id'] )->output();
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			if ( count( $post_ids ) > 1 ) {
+				ConsoleColor::cyan( 'Multiple post IDs found for topic ID: ' . $row['topic_id'] )->output();
+			} else {
+				ConsoleColor::underlined_white( 'Topic ID:' )->underlined_bright_white( $row['topic_id'] )->output();
+			}
+
+			foreach ( $post_ids as $post_id ) {
+				$qa_row_copy            = $qa_row;
+				$qa_row_copy['post_id'] = $post_id;
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$post = $wpdb->get_row(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->posts WHERE ID = %d",
+						$post_id
+					)
+				);
+
+				$qa_row_copy['post_author_id'] = $post->post_author;
+
+				ConsoleColor::white( 'Post ID: ' )
+							->bright_white( $post_id )
+							->white( 'Status:' )
+							->bright_white( $post->post_status )
+							->white( 'Type:' )
+							->bright_white( $post->post_type )
+							->output();
+
+				if ( ! empty( $row['old_site'] ) ) {
+					ConsoleColor::white( 'Site:' )->bright_white( $row['old_site'] )->output();
+				} else {
+					ConsoleColor::white( 'Site:' )->bright_yellow( 'NO SITE INDICATED' )->output();
+				}
+
+
+				$qa_row_copy['original_byline'] = $row['blogger_user_name'];
+
+				if ( array_key_exists( $row['blogger_user_id'], $bloggers_by_id ) ) {
+					$qa_row_copy['original_author_email'] = $bloggers_by_id[ $row['blogger_user_id'] ]['blogger_email'];
+				}
+
+				$post_author = get_user_by( 'id', $post->post_author );
+
+				if ( $post_author ) {
+					$qa_row_copy['post_author_nicename']     = $post_author->user_nicename;
+					$qa_row_copy['post_author_email']        = $post_author->user_email;
+					$qa_row_copy['post_author_display_name'] = $post_author->display_name;
+				}
+
+				$authors = get_coauthors( $post_id );
+				if ( empty( $authors ) ) {
+					ConsoleColor::bright_magenta( 'No authors found for post ID: ' . $post_id )->output();
+					fputcsv( $qa_file, $qa_row_copy );
+					continue;
+				}
+
+				$author                             = reset( $authors );
+				$qa_row_copy['author_nicename']     = $author->user_nicename;
+				$qa_row_copy['author_email']        = $author->user_email;
+				$qa_row_copy['author_display_name'] = $author->display_name;
+
+				fputcsv( $qa_file, $qa_row_copy );
+			}
+		}
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- just need a quick and easy way to do this.
+		fclose( $qa_file );
+	}
+
+	public function cmd_tabulate_duplicated_posts_from_original_import( array $args, array $assoc_args ) {
+		$csv_path         = $assoc_args['csv-path'];
+		$skip_to_story_id = $assoc_args['skip-to-story-id'] ?? 0;
+
+		$csv_iterable = ( new FileImportFactory() )->get_file( $csv_path )->getIterator();
+
+		global $wpdb;
+
+		foreach ( $csv_iterable as $row ) {
+			if ( $row['story_id'] <= $skip_to_story_id ) {
+				continue;
+			}
+
+			$post_exists = $wpdb->get_row(
+				$wpdb->prepare(
+					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
+					self::EMBARCADERO_ORIGINAL_ID_META_KEY,
+					$row['story_id']
+				)
+			);
+
+			if ( ! $post_exists ) {
+				continue;
+			}
+
+			$search_title = empty( trim( $row['print_headline'] ?? '' ) ) ? trim( $row['headline'] ) : trim( $row['print_headline'] );
+
+			$post_search = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT
+    					p.ID as post_id,
+    					p.post_title,
+    					p.post_date,
+    					SUBSTR( p.post_content, 1, 250 ) as post_content_snippet,
+    					GROUP_CONCAT( pm.meta_key ) as meta_keys
+					FROM $wpdb->posts p
+					LEFT JOIN $wpdb->postmeta pm ON p.ID = pm.post_id
+	                WHERE p.post_title = %s AND p.post_type = 'post' AND p.post_status = 'publish' AND p.ID <> %d
+	                GROUP BY p.ID",
+					$search_title,
+					$post_exists->post_id
+				)
+			);
+
+			if ( ! empty( $post_search ) ) {
+				$output = [];
+
+				foreach ( $post_search as $post ) {
+					if ( str_contains( $post->meta_keys, self::EMBARCADERO_ORIGINAL_ID_META_KEY ) ) {
+						continue;
+					}
+
+					similar_text( strip_tags( $post->post_content_snippet ), $row['headline'], $percent );
+
+					$output[] = [
+						'post_id'                      => $post->post_id,
+						'post_title'                   => $post->post_title,
+						'post_date'                    => $post->post_date,
+						'content_snippet_has_headline' => number_format( $percent, 2 ) . '%',
+					];
+				}
+
+				if ( ! empty( $output ) ) {
+					echo "\n";
+					ConsoleColor::white( 'Story ID:' )->bright_yellow( $row['story_id'] )
+								->white( 'Date:' )->bright_yellow( $row['date_uploaded'] )->output();
+					ConsoleColor::white( 'Title:' )->bright_white( $row['print_headline'] ?? '' )->output();
+					ConsoleColor::white( 'Sub-Headline:' )->bright_white( $row['headline'] )->output();
+					ConsoleColor::magenta( 'Post already exists with ID:' )->bright_magenta( $post_exists->post_id )->output();
+
+					ConsoleTable::output_data( $output );
+				}
+			}
+		}
+	}
+
+	/**
+	 * This command is used to tabulate posts with no author assigned via console output.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_tabulate_posts_with_no_author_assigned( array $args, array $assoc_args ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_without_author = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT
+    				ID,
+    				post_title,
+    				post_name,
+    				post_author,
+    				post_type,
+    				post_status,
+    				post_date
+				FROM $wpdb->posts
+				WHERE post_author = 0
+				  AND post_type IN ('post' )
+				  AND post_status IN ( 'publish' )
+				  AND ID NOT IN (
+				      SELECT
+				          post_id
+				      FROM $wpdb->postmeta
+				      WHERE ( meta_key = '_2025-02_newspack_author_assignment' AND meta_value IN ( 'skip', 'resolved' ) )
+				         #OR ( meta_key = 'topic_id' )
+				  )"
+			)
+		);
+
+		if ( empty( $posts_without_author ) ) {
+			ConsoleColor::yellow( 'No posts found without an author.' )->output();
+
+			return;
+		}
+
+		ConsoleColor::yellow( 'Posts without an author:' )->bright_yellow( count( $posts_without_author ) )->output();
+
+		foreach ( $posts_without_author as $post ) {
+			echo "\n";
+			ConsoleColor::white( 'ID:' )->bright_yellow( $post->ID )
+						->white( 'Author ID:' )->bright_yellow( $post->post_author )
+						->white( 'Type:' )->bright_yellow( $post->post_type )
+						->white( 'Status:' )->bright_yellow( $post->post_status )
+						->white( 'Date:' )->bright_yellow( $post->post_date )->output();
+			ConsoleColor::white( 'Title:' )->bright_white( $post->post_title )->output();
+			ConsoleColor::white( 'Name:' )->bright_white( $post->post_name )->output();
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$postmeta = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT meta_id as 'Meta ID', meta_key as 'Meta Key', meta_value as 'Meta Value' FROM $wpdb->postmeta WHERE post_id = %d",
+					$post->ID
+				)
+			);
+
+			ConsoleTable::output_data( $postmeta, [ 'Meta ID', 'Meta Key', 'Meta Value' ] );
+		}
+	}
+
+	/**
+	 * This command looks for posts that don't have an author assigned (post_author = 0). In dry-run mode, it will
+	 * be helpful in identifying posts that may need attention. In live mode, it will assign an author to the posts.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_assign_author_using_network_sites( array $args, array $assoc_args ) {
+		global $wpdb, $coauthors_plus;
+		$post_ids = [];
+		if ( ! empty( $assoc_args['post-ids'] ) ) {
+			$post_ids = explode( ',', $assoc_args['post-ids'] );
+			$post_ids = array_map( 'intval', $post_ids );
+		}
+
+		$sites = $assoc_args['sites-and-passwords'];
+		$sites = explode( ',', $sites );
+
+		$authorization_headers_by_site = [];
+
+		foreach ( $sites as $index => $site ) {
+			$password = '';
+			if ( str_contains( $site, '|' ) ) {
+				[ $site, $password ] = explode( '|', $site, 2 );
+			}
+
+			$site = trim( $site );
+			$site = trim( $site, '/' );
+			if ( ! str_starts_with( $site, 'http' ) ) {
+				$site = "https://$site";
+			}
+
+			$host = wp_parse_url( $site, PHP_URL_HOST );
+
+			if ( ! $host ) {
+				unset( $sites[ $index ] );
+			} else {
+				$sites[ $index ] = "https://$host";
+
+				if ( ! empty( $password ) ) {
+					$authorization_headers_by_site[ $sites[ $index ] ] = [
+						'Authorization' => $this->get_authorization_value(
+							$assoc_args['admin-username'],
+							$password
+						),
+					];
+				}
+			}
+		}
+
+		if ( empty( $sites ) ) {
+			ConsoleColor::red( 'No valid sites provided.' )->output();
+
+			return;
+		}
+
+		$author_nicename_map = [];
+		if ( ! empty( $assoc_args['author-nicename-map'] ) ) {
+			$author_nicename_map = (array) wp_json_file_decode( $assoc_args['author-nicename-map'], true );
+		}
+
+		$dry_run = ! empty( $assoc_args['dry-run'] );
+
+		$target_posts = [];
+		if ( empty( $post_ids ) ) {
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$authorless_posts = $wpdb->get_results(
+				"SELECT
+    				p.ID,
+    				p.post_title,
+    				p.post_type,
+    				p.post_status,
+    				p.post_author,
+    				u.user_nicename,
+    				u.display_name,
+    				GROUP_CONCAT( CONCAT( pm.meta_key, ':', pm.meta_value ) SEPARATOR '|') as meta_keys
+				FROM $wpdb->posts p
+				    LEFT JOIN $wpdb->users u ON p.post_author = u.ID
+				    LEFT JOIN $wpdb->postmeta pm ON p.ID = pm.post_id
+				WHERE p.post_author = 0
+				  AND p.post_type = 'post'
+				  AND p.post_status = 'publish'
+				GROUP BY p.ID"
+			);
+
+			foreach ( $authorless_posts as $post ) {
+				if ( str_contains( $post->meta_keys, 'wprss' ) ) {
+					$meta_keys = explode( '|', $post->meta_keys );
+
+					foreach ( $meta_keys as $meta ) {
+						if ( str_starts_with( $meta, 'wprss_item_permalink:' ) ) {
+							$this->console_output_post_info( $post );
+							ConsoleColor::yellow( 'Imported via WPRSS.' )->output();
+							if ( str_contains( $meta, 'calmatters' ) ) {
+								$calmatters_user = get_user_by( 'email', 'webmaster+calmatters@embarcaderopublishing.com' );
+
+								if ( $calmatters_user && $calmatters_user->ID ) {
+									if ( ! $dry_run ) {
+										$reassigned = $coauthors_plus->add_coauthors( $post->ID, [ $calmatters_user->user_nicename ], false );
+										if ( $reassigned ) {
+											ConsoleColor::green( 'Reassigned to Calmatters.' )->output();
+										} else {
+											ConsoleColor::red( 'Failed to reassign to Calmatters.' )->output();
+										}
+									} else {
+										ConsoleColor::green( 'Dry run: Reassigned to Calmatters.' )->output();
+									}
+								} else {
+									ConsoleColor::red( 'Calmatters user not found.' )->output();
+								}
+							} elseif ( str_contains( $meta, 'baycity' ) ) {
+								$baycity_user = get_user_by( 'email', 'webmaster+bcn@embarcaderopublishing.com' );
+
+								if ( $baycity_user && $baycity_user->ID ) {
+									if ( ! $dry_run ) {
+										$reassigned = $coauthors_plus->add_coauthors( $post->ID, [ $baycity_user->user_nicename ], false );
+										if ( $reassigned ) {
+											ConsoleColor::green( 'Reassigned to Bay City.' )->output();
+										} else {
+											ConsoleColor::red( 'Failed to reassign to Bay City.' )->output();
+										}
+									} else {
+										ConsoleColor::green( 'Dry run: Reassigned to Bay City.' )->output();
+									}
+								} else {
+									ConsoleColor::red( 'Bay City user not found.' )->output();
+								}
+							} else {
+								ConsoleColor::bright_red( 'Unable to handle WPRSS import.' )->red( $meta )->output();
+							}
+							continue 2;
+						}
+					}
+				}
+
+				$target_posts[] = $post;
+			}
+		} else {
+			$post_id_placeholders = implode( ',', array_fill( 0, count( $post_ids ), '%d' ) );
+
+			// phpcs:disable -- query properly prepared.
+			$target_posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT
+    					p.ID,
+    					p.post_title,
+    					p.post_type,
+    					p.post_status,
+    					p.post_author,
+    					u.user_nicename,
+    					u.display_name
+					FROM $wpdb->posts p
+					    LEFT JOIN $wpdb->users u ON p.post_author = u.ID
+					WHERE p.ID IN ( $post_id_placeholders )",
+					...$post_ids
+				)
+			);
+			// phpcs:enable
+		}
+
+		$unique_authors_list = [];
+
+		foreach ( $target_posts as $post ) {
+			$this->console_output_post_info( $post );
+
+			$number_of_sites    = count( $sites );
+			$current_site_index = 0;
+
+			do {
+				$site_url = $sites[ $current_site_index ];
+				ConsoleColor::cyan( 'Searching for author on' )->bright_cyan( $site_url )->output();
+
+				$authorization_header = [];
+
+				if ( array_key_exists( $site_url, $authorization_headers_by_site ) ) {
+					$authorization_header = $authorization_headers_by_site[ $site_url ];
+				}
+
+				$remote_post_id = $this->search_remote_post( $post->post_title, $site_url, $authorization_header );
+
+				if ( ! $remote_post_id ) {
+					ConsoleColor::magenta( 'No matching post found' )->output();
+					++$current_site_index;
+					continue;
+				}
+
+				$remote_post_data = $this->get_remote_post_data( $remote_post_id, $site_url, $authorization_header );
+
+				if ( ! $remote_post_data ) {
+					ConsoleColor::red( 'Failed to retrieve post data from' )->output();
+					++$current_site_index;
+					continue;
+				}
+
+				if ( ! isset( $remote_post_data->author ) || 0 === $remote_post_data->author ) {
+					ConsoleColor::magenta( 'Missing author information in remote post data, trying next site.' )->output();
+					++$current_site_index;
+					continue;
+				}
+
+				$author = $this->get_remote_user_data( $remote_post_data->author, $site_url, $authorization_header );
+
+				if ( ! $author ) {
+					ConsoleColor::magenta( 'Failed to retrieve author data from' )->output();
+					++$current_site_index;
+					break;
+				}
+
+				ConsoleColor::white( 'Name:' )
+							->bright_yellow( $author->name )
+							->white( 'Nicename:' )
+							->bright_yellow( $author->slug )->output();
+
+				if ( ! array_key_exists( $author->slug, $unique_authors_list ) ) {
+					$unique_authors_list[ $author->slug ] = $author->name;
+				}
+
+				$nicename = $author_nicename_map[ $author->slug ] ?? $author->slug;
+
+				if ( ! $dry_run ) {
+					$result = $coauthors_plus->add_coauthors( $post->ID, [ $nicename ], false );
+
+					if ( is_wp_error( $result ) ) {
+						ConsoleColor::red( 'Error: Failed to add coauthors.' )->output();
+					} else {
+						ConsoleColor::green( 'Coauthors added successfully.' )->bright_green( get_permalink( $post->ID ) )->output();
+					}
+				} else {
+					ConsoleColor::green( 'Dry run: Coauthors added successfully.' )->bright_green( $nicename )->output();
+				}
+				continue 2;
+			} while ( $current_site_index < $number_of_sites );
+		}
+
+		if ( $dry_run && ! empty( $unique_authors_list ) ) {
+			array_walk(
+				$unique_authors_list,
+				function ( &$name, $slug ) {
+					$name = [
+						'User Nicename' => $slug,
+						'Name'          => $name,
+					];
+				}
+			);
+
+			echo "\n\n";
+			ConsoleTable::output_data( array_values( $unique_authors_list ), [], 'Unique Authors Found' );
+		}
+	}
+
+	/**
+	 * Outputs post information to the console.
+	 *
+	 * @param object $post Post object containing post information.
+	 *
+	 * @return void
+	 */
+	private function console_output_post_info( object $post ): void {
+		echo "\n";
+		$console = ConsoleColor::white( 'ID:' )->bright_yellow( $post->ID );
+
+		$title = '';
+		$slug  = '';
+		foreach ( $post as $key => $value ) {
+			if ( null === $value ) {
+				continue;
+			}
+
+			if ( 'ID' === $key ) {
+				continue;
+			}
+
+			if ( 'meta_keys' === $key ) {
+				continue;
+			}
+
+			if ( 'post_title' === $key ) {
+				$title = $value;
+				continue;
+			}
+
+			if ( 'post_name' === $key ) {
+				$slug = $value;
+				continue;
+			}
+
+			$key_name = match ( $key ) {
+				'post_author' => 'Author ID',
+				'post_type' => 'Type',
+				'post_status' => 'Status',
+				'post_date' => 'Date',
+				'user_nicename' => 'Author Nicename',
+				'display_name' => 'Author Display Name',
+				default => $key,
+			};
+
+			$console = $console->white( $key_name . ':' )->bright_yellow( $value );
+		}
+
+		$console->output();
+
+		if ( $title ) {
+			ConsoleColor::white( 'Title:' )->underlined_bright_white( $title )->output();
+		}
+
+		if ( $slug ) {
+			ConsoleColor::white( 'Slug:' )->underlined_bright_white( $slug )->output();
+		}
+	}
+
+	/**
+	 * Get the authorization header value for the API request.
+	 *
+	 * @param string $username The username for the API request.
+	 * @param string $password The password for the API request.
+	 *
+	 * @return string
+	 */
+	private function get_authorization_value( string $username, string $password ): string {
+		// phpcs:ignore WordPress.PHP.DiscouragedPHPFunctions.obfuscation_base64_encode -- need to encode credentials.
+		return 'Basic ' . base64_encode( $username . ':' . $password );
+	}
+
+	/**
+	 * Searches for a post on a remote WordPress site using the post title.
+	 *
+	 * This function sends a GET request to the remote site's WP REST API,
+	 * searching for posts with titles matching the provided search title.
+	 * It compares the titles and returns the post ID if an exact or close match is found.
+	 *
+	 * @param string $search_title The title of the post to search for.
+	 * @param string $remote_site_url The URL of the remote WordPress site.
+	 * @param array  $authorization_header The authorization header for the API request.
+	 *
+	 * @return int|bool Returns the post ID if a match is found, or false if no match is found or an error occurs.
+	 */
+	private function search_remote_post( string $search_title, string $remote_site_url, array $authorization_header ): int|bool {
+		$search_url           = $remote_site_url . '/wp-json/wp/v2/posts?search=' . rawurlencode( $search_title );
+		$lowered_search_title = strtolower( $search_title );
+
+		WP_CLI::log( $search_url );
+
+		$response = wp_remote_get( $search_url, [ 'headers' => $authorization_header ] );
+
+		if ( is_wp_error( $response ) ) {
+			return false;
+		}
+
+		$body  = wp_remote_retrieve_body( $response );
+		$posts = json_decode( $body );
+
+		if ( ! empty( $posts ) ) {
+			foreach ( $posts as $p ) {
+				$remote_title         = html_entity_decode( $p->title->rendered );
+				$lowered_remote_title = strtolower( $remote_title );
+
+				if ( $lowered_remote_title === $lowered_search_title ) {
+					ConsoleColor::green( 'Titles Match' )->output();
+
+					return $p->id;
+				} else {
+					similar_text( $lowered_remote_title, $lowered_search_title, $percent );
+					ConsoleColor::yellow( 'Similarity:' )
+								->bright_yellow( number_format( $percent, 2 ) . '%%' )
+								->underlined_bright_yellow( $remote_title )
+								->output();
+					if ( $percent >= 85 ) {
+						return $p->id;
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Retrieves post data from a remote WordPress site using the WP REST API.
+	 *
+	 * This function sends a GET request to the specified remote WordPress site's API
+	 * endpoint to fetch data for a specific post.
+	 *
+	 * @param int    $post_id The ID of the post to retrieve from the remote site.
+	 * @param string $remote_site_url The base URL of the remote WordPress site.
+	 * @param array  $authorization_header An array containing authorization headers for the API request.
+	 *
+	 * @return object|bool Returns an array of post data if successful, or false if the request fails
+	 *                        or the response code is not 200.
+	 */
+	private function get_remote_post_data( int $post_id, string $remote_site_url, array $authorization_header ): object|bool {
+		$post_url = $remote_site_url . '/wp-json/wp/v2/posts/' . $post_id;
+
+		WP_CLI::log( $post_url );
+
+		$response = wp_remote_get( $post_url, [ 'headers' => $authorization_header ] );
+
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			return false;
+		}
+
+		$body = wp_remote_retrieve_body( $response );
+
+		return json_decode( $body );
+	}
+
+	/**
+	 * Retrieves user data from a remote WordPress site using the WP REST API.
+	 *
+	 * This function sends a GET request to the specified remote WordPress site's API
+	 * endpoint to fetch data for a specific user.
+	 *
+	 * @param int    $user_id The ID of the user to retrieve from the remote site.
+	 * @param string $remote_site_url The base URL of the remote WordPress site.
+	 * @param array  $authorization_header An array containing authorization headers for the API request.
+	 *
+	 * @return object|bool Returns an array of user data if successful, or false if the request
+	 *                       or the response code is not 200.
+	 * */
+	private function get_remote_user_data( int $user_id, string $remote_site_url, array $authorization_header ): object|bool {
+		$user_url = $remote_site_url . '/wp-json/wp/v2/users/' . $user_id;
+
+		WP_CLI::log( $user_url );
+
+		$response = wp_remote_get( $user_url, [ 'headers' => $authorization_header ] );
+
+		if ( is_wp_error( $response ) || 200 !== wp_remote_retrieve_response_code( $response ) ) {
+			ConsoleColor::red( 'Error: Failed to retrieve user data from remote site.' )->output();
+
+			return false;
+		}
+
+		$body = wp_remote_retrieve_body( $response );
+
+		return json_decode( $body );
 	}
 
 	/**
