@@ -2,6 +2,9 @@
 
 namespace NewspackCustomContentMigrator\Logic;
 
+/**
+ * Class Compare.
+ */
 class Compare {
 
 	/**
