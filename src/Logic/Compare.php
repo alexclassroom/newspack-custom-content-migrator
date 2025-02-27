@@ -6,6 +6,10 @@ class Compare {
 
 	/**
 	 * This function will compare the values of two arrays, and return the matching, different, and undetermined values.
+	 * This differs from `values_using_array_functions` in the following ways:
+	 * - It can compare all keys or only specific keys, which can be useful for ignoring certain keys.
+	 * - Setting $strict to false will allow values such as (int) 1 and (string) "1" to be considered equal.
+	 * - The entire function runs in O(n), when given specific keys; 3*O(n) when comparing all keys.
 	 *
 	 * @param array  $keys Specific keys to compare. If empty, all keys will be compared.
 	 * @param array  $left First array to compare.
