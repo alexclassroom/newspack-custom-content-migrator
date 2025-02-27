@@ -60,4 +60,50 @@ class Compare {
 			'undetermined' => $undetermined_rows,
 		];
 	}
+
+	/**
+	 * This function will compare values of two arrays using array functions like `array_diff_assoc` and `array_intersect_assoc`.
+	 *
+	 * @param array  $left First array to compare.
+	 * @param array  $right Second array to compare.
+	 * @param string $left_handle The name of the first/left array.
+	 * @param string $right_handle The name of the second/right array.
+	 *
+	 * @return array
+	 */
+	public static function values_using_array_functions( array $left, array $right, string $left_handle = 'left', string $right_handle = 'right' ): array {
+		$keys = array_keys( array_merge( $left, $right ) );
+
+		$match = array_intersect_assoc( $left, $right );
+		$diff  = array_diff_assoc( $left, $right );
+
+		foreach ( $match as $key => &$value ) {
+			$value = [
+				$left_handle  => $left[ $key ],
+				$right_handle => $right[ $key ],
+			];
+		}
+
+		foreach ( $diff as $key => &$value ) {
+			$value = [
+				$left_handle  => $left[ $key ] ?? null,
+				$right_handle => $right[ $key ] ?? null,
+			];
+		}
+
+		$undetermined = array_diff_key( $left, $right ) + array_diff_key( $right, $left );
+		foreach ( $undetermined as $key => &$value ) {
+			$value = [
+				$left_handle  => $left[ $key ] ?? null,
+				$right_handle => $right[ $key ] ?? null,
+			];
+		}
+
+		return [
+			'keys'         => $keys,
+			'matching'     => $match,
+			'different'    => $diff,
+			'undetermined' => $undetermined,
+		];
+	}
 }
