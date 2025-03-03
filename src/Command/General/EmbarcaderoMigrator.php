@@ -1261,6 +1261,13 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'blog-registered-users-csv',
+						'description' => 'Path to the blog_registered_users.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'blog-blogs-csv',
 						'description' => 'Path to the blog_blogs.csv file',
 						'optional'    => false,
@@ -1268,15 +1275,8 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'blog-photos-csv',
-						'description' => 'Path to the blog_photos.csv file',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
-						'name'        => 'blog-sites-csv',
-						'description' => 'Path to the blog_sites.csv file',
+						'name'        => 'blog-comments-csv',
+						'description' => 'Path to the comments.csv file',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -7457,14 +7457,13 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 * --blog-bloggers-csv=<path>
 	 * : Path to the blog_bloggers.csv file
 	 *
+	 * --blog-registered-users-csv=<path>
+	 *
 	 * --blog-blogs-csv=<path>
 	 * : Path to the blog_blogs.csv file
 	 *
-	 * --blog-photos-csv=<path>
-	 * : Path to the blog_photos.csv file
-	 *
-	 * --blog-sites-csv=<path>
-	 * : Path to the blog_sites.csv file
+	 * --blog-comments-csv=<path>
+	 * : Path to the comments.csv file
 	 *
 	 * --blog-site=<domain>
 	 * : The target site domain (e.g. paloaltoonline.com)
@@ -7478,33 +7477,32 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		// Required parameters.
 		$blog_topics_csv   = $assoc_args['blog-topics-csv'] ?? null;
 		$blog_bloggers_csv = $assoc_args['blog-bloggers-csv'] ?? null;
+		$blog_users_csv    = $assoc_args['blog-registered-users-csv'] ?? null;
 		$blog_blogs_csv    = $assoc_args['blog-blogs-csv'] ?? null;
-		$blog_photos_csv   = $assoc_args['blog-photos-csv'] ?? null;
-		$blog_sites_csv    = $assoc_args['blog-sites-csv'] ?? null;
+		$blog_comments_csv = $assoc_args['blog-comments-csv'] ?? null;
 		$blog_site         = $assoc_args['blog-site'] ?? null;
 
 		// Validate all required parameters are provided.
-		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_photos_csv || ! $blog_sites_csv || ! $blog_site ) {
+		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_comments_csv || ! $blog_site ) {
 			WP_CLI::error( 'Missing required parameters. Please provide all required CSV files and the blog site domain.' );
 		}
 
 		// Validate all CSV files exist.
-		foreach ( [ $blog_topics_csv, $blog_bloggers_csv, $blog_blogs_csv, $blog_photos_csv, $blog_sites_csv ] as $csv_file ) {
+		foreach ( [ $blog_topics_csv, $blog_bloggers_csv, $blog_blogs_csv, $blog_comments_csv ] as $csv_file ) {
 			if ( ! file_exists( $csv_file ) ) {
 				WP_CLI::error( sprintf( 'CSV file not found: %s', $csv_file ) );
 			}
 		}
 
 		// Read all CSV files.
-		$blog_sites    = $this->get_data_from_csv_or_tsv( $blog_sites_csv );
 		$blog_blogs    = $this->get_data_from_csv_or_tsv( $blog_blogs_csv );
 		$blog_bloggers = $this->get_data_from_csv_or_tsv( $blog_bloggers_csv );
-		$blog_photos   = $this->get_data_from_csv_or_tsv( $blog_photos_csv );
+		$blog_users    = $this->get_data_from_csv_or_tsv( $blog_users_csv );
 
 		// Index blog sites by domain.
 		$blogs = [];
-		foreach ( $blog_sites as $site ) {
-			$blogs[ $site['blog_site'] ][] = $site['blog_id'];
+		foreach ( $blog_blogs as $blog ) {
+			$blogs[ $blog['primary_site'] ][] = $blog['blog_id'];
 		}
 
 		// Validate the target site exists in the data.
@@ -7516,15 +7514,19 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		$target_blog_ids = $blogs[ $blog_site ];
 
 		// Get already migrated topic IDs.
-		$already_migrated_topic_ids = $wpdb->get_col( "SELECT DISTINCT meta_value FROM $wpdb->postmeta WHERE meta_key = 'topic_id'" );
+		$already_migrated_topics                      = $wpdb->get_results( "SELECT DISTINCT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key = 'topic_id'", ARRAY_A );
+		$already_migrated_topic_ids                   = array_column( $already_migrated_topics, 'meta_value' );
+		$already_migrated_post_ids_mapped_by_topic_id = array_column( $already_migrated_topics, 'post_id', 'meta_value' );
 
 		// Read and filter topics.
-		$blog_topics = $this->get_data_from_csv_or_tsv( $blog_topics_csv );
-		$topics      = array_values(
+		$blog_topics     = $this->get_data_from_csv_or_tsv( $blog_topics_csv );
+		$migrated_topics = [];
+		$topics          = array_values(
 			array_filter(
 				$blog_topics,
-				function ( $topic ) use ( $target_blog_ids, $already_migrated_topic_ids, &$skipped_topics ) {
+				function ( $topic ) use ( $target_blog_ids, $already_migrated_topic_ids, &$migrated_topics ) {
 					if ( in_array( $topic['topic_id'], $already_migrated_topic_ids ) ) {
+						$migrated_topics[] = $topic;
 						$this->logger->log( self::LOG_FILE, sprintf( 'Skipping topic %s (ID: %s) because it has already been migrated', $topic['headline'], $topic['topic_id'] ) );
 						return false;
 					}
@@ -7534,12 +7536,23 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			)
 		);
 
+		// Read and filter comments.
+		$blog_comments = $this->get_data_from_csv_or_tsv( $blog_comments_csv );
+		$comments      = array_values(
+			array_filter(
+				$blog_comments,
+				function ( $comment ) use ( $target_blog_ids ) {
+					return in_array( $comment['blog_id'], $target_blog_ids );
+				}
+			)
+		);
+
 		$total_topics = count( $topics );
 		$this->logger->log( self::LOG_FILE, sprintf( 'Found %d topics to migrate for site %s (excluding %d already migrated)', $total_topics, $blog_site, count( $already_migrated_topic_ids ) ) );
 
 		// Process each topic.
 		foreach ( $topics as $index => $topic ) {
-			$this->logger->log( self::LOG_FILE, sprintf( 'Processing topic %d/%d (ID: %s)', $index + 1, $total_topics, $topic['topic_id'] ) );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Processing topic %d/%d (Topic ID: %s)', $index + 1, $total_topics, $topic['topic_id'] ) );
 
 			// Find the blogger info.
 			$blogger_index = array_search( $topic['blogger_user_id'], array_column( $blog_bloggers, 'blogger_user_id' ) );
@@ -7610,25 +7623,60 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				);
 			}
 
+			// Migrate comments.
+			$topic_comments = array_values(
+				array_filter(
+					$comments,
+					function ( $comment ) use ( $topic ) {
+						return $topic['topic_id'] === $comment['topic_id'];
+					}
+				)
+			);
+
+			$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site );
+
 			// Set post meta.
 			update_post_meta( $post_id, '_newspack_migrated_topic_id', $topic['topic_id'] );
 			update_post_meta( $post_id, 'topic_id', $topic['topic_id'] );
 			update_post_meta( $post_id, 'blog_id', $topic['blog_id'] );
 
 			// Update modification date directly in the database.
-			if ( ! empty( $topic['updated_date'] ) ) {
-				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
-				$wpdb->update(
-					$wpdb->posts,
-					[
-						'post_modified'     => $topic['updated_date'],
-						'post_modified_gmt' => get_gmt_from_date( $topic['updated_date'] ),
-					],
-					[ 'ID' => $post_id ]
-				);
-			}
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$updated_date = ( $topic['updated_date'] && '0000-00-00' !== $topic['updated_date'] ) ? $topic['updated_date'] : $topic['posted_epoch'];
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_modified'     => $updated_date,
+					'post_modified_gmt' => get_gmt_from_date( $updated_date ),
+				],
+				[ 'ID' => $post_id ]
+			);
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Successfully created post %d for topic %s', $post_id, $topic['topic_id'] ) );
+		}
+
+		// Migrate comments for the migrated topics.
+		$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comments for the migrated topics...' ) );
+		foreach ( $migrated_topics as $topic ) {
+			if ( ! isset( $already_migrated_post_ids_mapped_by_topic_id[ $topic['topic_id'] ] ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Topic %s (ID: %s) not found for the post %s', $topic['headline'], $topic['topic_id'], $already_migrated_post_ids_mapped_by_topic_id[ $topic['topic_id'] ] ), Logger::WARNING );
+				continue;
+			}
+
+			$post_id = $already_migrated_post_ids_mapped_by_topic_id[ $topic['topic_id'] ];
+
+			$topic_comments = array_values(
+				array_filter(
+					$comments,
+					function ( $comment ) use ( $topic ) {
+						return $topic['topic_id'] === $comment['topic_id'];
+					}
+				)
+			);
+
+			if ( ! empty( $topic_comments ) ) {
+				$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site );
+			}
 		}
 
 		WP_CLI::success( sprintf( 'Completed blog posts migration for site %s', $blog_site ) );
@@ -7672,5 +7720,74 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		}
 
 		return $post_content;
+	}
+
+	/**
+	 * Migrate blog comments.
+	 *
+	 * @param int    $wp_post_id Post ID.
+	 * @param array  $comments Comments.
+	 * @param array  $users    Users.
+	 * @param string $blog_site Blog site.
+	 */
+	private function migrate_blog_comments( $wp_post_id, $comments, $users, $blog_site ) {
+		foreach ( $comments as $comment_index => $comment ) {
+			if ( empty( $comment['comment'] ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Skipping empty comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
+				continue;
+			}
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
+
+			// Get or create subscriber user.
+			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
+			if ( false === $user_index ) {
+				// Will skip providing user data.
+				$wp_user = null;
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find user %s for the comment %d', $comment['user_id'], $comment['blog_comment_id'] ), Logger::WARNING );
+			} else {
+				// Get WP_User object.
+				$raw_user = $users[ $user_index ];
+
+				// Update default email.
+				if ( 'blank' == $raw_user['email'] ) {
+					// Using "@$blog_site" for security reasons (a valid domain not owned by us or the Publisher could emulate this email).
+					$raw_user['email'] = uniqid() . "@$blog_site";
+				}
+
+				$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
+
+				if ( ! $wp_user_id ) {
+					$wp_user = null;
+					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create subscriber %s', $raw_user['full_name'] ?? 'na/' ), Logger::WARNING );
+				} else {
+					$wp_user = get_user_by( 'id', $wp_user_id );
+				}
+			}
+
+			$comment_data = [
+				'comment_post_ID'      => $wp_post_id,
+				'comment_approved'     => 'no' === $comment['hide'],
+				'user_id'              => $wp_user ? $wp_user->ID : '',
+				'comment_author'       => $wp_user ? $wp_user->user_nicename : $comment['user_name'],
+				'comment_author_email' => $wp_user ? $wp_user->user_email : '',
+				'comment_author_url'   => $wp_user ? $wp_user->user_url : '',
+				'comment_author_IP'    => $comment['ip_address'] ?? '',
+				'comment_content'      => $comment['comment'] ?? '',
+				'comment_date'         => $this->get_post_date_from_timestamp( $comment['posted_epoch'] ),
+				'comment_meta'         => [],
+			];
+
+			$comment_id = wp_insert_comment( $comment_data );
+
+			if ( ! $comment_id ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not create comment %s', $comment['blog_comment_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			update_comment_meta( $comment_id, self::EMBARCADERO_IMPORTED_COMMENT_META_KEY, $comment['blog_comment_id'] );
+
+			$this->logger->log( self::LOG_FILE, sprintf( 'Created comment %d with the ID %d', $comment['blog_comment_id'], $comment_id ) );
+		}
 	}
 }
