@@ -7542,7 +7542,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			array_filter(
 				$blog_comments,
 				function ( $comment ) use ( $target_blog_ids ) {
-					return in_array( $comment['blog_id'], $target_blog_ids );
+					return in_array( $comment['blog_id'], $target_blog_ids ) && 'no' !== $comment['hide'];
 				}
 			)
 		);
