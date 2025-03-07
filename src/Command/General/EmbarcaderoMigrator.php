@@ -1261,8 +1261,36 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'blog-registered-users-csv',
-						'description' => 'Path to the blog_registered_users.csv file',
+						'name'        => 'danville-registered-users-csv',
+						'description' => 'Path to the danville_san_ramon_registrated_users.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'moutanin-view-registered-users-csv',
+						'description' => 'Path to the mountain_view_voice_registrated_users.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'palo-alto-registered-users-csv',
+						'description' => 'Path to the palo_alto_registrated_users.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'pleasanton-registered-users-csv',
+						'description' => 'Path to the pleasanton_registrated_users.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'almanac-registered-users-csv',
+						'description' => 'Path to the the_almanac_registrated_users.csv file',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -7475,29 +7503,45 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		global $wpdb;
 
 		// Required parameters.
-		$blog_topics_csv   = $assoc_args['blog-topics-csv'] ?? null;
-		$blog_bloggers_csv = $assoc_args['blog-bloggers-csv'] ?? null;
-		$blog_users_csv    = $assoc_args['blog-registered-users-csv'] ?? null;
-		$blog_blogs_csv    = $assoc_args['blog-blogs-csv'] ?? null;
-		$blog_comments_csv = $assoc_args['blog-comments-csv'] ?? null;
-		$blog_site         = $assoc_args['blog-site'] ?? null;
+		$blog_topics_csv         = $assoc_args['blog-topics-csv'] ?? null;
+		$blog_bloggers_csv       = $assoc_args['blog-bloggers-csv'] ?? null;
+		$danville_users_csv      = $assoc_args['danville-registered-users-csv'] ?? null;
+		$moutanin_view_users_csv = $assoc_args['moutanin-view-registered-users-csv'] ?? null;
+		$palo_alto_users_csv     = $assoc_args['palo-alto-registered-users-csv'] ?? null;
+		$pleasanton_users_csv    = $assoc_args['pleasanton-registered-users-csv'] ?? null;
+		$almanac_users_csv       = $assoc_args['almanac-registered-users-csv'] ?? null;
+		$blog_blogs_csv          = $assoc_args['blog-blogs-csv'] ?? null;
+		$blog_comments_csv       = $assoc_args['blog-comments-csv'] ?? null;
+		$blog_site               = $assoc_args['blog-site'] ?? null;
 
 		// Validate all required parameters are provided.
-		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_comments_csv || ! $blog_site ) {
+		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_comments_csv || ! $blog_site || ! $danville_users_csv || ! $moutanin_view_users_csv || ! $palo_alto_users_csv || ! $pleasanton_users_csv || ! $almanac_users_csv ) {
 			WP_CLI::error( 'Missing required parameters. Please provide all required CSV files and the blog site domain.' );
 		}
 
 		// Validate all CSV files exist.
-		foreach ( [ $blog_topics_csv, $blog_bloggers_csv, $blog_blogs_csv, $blog_comments_csv ] as $csv_file ) {
+		foreach ( [ $blog_topics_csv, $blog_bloggers_csv, $blog_blogs_csv, $blog_comments_csv, $danville_users_csv, $moutanin_view_users_csv, $palo_alto_users_csv, $pleasanton_users_csv, $almanac_users_csv ] as $csv_file ) {
 			if ( ! file_exists( $csv_file ) ) {
 				WP_CLI::error( sprintf( 'CSV file not found: %s', $csv_file ) );
 			}
 		}
 
 		// Read all CSV files.
-		$blog_blogs    = $this->get_data_from_csv_or_tsv( $blog_blogs_csv );
-		$blog_bloggers = $this->get_data_from_csv_or_tsv( $blog_bloggers_csv );
-		$blog_users    = $this->get_data_from_csv_or_tsv( $blog_users_csv );
+		$blog_blogs          = $this->get_data_from_csv_or_tsv( $blog_blogs_csv );
+		$blog_bloggers       = $this->get_data_from_csv_or_tsv( $blog_bloggers_csv );
+		$danville_users      = $this->get_data_from_csv_or_tsv( $danville_users_csv );
+		$moutanin_view_users = $this->get_data_from_csv_or_tsv( $moutanin_view_users_csv );
+		$palo_alto_users     = $this->get_data_from_csv_or_tsv( $palo_alto_users_csv );
+		$pleasanton_users    = $this->get_data_from_csv_or_tsv( $pleasanton_users_csv );
+		$almanac_users       = $this->get_data_from_csv_or_tsv( $almanac_users_csv );
+
+		$blog_users = [
+			'danvillesanramon.com' => $danville_users,
+			'mv-voice.com'         => $moutanin_view_users,
+			'paloaltoonline.com'   => $palo_alto_users,
+			'pleasantonweekly.com' => $pleasanton_users,
+			'almanacnews.com'      => $almanac_users,
+		];
 
 		// Index blog sites by domain.
 		$blogs = [];
@@ -7727,10 +7771,10 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 *
 	 * @param int    $wp_post_id Post ID.
 	 * @param array  $comments Comments.
-	 * @param array  $users    Users.
+	 * @param array  $all_users All users.
 	 * @param string $blog_site Blog site.
 	 */
-	private function migrate_blog_comments( $wp_post_id, $comments, $users, $blog_site ) {
+	private function migrate_blog_comments( $wp_post_id, $comments, $all_users, $blog_site ) {
 		foreach ( $comments as $comment_index => $comment ) {
 			if ( empty( $comment['comment'] ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Skipping empty comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
@@ -7738,6 +7782,13 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			}
 
 			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
+
+			if ( ! array_key_exists( $comment['site_name'], $all_users ) ) {
+				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find users for the comment %d', $comment['blog_comment_id'] ), Logger::WARNING );
+				continue;
+			}
+
+			$users = $all_users[ $comment['site_name'] ];
 
 			// Get or create subscriber user.
 			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
