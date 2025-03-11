@@ -88,6 +88,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	const EMBARCADERO_IMPORTED_PRINT_ISSUE_META_KEY = '_newspack_import_print_issue_id';
 	const EMBARCADERO_MIGRATED_POST_SLUG_META_KEY   = '_newspack_migrated_post_slug_id';
 	const EMBARCADERO_ORIGINAL_MEDIA_ID_META_KEY    = '_newspack_media_import_id';
+	const EMBARCADERO_SKIP_NUMBR_POST_SLUG_META_KEY = '_newspack_skip_number_post_slug';
 	const DEFAULT_AUTHOR_NAME                       = 'Staff';
 
 	const ALLOWED_CATEGORIES = [
@@ -1336,6 +1337,39 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						'name'        => 'dry-run',
 						'description' => 'If present, the command will not make any changes to the database.',
 						'optional'    => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-tackle-posts-with-numbers-in-slugs',
+			self::get_command_closure( 'cmd_address_posts_with_numbers_in_slugs' ),
+			[
+				'shortdesc' => 'This command will tackle posts with numbers in their slugs.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'dry-run',
+						'description' => 'If present, the command will not make any changes to the database.',
+						'optional'    => true,
+					],
+				],
+			],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-add-skip-flag-to-numbered-slug-post',
+			self::get_command_closure( 'cmd_set_skip_flag_for_numbered_post_inspection' ),
+			[
+				'shortdesc' => 'This command will add a skip flag to the given list of post IDs so that they can be skipped during the post inspection process.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'Comma-separated list of post IDs.',
+						'optional'    => false,
+						'repeating'   => true,
 					],
 				],
 			]
@@ -5993,6 +6027,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_exists = $wpdb->get_row(
 				$wpdb->prepare(
 					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
@@ -6007,6 +6042,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 			$search_title = empty( trim( $row['print_headline'] ?? '' ) ) ? trim( $row['headline'] ) : trim( $row['print_headline'] );
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_search = $wpdb->get_results(
 				$wpdb->prepare(
 					"SELECT 
@@ -6032,6 +6068,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						continue;
 					}
 
+					// phpcs:ignore WordPress.WP.AlternativeFunctions.strip_tags_strip_tags -- wp_strip_tags removes too much HTML tags
 					similar_text( strip_tags( $post->post_content_snippet ), $row['headline'], $percent );
 
 					$output[] = [
@@ -6372,6 +6409,251 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 			echo "\n\n";
 			ConsoleTable::output_data( array_values( $unique_authors_list ), [], 'Unique Authors Found' );
+		}
+	}
+
+	/**
+	 * This command retrieves all posts with a number appended to their slugs. It will check to make sure
+	 * that the appended number is valid and not actually part of the post title. Then it will check to
+	 * make sure the updated slug is not already in use. If all checks pass, it will update the slug.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_address_posts_with_numbers_in_slugs( array $args, array $assoc_args ) {
+		$dry_run = ! empty( $assoc_args['dry-run'] );
+
+		global $wpdb;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$posts_with_number_in_slug = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    					p.ID, 
+    					p.post_title, 
+    					p.post_name, 
+    					p.post_date,
+    					pm.meta_value
+				FROM $wpdb->posts p
+				LEFT JOIN (
+					SELECT 
+					    * 
+					FROM $wpdb->postmeta
+					WHERE meta_key = %s
+					) pm 
+				    ON p.ID = pm.post_id
+				WHERE p.post_type = 'post' 
+				  AND p.post_status = 'publish' 
+				  AND p.post_name REGEXP '.+(-[0-9]+)$' 
+				  AND pm.meta_value IS NULL 
+				ORDER BY p.post_name, p.post_date",
+				self::EMBARCADERO_SKIP_NUMBR_POST_SLUG_META_KEY
+			)
+		);
+
+		if ( empty( $posts_with_number_in_slug ) ) {
+			ConsoleColor::green( 'No posts found with numbers in slugs.' )->output();
+
+			return;
+		}
+
+		$count_posts_with_number_in_slug = count( $posts_with_number_in_slug );
+
+		ConsoleColor::cyan( 'Total posts with numbers in slugs:' )->bright_cyan( $count_posts_with_number_in_slug )->output();
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- just need a quick and easy way to do this.
+		$qa_file = fopen( 'qa_posts_with_numbered_slugs.csv', 'w' );
+		$header  = [
+			'Post_ID'               => null,
+			'Post_Title'            => null,
+			'Post_Name'             => null,
+			'Post_Date'             => null,
+			'Original_Permalink'    => null,
+			'Anticipated_Permalink' => null,
+			'Updated'               => 'False',
+			'Reason?'               => null,
+		];
+		fputcsv(
+			$qa_file,
+			array_keys( $header )
+		);
+
+		foreach ( $posts_with_number_in_slug as $post ) {
+			echo "\n";
+			$qa_row                       = $header;
+			$qa_row['Post_ID']            = $post->ID;
+			$qa_row['Post_Title']         = $post->post_title;
+			$qa_row['Post_Name']          = $post->post_name;
+			$qa_row['Post_Date']          = $post->post_date;
+			$qa_row['Original_Permalink'] = get_permalink( $post->ID );
+			$console                      = ConsoleColor::white( 'ID:' )->bright_yellow( $post->ID );
+			$console->white( 'Slug:' )->bright_yellow( $post->post_name );
+			$console->white( 'Date:' )->bright_yellow( $post->post_date )->output();
+
+			$sanitized_title                 = sanitize_title( $post->post_title );
+			$slug_with_number_removed        = preg_replace( '/-[0-9]+$/', '', $post->post_name );
+			$qa_row['Anticipated_Permalink'] = str_replace( $post->post_name, $sanitized_title, $qa_row['Original_Permalink'] );
+
+			if ( $sanitized_title !== $slug_with_number_removed ) {
+				ConsoleTable::output_comparison(
+					[],
+					[
+						'Sanitized Title'              => ConsoleColor::yellow( $sanitized_title )->get(),
+						'Original Slug w/ No. Removed' => ConsoleColor::yellow( $slug_with_number_removed )->get(),
+					],
+				);
+
+				$qa_row['Reason?'] = 'Updated Permalink doesn\'t seem correct.';
+				fputcsv( $qa_file, $qa_row );
+
+				continue;
+			} else {
+				ConsoleTable::output_comparison(
+					[],
+					[
+						'Sanitized Title'              => ConsoleColor::white( $sanitized_title )->get(),
+						'Original Slug w/ No. Removed' => ConsoleColor::white( $slug_with_number_removed )->get(),
+					],
+				);
+			}
+
+			// Get any similarly named posts, near the same date.
+			// Because Embarcadero uses the date in their slug, if the date is different, we can update the post_name and remove the number.
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$similar_posts = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT 
+    						ID, 
+    						post_title, 
+    						post_name, 
+    						post_date 
+						FROM $wpdb->posts 
+						WHERE post_type = 'post' 
+						  AND post_status = 'publish' 
+						  AND post_name LIKE %s 
+						  AND post_date 
+						      BETWEEN DATE_SUB( %s, INTERVAL 2 DAY) 
+						      AND DATE_ADD( %s, INTERVAL 2 DAY) 
+						  AND ID != %d 
+						ORDER BY post_date",
+					$wpdb->esc_like( $sanitized_title ) . '%',
+					$post->post_date,
+					$post->post_date,
+					$post->ID
+				)
+			);
+
+			if ( empty( $similar_posts ) ) {
+				ConsoleColor::green( 'No similarly named posts found near the same date.' )->output();
+
+				$maybed_slug_updated = (bool) $dry_run;
+				if ( ! $dry_run ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$maybed_slug_updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_name' => $sanitized_title ],
+						[ 'ID' => $post->ID ]
+					);
+				}
+
+				if ( $maybed_slug_updated ) {
+					$qa_row['Updated'] = 'True';
+					$console           = ConsoleColor::green( 'Post slug updated successfully.' );
+
+					if ( $dry_run ) {
+						$console->bright_green( $qa_row['Anticipated_Permalink'] )->output();
+					} else {
+						wp_cache_flush();
+						$console->bright_green( get_permalink( $post->ID ) )->output();
+					}
+				} else {
+					$qa_row['Reason?'] = 'DB update failed.';
+					ConsoleColor::red( 'Failed to update post slug.' )->output();
+				}
+
+				fputcsv( $qa_file, $qa_row );
+				continue;
+			}
+
+			$unique_permalinks = [ $qa_row['Anticipated_Permalink'] ];
+			$post->permalink   = ConsoleColor::yellow( $qa_row['Anticipated_Permalink'] )->get();
+
+			foreach ( $similar_posts as &$similar_post ) {
+				$similar_post->permalink = get_permalink( $similar_post->ID );
+				$sanitized_similar_title = sanitize_title( $similar_post->post_title );
+				$similar_post->permalink = str_replace( $similar_post->post_name, $sanitized_similar_title, $similar_post->permalink );
+
+				if ( ! in_array( $similar_post->permalink, $unique_permalinks, true ) ) {
+					$unique_permalinks[] = $similar_post->permalink;
+				} else {
+					$similar_post->permalink = ConsoleColor::magenta( $similar_post->permalink )->get();
+				}
+			}
+
+			unset( $post->meta_value );
+			$bag = array_merge( [ $post ], $similar_posts );
+			ConsoleTable::output_data( $bag, [], 'Similarly Named Posts' );
+
+			if ( count( $bag ) === count( $unique_permalinks ) ) {
+				ConsoleColor::green( 'Permalinks are all unique, can update the slug.' )->output();
+
+				$maybed_slug_updated = (bool) $dry_run;
+				if ( ! $dry_run ) {
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+					$maybed_slug_updated = $wpdb->update(
+						$wpdb->posts,
+						[ 'post_name' => $sanitized_title ],
+						[ 'ID' => $post->ID ]
+					);
+				}
+
+				if ( $maybed_slug_updated ) {
+					$qa_row['Updated'] = 'True';
+
+					$console = ConsoleColor::green( 'Post slug updated successfully.' );
+
+					if ( $dry_run ) {
+						$console->bright_green( $qa_row['Anticipated_Permalink'] )->output();
+					} else {
+						wp_cache_flush();
+						$console->bright_green( get_permalink( $post->ID ) )->output();
+					}
+				} else {
+					$qa_row['Reason?'] = 'DB update failed.';
+					ConsoleColor::red( 'Failed to update post slug.' )->output();
+				}
+			} else {
+				ConsoleColor::red( 'Some permalinks are not unique, cannot update the slug.' )->output();
+				$qa_row['Reason?'] = 'Some permalinks are not unique.';
+			}
+
+			fputcsv( $qa_file, $qa_row );
+		}
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose
+		fclose( $qa_file );
+	}
+
+	/**
+	 * Sets a metadata flag to help the previous command skip the numbered post inspection.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @see cmd_address_posts_with_numbers_in_slugs
+	 */
+	public function cmd_set_skip_flag_for_numbered_post_inspection( array $args, array $assoc_args ) {
+		$post_ids = explode( ',', $assoc_args['post-ids'] );
+
+		foreach ( $post_ids as $post_id ) {
+			$maybe_meta_added = update_post_meta( $post_id, self::EMBARCADERO_SKIP_NUMBR_POST_SLUG_META_KEY, '' );
+
+			if ( $maybe_meta_added ) {
+				ConsoleColor::green( 'Skipped flag set for post ID ' . $post_id . '.' )->output();
+			} else {
+				ConsoleColor::red( 'Failed to set skipped flag for post ID ' . $post_id . '.' )->output();
+			}
 		}
 	}
 
