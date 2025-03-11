@@ -6027,6 +6027,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_exists = $wpdb->get_row(
 				$wpdb->prepare(
 					"SELECT post_id FROM $wpdb->postmeta WHERE meta_key = %s AND meta_value = %d",
@@ -6041,6 +6042,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 
 			$search_title = empty( trim( $row['print_headline'] ?? '' ) ) ? trim( $row['headline'] ) : trim( $row['print_headline'] );
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_search = $wpdb->get_results(
 				$wpdb->prepare(
 					"SELECT 
@@ -6066,6 +6068,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						continue;
 					}
 
+					// phpcs:ignore WordPress.WP.AlternativeFunctions.strip_tags_strip_tags -- wp_strip_tags removes too much HTML tags
 					similar_text( strip_tags( $post->post_content_snippet ), $row['headline'], $percent );
 
 					$output[] = [
