@@ -82,6 +82,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\MiradorProvincialMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
+		Command\PublisherSpecific\PalabraMigrator::class,
 		Command\PublisherSpecific\UgObserver::class,
 		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
 		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
