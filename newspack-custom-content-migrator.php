@@ -86,6 +86,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
 		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
 		Command\PublisherSpecific\OrthopedicsThisWeekMigrator::class,
+		Command\PublisherSpecific\MountainJournalMigrator::class,
 	]
 );
 
