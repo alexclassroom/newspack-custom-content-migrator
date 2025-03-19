@@ -391,11 +391,13 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	private function process_article( array $article_data ): void {
 		global $wpdb;
 
+		// Reset the height adjustment script added flag.
+		$this->height_adjustment_script_added = false;
+
 		// Create post data.
 		$post_data = [
 			'post_title'   => $article_data['metadata']['headline'],
 			'post_status'  => $article_data['metadata']['is_published'] ? 'publish' : 'draft',
-			// 'post_author'  => $post_author,
 			'post_excerpt' => $article_data['metadata']['summary'] ?? '',
 		];
 
@@ -473,6 +475,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			$this->handle_post_topics( $post_id, $article_data['metadata']['user_facing_tags'] );
 		}
 
+		// Handle private tags.
+		if ( ! empty( $article_data['metadata']['tags'] ) ) {
+			$this->handle_post_tags( $post_id, $article_data['metadata']['tags'], true );
+		}
+
 		// Handle series.
 		if ( ! empty( $article_data['metadata']['series'] ) ) {
 			$this->handle_post_series( $post_id, $article_data['metadata']['series'], $article_data['metadata']['series_kicker']['name'] ?? null );
@@ -511,12 +518,24 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			$maybe_featured_image_attachment_object
 		);
 
-		// Update post with content.
+		// Get first component.
+		$first_component = current( parse_blocks( $content ) );
+		if ( $first_component ) {
+			$first_component_type = $first_component['blockName'];
+			if ( in_array( $first_component_type, [ 'core/video', 'core/embed', 'core/image', 'core/gallery' ], true ) ) {
+				update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+			}
+		}
+
+		// Update post with content and post data in case they were updated.
 		wp_update_post(
-			[
-				'ID'           => $post_id,
-				'post_content' => $content,
-			]
+			array_merge(
+				[
+					'ID'           => $post_id,
+					'post_content' => $content,
+				],
+				$post_data
+			)
 		);
 
 		// Handle articlelink.
@@ -526,6 +545,26 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 		// Handle authors and contributors.
 		$this->handle_authors_and_contributors( $post_id, $article_data['metadata']['authors'], $article_data['metadata']['contributors'] );
+
+		// Handle permalink with dates different from the post date.
+		$original_permalink = join( '/', $article_data['metadata']['path_array'] );
+		$original_post_date = gmdate( 'Y/m/d', strtotime( $article_data['metadata']['date_published'] ) );
+
+		if ( ! str_starts_with( $original_permalink, $original_post_date ) ) {
+			$relative_permalink = wp_make_link_relative( get_permalink( $post_id ) );
+			$this->redirection->create_redirection_rule_in_group(
+				'Different date permalink: ' . $article_data['metadata']['headline'],
+				$original_permalink,
+				$relative_permalink,
+				'articlelink'
+			);
+
+			ConsoleColor::green( 'Created redirection group for articlelink post' )
+				->bright_green( $post_id . ':' )
+				->green( "$original_permalink => " )
+				->green( $relative_permalink )
+				->output();
+		}
 
 		// Update modification date directly in the database.
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -958,7 +997,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		}
 
 		$this->tags_data = [];
-		$next_url        = 'https://www.texastribune.org/api/v2/tags/?limit=100&is_public=true';
+		$next_url        = 'https://www.texastribune.org/api/v2/tags/?limit=100';
 
 		while ( $next_url ) {
 			$response = wp_remote_get( $next_url );
@@ -982,7 +1021,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 			// Store each tag in our cache, indexed by ID.
 			foreach ( $data['results'] as $tag ) {
-				if ( isset( $tag['id'] ) && isset( $tag['name'] ) && isset( $tag['type'] ) && isset( $tag['is_public'] ) && $tag['is_public'] ) {
+				if ( isset( $tag['id'] ) && isset( $tag['name'] ) && isset( $tag['type'] ) ) {
 					// Get parent tag name based on type.
 					$parent_name = 'subject' === strtolower( $tag['type'] ) ? 'Topic' : ucfirst( strtolower( $tag['type'] ) );
 
@@ -1084,9 +1123,10 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 *
 	 * @param int   $post_id Post ID.
 	 * @param array $tag_ids Array of tag IDs.
+	 * @param bool  $is_private Whether the tags are private.
 	 * @return void
 	 */
-	private function handle_post_tags( int $post_id, array $tag_ids ): void {
+	private function handle_post_tags( int $post_id, array $tag_ids, bool $is_private = false ): void {
 		$tag_ids_to_set = [];
 
 		foreach ( $tag_ids as $tag_id ) {
@@ -1116,7 +1156,13 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 							'post_tag',
 							[ 'parent' => $parent_term->term_id ]
 						);
+
 						if ( ! is_wp_error( $child_result ) ) {
+							if ( $is_private ) {
+								// Set tag meta.
+								update_term_meta( $child_result['term_id'], 'np_private_tag', true );
+							}
+
 							$tag_ids_to_set[] = $child_result['term_id'];
 							continue;
 						}
@@ -1465,12 +1511,13 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * @return string
 	 */
 	private function handle_sections_entry_container( array $component, int $post_id ): string {
-		$sections_entry = '';
-		$timestamp      = '';
-		$copy_link      = '';
+		$sections_entry      = '';
+		$timestamp           = '';
+		$copy_link           = '';
+		$component_permalink = get_permalink( $post_id ) . '#' . $component['identifier'];
 
 		if ( isset( $component['show_copy_link'] ) && $component['show_copy_link'] ) {
-			$copy_link = '<a href="#' . $component['identifier'] . '"><span class="dashicons dashicons-admin-links"></span></a>';
+			$copy_link = '<a href="#' . $component['identifier'] . '"><span class="dashicons dashicons-admin-links" onclick="navigator.clipboard.writeText(\'' . $component_permalink . '\');"></span></a>';
 		}
 
 		foreach ( $component['components'] as $sub_component ) {
@@ -2145,16 +2192,15 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 					return serialize_block( $paragraph_block );
 				}
 
-				$pdf_block = $this->block_generator->get_file_pdf( get_post( $attachment_id ), '', false );
-
-				$caption_block = $this->handle_caption_component( $component );
+				$caption_text = isset( $component['text'] ) ? $component['text'] : ( isset( $component['caption'] ) ? $component['caption'] : '' );
 
 				return serialize_block(
 					$this->block_generator->get_group_constrained(
 						[
-							$pdf_block,
-							$caption_block,
-						]
+							$this->block_generator->get_heading( 'Reference', 'h4', '', 'small', 'bold' ),
+							$this->block_generator->get_paragraph( '<a href="' . $component['file_url'] . '"><span class="dashicons dashicons-media-document"></span> ' . $caption_text . ' <span>Download</span></a>' ),
+						],
+						[ 'newspack-document-download-container' ]
 					)
 				);
 			default:
@@ -2196,17 +2242,24 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		$url  = isset( $component['series_url'] ) ? get_site_url( null, $component['series_url'] ) : '';
 		$text = isset( $component['series_name'] ) ? $component['series_name'] : $url;
 
-		return serialize_block(
+		$inner_blocks = [
 			$this->block_generator->get_heading(
 				'<span style="text-transform:uppercase">Latest from the series</span>'
 				. '<br>'
 				. '<a href="' . $url . '" >' . $text . '</a>'
-			)
-		)
-		.
-		serialize_block(
-			$this->block_generator->get_homepage_articles_for_category( [ $series_term->term_id ], [] )
-		);
+			),
+			$this->block_generator->get_homepage_articles_for_category(
+				[ $series_term->term_id ],
+				[
+					'postsToShow'   => 3,
+					'mediaPosition' => 'left',
+					'typeScale'     => 3,
+					'imageScale'    => 2,
+				]
+			),
+		];
+
+		return serialize_block( $this->block_generator->get_group_constrained( $inner_blocks ), [ 'newspack-latest-from-the-series-container' ] );
 	}
 
 	/**
@@ -2541,20 +2594,6 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			->bright_green( count( $this->legacy_ids ) )
 			->green( 'previously imported articles.' )
 			->output();
-	}
-
-	/**
-	 * Set custom authors for a post based on authors metadata.
-	 *
-	 * @param int   $post_id The post ID.
-	 * @param array $authors_data The authors data from the article metadata.
-	 */
-	private function set_custom_byline( int $post_id, array $authors_data ): void {
-
-
-		// Store the custom byline.
-		update_post_meta( $post_id, '_newspack_byline_active', true );
-		update_post_meta( $post_id, '_newspack_byline', $custom_byline );
 	}
 
 	/**
