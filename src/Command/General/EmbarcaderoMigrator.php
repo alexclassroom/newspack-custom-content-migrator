@@ -1315,6 +1315,20 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-site-original-author-id',
+						'description' => 'The original author ID for the blog site',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-site-migrated-author-id',
+						'description' => 'The migrated author ID for the blog site',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -7503,16 +7517,18 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		global $wpdb;
 
 		// Required parameters.
-		$blog_topics_csv         = $assoc_args['blog-topics-csv'] ?? null;
-		$blog_bloggers_csv       = $assoc_args['blog-bloggers-csv'] ?? null;
-		$danville_users_csv      = $assoc_args['danville-registered-users-csv'] ?? null;
-		$moutanin_view_users_csv = $assoc_args['moutanin-view-registered-users-csv'] ?? null;
-		$palo_alto_users_csv     = $assoc_args['palo-alto-registered-users-csv'] ?? null;
-		$pleasanton_users_csv    = $assoc_args['pleasanton-registered-users-csv'] ?? null;
-		$almanac_users_csv       = $assoc_args['almanac-registered-users-csv'] ?? null;
-		$blog_blogs_csv          = $assoc_args['blog-blogs-csv'] ?? null;
-		$blog_comments_csv       = $assoc_args['blog-comments-csv'] ?? null;
-		$blog_site               = $assoc_args['blog-site'] ?? null;
+		$blog_topics_csv              = $assoc_args['blog-topics-csv'] ?? null;
+		$blog_bloggers_csv            = $assoc_args['blog-bloggers-csv'] ?? null;
+		$danville_users_csv           = $assoc_args['danville-registered-users-csv'] ?? null;
+		$moutanin_view_users_csv      = $assoc_args['moutanin-view-registered-users-csv'] ?? null;
+		$palo_alto_users_csv          = $assoc_args['palo-alto-registered-users-csv'] ?? null;
+		$pleasanton_users_csv         = $assoc_args['pleasanton-registered-users-csv'] ?? null;
+		$almanac_users_csv            = $assoc_args['almanac-registered-users-csv'] ?? null;
+		$blog_blogs_csv               = $assoc_args['blog-blogs-csv'] ?? null;
+		$blog_comments_csv            = $assoc_args['blog-comments-csv'] ?? null;
+		$blog_site                    = $assoc_args['blog-site'] ?? null;
+		$blog_site_original_author_id = intval( $assoc_args['blog-site-original-author-id'] ) ?? null;
+		$blog_site_migrated_author_id = intval( $assoc_args['blog-site-migrated-author-id'] ) ?? null;
 
 		// Validate all required parameters are provided.
 		if ( ! $blog_topics_csv || ! $blog_bloggers_csv || ! $blog_blogs_csv || ! $blog_comments_csv || ! $blog_site || ! $danville_users_csv || ! $moutanin_view_users_csv || ! $palo_alto_users_csv || ! $pleasanton_users_csv || ! $almanac_users_csv ) {
@@ -7558,7 +7574,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		$target_blog_ids = $blogs[ $blog_site ];
 
 		// Get already migrated topic IDs.
-		$already_migrated_topics                      = $wpdb->get_results( "SELECT DISTINCT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key = 'topic_id'", ARRAY_A );
+		$already_migrated_topics                      = $wpdb->get_results( "SELECT DISTINCT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key IN ('topic_id', '_newspack_migrated_topic_id')", ARRAY_A );
 		$already_migrated_topic_ids                   = array_column( $already_migrated_topics, 'meta_value' );
 		$already_migrated_post_ids_mapped_by_topic_id = array_column( $already_migrated_topics, 'post_id', 'meta_value' );
 
@@ -7586,7 +7602,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			array_filter(
 				$blog_comments,
 				function ( $comment ) use ( $target_blog_ids ) {
-					return in_array( $comment['blog_id'], $target_blog_ids ) && 'no' !== $comment['hide'];
+					return in_array( $comment['blog_id'], $target_blog_ids );
 				}
 			)
 		);
@@ -7677,7 +7693,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				)
 			);
 
-			$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site );
+			$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site, $blog_site_original_author_id, $blog_site_migrated_author_id );
 
 			// Set post meta.
 			update_post_meta( $post_id, '_newspack_migrated_topic_id', $topic['topic_id'] );
@@ -7719,7 +7735,7 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 			);
 
 			if ( ! empty( $topic_comments ) ) {
-				$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site );
+				$this->migrate_blog_comments( $post_id, $topic_comments, $blog_users, $blog_site, $blog_site_original_author_id, $blog_site_migrated_author_id );
 			}
 		}
 
@@ -7773,29 +7789,36 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 	 * @param array  $comments Comments.
 	 * @param array  $all_users All users.
 	 * @param string $blog_site Blog site.
+	 * @param int    $blog_site_original_author_id Original author ID for the blog site.
+	 * @param int    $blog_site_migrated_author_id Migrated author ID for the blog site.
 	 */
-	private function migrate_blog_comments( $wp_post_id, $comments, $all_users, $blog_site ) {
+	private function migrate_blog_comments( $wp_post_id, $comments, $all_users, $blog_site, $blog_site_original_author_id, $blog_site_migrated_author_id ) {
 		foreach ( $comments as $comment_index => $comment ) {
+			$default_wp_user = null;
+
 			if ( empty( $comment['comment'] ) ) {
 				$this->logger->log( self::LOG_FILE, sprintf( 'Skipping empty comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
 				continue;
 			}
 
-			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the post %d/%d: %d', $comment_index + 1, count( $comments ), $comment['topic_id'] ) );
+			$this->logger->log( self::LOG_FILE, sprintf( 'Migrating comment for the topic %d/%d: %d (ID: %d)', $comment_index + 1, count( $comments ), $comment['topic_id'], $wp_post_id ) );
 
 			if ( ! array_key_exists( $comment['site_name'], $all_users ) ) {
-				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find users for the comment %d', $comment['blog_comment_id'] ), Logger::WARNING );
-				continue;
+				if ( $comment['user_id'] == $blog_site_original_author_id ) {
+					$default_wp_user = $blog_site_migrated_author_id;
+				}
 			}
 
-			$users = $all_users[ $comment['site_name'] ];
+			$users = array_key_exists( $comment['site_name'], $all_users ) ? $all_users[ $comment['site_name'] ] : [];
 
 			// Get or create subscriber user.
+			$wp_user    = null;
 			$user_index = array_search( $comment['user_id'], array_column( $users, 'user_id' ) );
-			if ( false === $user_index ) {
+			if ( false === $user_index && ! $default_wp_user ) {
 				// Will skip providing user data.
-				$wp_user = null;
 				$this->logger->log( self::LOG_FILE, sprintf( 'Could not find user %s for the comment %d', $comment['user_id'], $comment['blog_comment_id'] ), Logger::WARNING );
+			} elseif ( $default_wp_user ) {
+				$wp_user = get_user_by( 'id', $default_wp_user );
 			} else {
 				// Get WP_User object.
 				$raw_user = $users[ $user_index ];
@@ -7809,7 +7832,6 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 				$wp_user_id = $this->get_or_create_user( $raw_user['user_name'], $raw_user['email'], 'subscriber' );
 
 				if ( ! $wp_user_id ) {
-					$wp_user = null;
 					$this->logger->log( self::LOG_FILE, sprintf( 'Could not get or create subscriber %s', $raw_user['full_name'] ?? 'na/' ), Logger::WARNING );
 				} else {
 					$wp_user = get_user_by( 'id', $wp_user_id );
