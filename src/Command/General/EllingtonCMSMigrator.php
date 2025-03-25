@@ -176,7 +176,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$from_index             = isset( $assoc_args['from-index'] ) ? absint( $assoc_args['from-index'] ) : 0;
 
 		$xml_files = scandir( $xml_dir_path );
-		$xml_files = array_filter( $xml_files, fn ( $filename ) => ! in_array( $filename, [ '.', '..' ] ) );
+		$xml_files = array_filter( $xml_files, fn ( $filename ) => ! in_array( $filename, [ '.', '..', '.DS_Store' ] ) );
 
 		natsort( $xml_files );
 
@@ -597,7 +597,11 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			],
 		];
 
-		$post_id = wp_insert_post( $post_data );
+		if ( $local_post_id ) {
+			$post_id = wp_update_post( $post_data );
+		} else {
+			$post_id = wp_insert_post( $post_data );
+		}
 		
 		try {
 			if ( $this->cap->is_coauthors_active() && ! empty( $post_authors ) ) {
@@ -640,7 +644,11 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			'full_slug'      => $post_doc->find( 'nitf > head > doc-id', 0 )?->getAttribute( 'id-string' ),
 			'published_date' => $post_doc->find( 'nitf > head > docdata > date_release', 0 )?->getAttribute( 'norm' ),
 			'excerpt'        => $post_doc->find( 'nitf > body > body_head > abstract', 0 )?->text(),
-			'content'        => str_replace( [ '<body_content><div>', '</div></body_content>' ], '', $post_doc->find( 'nitf > body > body_content', 0 )?->text() ),
+			'content'        => str_replace(
+				[ '<body_content>', '</body_content>' ],
+				'',
+				$post_doc->find( 'nitf > body > body_content', 0 )?->text()
+			),
 			'authors'        => array_map(
 				function ( $author ) {
 					return [
@@ -651,6 +659,10 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				$post_doc->find( 'nitf > body > body_head > byline > person' ) ?? []
 			),
 		];
+
+		// There is a div after the optional first image and at the end of the content.
+		// We need to remove it.
+		$post_data['content'] = $this->filter_post_content( $post_data['content'] );
 
 		// Handle Post Comments.
 		if ( strpos( $post_data['content'], 'Previous Comments' ) ) {
@@ -921,5 +933,24 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			'innerHTML'    => '<details class="wp-block-details jfp-previous-comments"><summary>Previous Comments</summary> </details>',
 			'innerContent' => $details_block_inner_content,
 		];
+	}
+
+	/**
+	 * Filters Post Content.
+	 */
+	private function filter_post_content( string $content ): string {
+		$filtered_content = '';
+
+		$post_content_doc = new HtmlDocument( $content );
+
+		foreach ( $post_content_doc->childNodes() as $child_node ) {
+			if ( $child_node->tag === 'div' ) {
+				$filtered_content .= $child_node->innerText();
+			} else {
+				$filtered_content .= $child_node->outerText();
+			}
+		}
+
+		return $filtered_content;
 	}
 }
