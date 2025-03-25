@@ -192,6 +192,12 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 						'description' => 'Skip articles that have already been imported',
 						'optional'    => true,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'pdf-icon-attachment-id',
+						'description' => 'Attachment ID of the PDF icon',
+						'optional'    => false,
+					],
 				],
 			]
 		);
@@ -204,10 +210,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_migrate_data( $args, $assoc_args ): void {
-		$json_folder       = $assoc_args['json-folder'];
-		$sponsor_data_file = $assoc_args['sponsor-data'];
-		$author_map_file   = $assoc_args['author-map'];
-		$skip_imported     = isset( $assoc_args['skip-imported'] );
+		$json_folder            = $assoc_args['json-folder'];
+		$sponsor_data_file      = $assoc_args['sponsor-data'];
+		$author_map_file        = $assoc_args['author-map'];
+		$pdf_icon_attachment_id = $assoc_args['pdf-icon-attachment-id'];
+		$skip_imported          = isset( $assoc_args['skip-imported'] );
 
 		// Reset skipped counter.
 		$this->skipped = 0;
@@ -256,7 +263,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		foreach ( $this->json_directory_iterator( $json_folder, $skip_imported ) as $article_data ) {
 			try {
 				ConsoleColor::white( 'Processing article' )->blue( $article_data['identifier'] )->white( ':' )->bright_white( $article_data['metadata']['headline'] )->output();
-				$this->process_article( $article_data );
+				$this->process_article( $article_data, $pdf_icon_attachment_id );
 				++$processed;
 			} catch ( Exception $e ) {
 				WP_CLI::warning( sprintf( 'Error processing article: %s', $e->getMessage() ) );
@@ -387,8 +394,9 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * Process a single article.
 	 *
 	 * @param array $article_data Article data from JSON.
+	 * @param int   $pdf_icon_attachment_id Attachment ID of the PDF icon.
 	 */
-	private function process_article( array $article_data ): void {
+	private function process_article( array $article_data, int $pdf_icon_attachment_id ): void {
 		global $wpdb;
 
 		// Reset the height adjustment script added flag.
@@ -515,7 +523,8 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		$content = $this->get_post_content_by_handling_components(
 			$article_data['components'],
 			$post_id,
-			$maybe_featured_image_attachment_object
+			$maybe_featured_image_attachment_object,
+			$pdf_icon_attachment_id
 		);
 
 		// Get first component.
@@ -548,7 +557,8 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 		// Handle permalink with dates different from the post date.
 		$original_permalink = join( '/', $article_data['metadata']['path_array'] );
-		$original_post_date = gmdate( 'Y/m/d', strtotime( $article_data['metadata']['date_published'] ) );
+
+		$original_post_date = ( new \DateTime( $article_data['metadata']['date_published'] ) )->format( 'Y/m/d' );
 
 		if ( ! str_starts_with( $original_permalink, $original_post_date ) ) {
 			$relative_permalink = wp_make_link_relative( get_permalink( $post_id ) );
@@ -1352,19 +1362,20 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	/**
 	 * Return fully formed HTML from the supplied components.
 	 *
-	 * @param array                                     $components Components to process.
-	 * @param int                                       $post_id Post ID.
-	 * @param TexasTribuneAttachmentMetadataObject|null $featured_image_object Object representing a featured image.
+	 * @param array                                $components Components to process.
+	 * @param int                                  $post_id Post ID.
+	 * @param TexasTribuneAttachmentMetadataObject $featured_image_object Object representing a featured image.
+	 * @param int                                  $pdf_icon_attachment_id Attachment ID of the PDF icon.
 	 *
 	 * @return string
 	 */
-	private function get_post_content_by_handling_components( array $components, int $post_id, ?TexasTribuneAttachmentMetadataObject $featured_image_object ): string {
+	private function get_post_content_by_handling_components( array $components, int $post_id, ?TexasTribuneAttachmentMetadataObject $featured_image_object, ?int $pdf_icon_attachment_id ): string {
 		$content = '';
 
 		$previous = null;
 		foreach ( $components as $key => $component ) {
 			$next     = $components[ $key + 1 ] ?? null;
-			$content .= $this->handle_component( $component, $post_id, $previous, $next, $featured_image_object );
+			$content .= $this->handle_component( $component, $post_id, $previous, $next, $featured_image_object, $pdf_icon_attachment_id );
 			$previous = $component;
 		}
 
@@ -1382,7 +1393,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 *
 	 * @return string
 	 */
-	private function handle_component( array $component, int $post_id, ?array $previous_sibling, ?array $next_sibling, ?TexasTribuneAttachmentMetadataObject $featured_image ): string {
+	private function handle_component( array $component, int $post_id, ?array $previous_sibling, ?array $next_sibling, ?TexasTribuneAttachmentMetadataObject $featured_image, ?int $pdf_icon_attachment_id ): string {
 		switch ( strtolower( $component['role'] ) ) {
 			case 'header':
 				return '';
@@ -1393,9 +1404,9 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			case 'thumbnail entry':
 			case 'sections':
 			case 'sections container':
-				return $this->get_post_content_by_handling_components( $component['components'], $post_id, $featured_image );
+				return $this->get_post_content_by_handling_components( $component['components'], $post_id, $featured_image, $pdf_icon_attachment_id );
 			case 'sections entry container':
-				return $this->handle_sections_entry_container( $component, $post_id );
+				return $this->handle_sections_entry_container( $component, $post_id, $pdf_icon_attachment_id );
 			case 'text':
 				if ( isset( $component['text'] ) && '* * *' === $component['text'] ) {
 					return serialize_block( $this->block_generator->get_separator( 'is-stile-dots' ) );
@@ -1477,7 +1488,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			case 'audio':
 				return $this->handle_audio_component( $component );
 			case 'document link':
-				return $this->handle_document_link_component( $component );
+				return $this->handle_document_link_component( $component, $pdf_icon_attachment_id );
 			case 'series list':
 				return $this->handle_series_list_component( $component );
 			case 'series snippet':
@@ -1507,10 +1518,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 *
 	 * @param array $component Component to process.
 	 * @param int   $post_id Post ID.
+	 * @param int   $pdf_icon_attachment_id Attachment ID of the PDF icon.
 	 *
 	 * @return string
 	 */
-	private function handle_sections_entry_container( array $component, int $post_id ): string {
+	private function handle_sections_entry_container( array $component, int $post_id, ?int $pdf_icon_attachment_id ): string {
 		$sections_entry      = '';
 		$timestamp           = '';
 		$copy_link           = '';
@@ -1526,7 +1538,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 					$sections_entry .= serialize_block( $this->block_generator->get_heading( $sub_component['text'], 'h2', $component['identifier'] ) );
 					break;
 				case 'sections entry content':
-					$sections_entry .= $this->get_post_content_by_handling_components( $sub_component['components'], $post_id, null );
+					$sections_entry .= $this->get_post_content_by_handling_components( $sub_component['components'], $post_id, null, $pdf_icon_attachment_id );
 					break;
 				case 'sections entry timestamp':
 					$timestamp = '<time datetime="' . $sub_component['timestamp'] . '">' . $sub_component['text'] . '</time>';
@@ -2163,10 +2175,11 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * Handles document link components and returns HTML.
 	 *
 	 * @param array $component Component to process.
+	 * @param int   $pdf_icon_attachment_id Attachment ID of the PDF icon.
 	 *
 	 * @return string
 	 */
-	private function handle_document_link_component( array $component ): string {
+	private function handle_document_link_component( array $component, int $pdf_icon_attachment_id ): string {
 		switch ( $component['file_type'] ) {
 			case 'application/pdf':
 				$attachment_id = Attachments::import_external_file( $component['file_url'] );
@@ -2198,7 +2211,16 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 					$this->block_generator->get_group_constrained(
 						[
 							$this->block_generator->get_heading( 'Reference', 'h4', '', 'small', 'bold' ),
-							$this->block_generator->get_paragraph( '<a href="' . $component['file_url'] . '"><span class="dashicons dashicons-media-document"></span> ' . $caption_text . ' <span>Download</span></a>' ),
+							$this->block_generator->get_row(
+								[
+									$this->block_generator->get_image( get_post( $pdf_icon_attachment_id ), 'full', false, null, null, null, 24 ),
+									$this->block_generator->get_paragraph( '<a href="' . $component['file_url'] . '">' . $caption_text . ' <span>Download</span></a>' ),
+								],
+								'horizontal',
+								'left',
+								'',
+								'nowrap'
+							),
 						],
 						[ 'newspack-document-download-container' ]
 					)
