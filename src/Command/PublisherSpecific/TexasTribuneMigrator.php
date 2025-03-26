@@ -519,6 +519,12 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			}
 		}
 
+		// Delete all the corrections on the post.
+		$post_corrections = $this->get_post_corrections( $post_id );
+		foreach ( $post_corrections as $correction_id ) {
+			wp_delete_post( $correction_id, true );
+		}
+
 		// Process content components.
 		$content = $this->get_post_content_by_handling_components(
 			$article_data['components'],
@@ -1712,12 +1718,32 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		// Link the correction to the post.
 		update_post_meta( $correction_id, 'newspack_correction-post-id', $post_id );
 
-		// Set the correction type.
+		// Set the correction type and priority.
 		update_post_meta( $correction_id, 'newspack_corrections_type', $component['type'] );
+		update_post_meta( $correction_id, 'newspack_corrections_priority', $important ? 'high' : 'low' );
 
 		// Set correction settings on the post.
 		update_post_meta( $post_id, 'newspack_corrections_active', true );
-		update_post_meta( $post_id, 'newspack_corrections_location', $important ? 'top' : 'bottom' );
+	}
+
+	/**
+	 * Get all the corrections on a post.
+	 *
+	 * @param int $post_id Post ID.
+	 *
+	 * @return array<int> Array of correction IDs.
+	 */
+	private function get_post_corrections( int $post_id ): array {
+		return get_posts(
+			[
+				'post_status'    => 'all',
+				'post_type'      => 'newspack_correction',
+				'meta_key'       => 'newspack_correction-post-id',
+				'meta_value'     => $post_id, //phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+				'posts_per_page' => -1,
+				'fields'         => 'ids',
+			]
+		);
 	}
 
 	/**
