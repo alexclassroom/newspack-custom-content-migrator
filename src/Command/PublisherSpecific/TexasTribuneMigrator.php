@@ -793,8 +793,8 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 				if ( ! empty( $author['wp_user_id'] ) ) {
 					$author_text .= sprintf(
-						'<a href="%s">%s</a>',
-						get_author_posts_url( $author['wp_user_id'] ),
+						'[Author id=%s]%s[/Author]',
+						$author['wp_user_id'],
 						$author['name']
 					);
 				} else {
