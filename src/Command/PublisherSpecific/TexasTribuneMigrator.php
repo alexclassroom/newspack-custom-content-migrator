@@ -260,9 +260,19 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		// Set default domain for email.
 		add_filter( 'nmt_user_email_default_domain', fn () => 'texastribune.org' );
 
-		foreach ( $this->json_directory_iterator( $json_folder, $skip_imported ) as $article_data ) {
+		$total_files = count( $json_files );
+		foreach ( $this->json_directory_iterator( $json_folder, $skip_imported ) as $i => $article_data ) {
 			try {
-				ConsoleColor::white( 'Processing article' )->blue( $article_data['identifier'] )->white( ':' )->bright_white( $article_data['metadata']['headline'] )->output();
+				ConsoleColor::white( 'Processing article' )
+				->blue( $article_data['identifier'] )
+				->white( ' (' )
+				->blue( $i + 1 )
+				->white( '/' )
+				->blue( $total_files )
+				->white( ')' )
+				->white( ':' )
+				->bright_white( $article_data['metadata']['headline'] )
+				->output();
 				$this->process_article( $article_data, $pdf_icon_attachment_id );
 				++$processed;
 			} catch ( Exception $e ) {
