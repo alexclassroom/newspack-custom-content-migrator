@@ -53,6 +53,8 @@ class RooseveltIslander implements RegisterCommandInterface {
 		$scraper_util      = new Newspack_Scraper_Migrator_Util();
 		require_once trailingslashit( WP_PLUGIN_DIR ) . 'newspack-scraper-migrator/configs/config-roosevelt-islander.php';
 
+		$scraped_urls_path = WP_CONTENT_DIR . '/plugins/newspack-scraper-migrator/scraped_urls/';
+
 		if ( isset( $assoc_args['post-ids'] ) ) {
 			$post_ids = array_map( 'intval', explode( ',', $assoc_args['post-ids'] ) );
 
@@ -77,7 +79,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 					)
 				);
 
-				$maybe_updated = $this->update_content( $post, $post->guid, $scraper_processor, $scraper_util );
+				$maybe_updated = $this->update_content( $post, $post->guid, $scraped_urls_path, $scraper_processor, $scraper_util );
 
 				if ( null === $maybe_updated ) {
 					WP_CLI::log( 'NO UPDATE NEEDED' );
@@ -169,9 +171,18 @@ class RooseveltIslander implements RegisterCommandInterface {
 		}
 	}
 
-	private function update_content( object $post, string $url, Newspack_Scraper_Migrator_HTML_Parser $scraper_processor, Newspack_Scraper_Migrator_Util $scraper_util ): ?bool {
+	private function update_content( object $post, string $url, string $scraped_urls_path, Newspack_Scraper_Migrator_HTML_Parser $scraper_processor, Newspack_Scraper_Migrator_Util $scraper_util ): ?bool {
 		$scraper_processor->dom_crawler_clear();
-		$scraper_processor->dom_crawler_add_html( $scraper_util->newspack_scraper_migrator_get_raw_html( $url ) );
+
+		$url_filename = str_replace( '/', '__', $url );
+		$url_filename = sanitize_file_name( $url_filename );
+
+		if ( ! file_exists( $scraped_urls_path . $url_filename ) ) {
+			$html = $scraper_util->newspack_scraper_migrator_get_raw_html( $url );
+			file_put_contents( $scraped_urls_path . $url_filename, $html );
+		}
+
+		$scraper_processor->dom_crawler_add_html( file_get_contents( $scraped_urls_path . $url_filename ) );
 
 		$content = $scraper_processor->parse_content( '', $url );
 
