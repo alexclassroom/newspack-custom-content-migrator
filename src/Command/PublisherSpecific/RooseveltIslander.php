@@ -148,7 +148,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 				)
 			);
 
-			$maybe_updated = $this->update_content( $post, $url, $scraper_processor, $scraper_util );
+			$maybe_updated = $this->update_content( $post, $url, $scraped_urls_path, $scraper_processor, $scraper_util );
 
 			if ( null === $maybe_updated ) {
 				WP_CLI::log( 'NO UPDATE NEEDED' );
