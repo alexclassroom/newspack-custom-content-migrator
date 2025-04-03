@@ -1334,6 +1334,23 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-get-imported-blogs-logs',
+			self::get_command_closure( 'cmd_embarcadero_get_imported_blogs_logs' ),
+			[
+				'shortdesc' => 'Get imported blogs from Embarcadero\'s legacy system.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-blogs-csv',
+						'description' => 'Path to the blog_blogs.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-blog-author-qa',
 			self::get_command_closure( 'cmd_blog_author_qa' ),
 			[
@@ -7740,6 +7757,99 @@ class EmbarcaderoMigrator implements RegisterCommandInterface {
 		}
 
 		WP_CLI::success( sprintf( 'Completed blog posts migration for site %s', $blog_site ) );
+	}
+
+	/**
+	 * Get imported blogs from Embarcadero's legacy system.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_embarcadero_get_imported_blogs_logs( $args, $assoc_args ) {
+		global $wpdb;
+		$log_file   = 'embarcadero-get-imported-blogs.log';
+		$output_csv = 'imported_blogs.csv';
+
+		$blog_blogs_csv          = $assoc_args['blog-blogs-csv'] ?? null;
+		$blog_blogs              = $this->get_data_from_csv_or_tsv( $blog_blogs_csv );
+		$blog_names              = array_map( fn( $blog_name ) => strtolower( sanitize_term_field( 'name', $blog_name, 0, 'category', 'db' ) ), array_column( $blog_blogs, 'blog_name' ) );
+		$original_category_names = [];
+
+		// Create CSV file for output.
+		$csv_handle = fopen( $output_csv, 'w' );
+
+		// Add CSV header.
+		fputcsv(
+			$csv_handle,
+			[
+				'WP Post ID',
+				'Original ID',
+				'Was Originally Imported',
+				'Blog name',
+			]
+		);
+
+		// Get all posts with either topic_id or _newspack_migrated_topic_id meta keys.
+		$already_migrated_topics = $wpdb->get_results(
+			"SELECT DISTINCT post_id, meta_key, meta_value
+			FROM $wpdb->postmeta
+			WHERE meta_key IN ('topic_id', '_newspack_migrated_topic_id')",
+			ARRAY_A
+		);
+
+		$this->logger->log( $log_file, sprintf( 'Found %d migrated topics', count( $already_migrated_topics ) ) );
+
+		foreach ( $already_migrated_topics as $topic ) {
+			$post_id    = $topic['post_id'];
+			$meta_key   = $topic['meta_key'];
+			$meta_value = $topic['meta_value'];
+
+			// Determine if originally imported based on meta_key.
+			$was_originally_imported = '';
+			if ( 'topic_id' === $meta_key ) {
+				$was_originally_imported = 'yes';
+			} elseif ( '_newspack_migrated_topic_id' === $meta_key ) {
+				$was_originally_imported = 'no';
+			}
+
+			// Get the blog name from the post's current category.
+			$raw_categories     = array_values( array_filter( get_the_category( $post_id ), fn( $category ) => 'Blogs' !== $category->name ) );
+			$raw_category_names = array_column( $raw_categories, 'name' );
+			$category_names     = array_map(
+				function ( $blog_name ) use ( &$original_category_names ) {
+					$sanitized_name                             = strtolower( sanitize_term_field( 'name', $blog_name, 0, 'category', 'db' ) );
+					$original_category_names[ $sanitized_name ] = $blog_name;
+					return $sanitized_name;
+				},
+				$raw_category_names 
+			);
+			$blog_names_to_use  = '';
+
+			if ( ! empty( $category_names ) ) {
+				$category_names_to_use = array_values( array_filter( $category_names, fn( $category_name ) => array_key_exists( $category_name, $original_category_names ) ) );
+				$blog_names_to_use     = implode( ', ', array_map( fn( $category_name ) => $original_category_names[ $category_name ], $category_names_to_use ) );
+			}
+
+			if ( empty( $blog_names_to_use ) ) {
+				echo 1;
+			}
+
+			// Write the data to the CSV.
+			fputcsv(
+				$csv_handle,
+				[
+					$post_id,
+					$meta_value,
+					$was_originally_imported,
+					$blog_names_to_use,
+				]
+			);
+		}
+
+		// Close the CSV file.
+		fclose( $csv_handle );
+		$this->logger->log( $log_file, sprintf( 'Exported %d migrated topics to %s', count( $already_migrated_topics ), $output_csv ) );
+		WP_CLI::success( sprintf( 'Exported %d migrated topics to %s', count( $already_migrated_topics ), $output_csv ) );
 	}
 
 	/**
