@@ -2,10 +2,12 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Exception;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack_Scraper_Migrator_Util;
+use NewspackContentConverter\ContentPatcher\Patchers\BlockDecodePatcher;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use Newspack_Scraper_Migrator_HTML_Parser;
 use WP_CLI;
 use WP_Filesystem_Base;
@@ -53,6 +55,15 @@ class RooseveltIslander implements RegisterCommandInterface {
 						'default'     => 'roosevelt-islander-scrape-urls.json',
 					],
 				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator roosevelt-islander-fix-block-encoded-content',
+			self::get_command_closure( 'cmd_roosevelt_islander_fix_block_encoded_content' ),
+			[
+				'shortdesc' => 'Fix block encoded content in the Roosevelt Islander blog',
+				'synopsis'  => [],
 			]
 		);
 	}
@@ -317,6 +328,99 @@ class RooseveltIslander implements RegisterCommandInterface {
 		}
 
 		$wp_filesystem->put_contents( $filename, '[' . $wp_filesystem->get_contents( $filename ) . ']' );
-		file_put_contents( $filename, '[' . file_get_contents( $filename ) . ']' );
+	}
+
+	/**
+	 * This function will update posts with block-encoded content that was created as a result of the NCC conversion process.
+	 *
+	 * @return void
+	 */
+	public function cmd_roosevelt_islander_fix_block_encoded_content() {
+		global $wpdb;
+
+		$affected_posts_query = $wpdb->prepare(
+			"SELECT 
+    			YEAR(post_date) as post_year, 
+    			COUNT(*) as counter 
+			FROM $wpdb->posts 
+			WHERE ID IN (
+				SELECT 
+				    id 
+				FROM $wpdb->posts 
+				WHERE post_status = 'publish' 
+				  AND post_type = 'post' 
+				  AND post_content LIKE %s
+				) 
+			GROUP BY YEAR(post_date);",
+			'%' . $wpdb->esc_like( 'BLOCK-ENCODED' ) . '%'
+		);
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching,WordPress.DB.PreparedSQL.NotPrepared
+		$summary_of_affected_posts = $wpdb->get_results( $affected_posts_query );
+
+		ConsoleTable::output_data( $summary_of_affected_posts );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$affected_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    				ID, 
+    				post_content,
+    				YEAR(post_date) as post_year 
+				FROM $wpdb->posts 
+				WHERE post_status = 'publish' 
+				  AND post_type = 'post' 
+				  AND post_content LIKE %s 
+				ORDER BY post_year DESC, ID DESC",
+				'%' . $wpdb->esc_like( 'BLOCK-ENCODED' ) . '%'
+			)
+		);
+
+		$decoder = new BlockDecodePatcher();
+
+		ConsoleColor::white( 'Total # of Affected Posts' )->bright_yellow( count( $affected_posts ) )->output();
+		foreach ( $affected_posts as $post ) {
+			ConsoleColor::white( 'Post ID' )->bright_yellow( $post->ID )->white( 'Year' )->bright_yellow( $post->post_year )->output();
+
+			preg_match_all( '/(?:<!-- wp:preformatted -->\s*)?<pre .+>(?:\s*)?(\[BLOCK-ENCODED:.+\])(?:\s*)?<\/pre>(?:\s*)?(?:<!-- \/wp:preformatted -->)?/', $post->post_content, $matches, PREG_SET_ORDER );
+			if ( empty( $matches ) ) {
+				ConsoleColor::magenta( 'No encoded blocks found' )->output();
+				continue;
+			}
+
+			$post_content = $post->post_content;
+			foreach ( $matches as $match ) {
+				// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+				// 0 => '<!-- wp:preformatted --><pre>[BLOCK-ENCODED:...]</pre><!-- /wp:preformatted -->'
+				// 1 => [BLOCK-ENCODED:...]
+
+				$decoded_content = $decoder->patch_blocks_contents( $match[1], $post->post_content, $post->ID );
+				if ( ! str_contains( $decoded_content, '<!-- wp:' ) ) {
+					$decoded_content = "<!-- wp:html -->\n{$decoded_content}\n<!-- /wp:html -->";
+				}
+				$post_content = str_replace( $match[0], $decoded_content, $post_content );
+			}
+
+			if ( $post_content === $post->post_content ) {
+				ConsoleColor::magenta( 'Content was not correctly decoded' )->output();
+				continue;
+			}
+
+			wp_save_post_revision( $post->ID );
+
+			$maybe_updated = wp_update_post(
+				[
+					'ID'           => $post->ID,
+					'post_content' => $post_content,
+				]
+			);
+
+			if ( is_wp_error( $maybe_updated ) ) {
+				ConsoleColor::red( 'POST NOT UPDATED' )->output();
+				continue;
+			}
+
+			ConsoleColor::green( 'Updated' )->output();
+		}
 	}
 }
