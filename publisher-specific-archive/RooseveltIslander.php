@@ -1,4 +1,9 @@
 <?php
+/**
+ * Custom Migrator for Roosevelt Islander.
+ *
+ * @package NewspackCustomContentMigrator\Command\PublisherSpecific
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
@@ -258,7 +263,16 @@ class RooseveltIslander implements RegisterCommandInterface {
 		);
 	}
 
-	public function cmd_roosevelt_islander_create_scrape_urls( array $args, array $assoc_args ) {
+	/**
+	 * This function generates a list of URLs to be scraped for the Roosevelt Islander blog.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws WP_CLI\ExitException If the file containing URLs to be scraped does not exist.
+	 */
+	public function cmd_roosevelt_islander_create_scrape_urls( array $args, array $assoc_args ): void {
 		// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
 		/* @var $wp_filesystem WP_Filesystem_Base */
 		global $wp_filesystem;
@@ -335,7 +349,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 	 *
 	 * @return void
 	 */
-	public function cmd_roosevelt_islander_fix_block_encoded_content() {
+	public function cmd_roosevelt_islander_fix_block_encoded_content(): void {
 		global $wpdb;
 
 		$affected_posts_query = $wpdb->prepare(
