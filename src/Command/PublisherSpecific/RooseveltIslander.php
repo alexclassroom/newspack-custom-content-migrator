@@ -8,11 +8,20 @@ use Newspack_Scraper_Migrator_Util;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack_Scraper_Migrator_HTML_Parser;
 use WP_CLI;
+use WP_Filesystem_Base;
 
+/**
+ * Roosevelt Islander-specific migrator and content fixer.
+ */
 class RooseveltIslander implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+	/**
+	 * Registers commands.
+	 *
+	 * @inheritDoc
+	 */
 	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator roosevelt-islander-content-fixes',
@@ -48,9 +57,29 @@ class RooseveltIslander implements RegisterCommandInterface {
 		);
 	}
 
+	/**
+	 * This command will cycle through all posts and re-run the scraping logic that was used initially to scrape
+	 * posts from the Roosevelt Islander blog. This was necessary because the scraping logic was being worked
+	 * on up until the last minute, and applying the changes retroactively was not feasible.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
 	public function cmd_roosevelt_islander_content_fixes( array $args, array $assoc_args ) {
 		$scraper_processor = new Newspack_Scraper_Migrator_HTML_Parser();
 		$scraper_util      = new Newspack_Scraper_Migrator_Util();
+
+		// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+		/* @var $wp_filesystem WP_Filesystem_Base */
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+
+		// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
 		require_once trailingslashit( WP_PLUGIN_DIR ) . 'newspack-scraper-migrator/configs/config-roosevelt-islander.php';
 
 		$scraped_urls_path = WP_CONTENT_DIR . '/plugins/newspack-scraper-migrator/scraped_urls/';
@@ -79,7 +108,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 					)
 				);
 
-				$maybe_updated = $this->update_content( $post, $post->guid, $scraped_urls_path, $scraper_processor, $scraper_util );
+				$maybe_updated = $this->update_content( $post, $post->guid, $scraped_urls_path, $scraper_processor, $scraper_util, $wp_filesystem );
 
 				if ( null === $maybe_updated ) {
 					WP_CLI::log( 'NO UPDATE NEEDED' );
@@ -107,6 +136,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$skippable_posts = $wpdb->get_results(
 			"SELECT meta_value, post_id FROM $wpdb->postmeta WHERE meta_key = '_newspack_skip_content_fix'",
 			OBJECT_K
@@ -123,6 +153,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 				continue;
 			}
 
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post = $wpdb->get_row(
 				$wpdb->prepare(
 					"SELECT * FROM $wpdb->posts WHERE guid = %s",
@@ -148,7 +179,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 				)
 			);
 
-			$maybe_updated = $this->update_content( $post, $url, $scraped_urls_path, $scraper_processor, $scraper_util );
+			$maybe_updated = $this->update_content( $post, $url, $scraped_urls_path, $scraper_processor, $scraper_util, $wp_filesystem );
 
 			if ( null === $maybe_updated ) {
 				WP_CLI::log( 'NO UPDATE NEEDED' );
@@ -171,7 +202,19 @@ class RooseveltIslander implements RegisterCommandInterface {
 		}
 	}
 
-	private function update_content( object $post, string $url, string $scraped_urls_path, Newspack_Scraper_Migrator_HTML_Parser $scraper_processor, Newspack_Scraper_Migrator_Util $scraper_util ): ?bool {
+	/**
+	 * This function handles updating the content of a post using the latest scraping logic.
+	 *
+	 * @param object                                $post The post object to update.
+	 * @param string                                $url The URL of the post.
+	 * @param string                                $scraped_urls_path The path to the scraped URLs directory.
+	 * @param Newspack_Scraper_Migrator_HTML_Parser $scraper_processor The HTML parser for scraping.
+	 * @param Newspack_Scraper_Migrator_Util        $scraper_util The utility class for scraping.
+	 * @param WP_Filesystem_Base                    $wp_filesystem The WordPress filesystem object.
+	 *
+	 * @return bool|null
+	 */
+	private function update_content( object $post, string $url, string $scraped_urls_path, Newspack_Scraper_Migrator_HTML_Parser $scraper_processor, Newspack_Scraper_Migrator_Util $scraper_util, WP_Filesystem_Base $wp_filesystem ): ?bool {
 		$scraper_processor->dom_crawler_clear();
 
 		$url_filename = str_replace( '/', '__', $url );
@@ -179,10 +222,10 @@ class RooseveltIslander implements RegisterCommandInterface {
 
 		if ( ! file_exists( $scraped_urls_path . $url_filename ) ) {
 			$html = $scraper_util->newspack_scraper_migrator_get_raw_html( $url );
-			file_put_contents( $scraped_urls_path . $url_filename, $html );
+			$wp_filesystem->put_contents( $scraped_urls_path . $url_filename, $html );
 		}
 
-		$scraper_processor->dom_crawler_add_html( file_get_contents( $scraped_urls_path . $url_filename ) );
+		$scraper_processor->dom_crawler_add_html( $wp_filesystem->get_contents( $scraped_urls_path . $url_filename ) );
 
 		$content = $scraper_processor->parse_content( '', $url );
 
@@ -192,6 +235,7 @@ class RooseveltIslander implements RegisterCommandInterface {
 
 		global $wpdb;
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		return (bool) $wpdb->update(
 			$wpdb->posts,
 			[
@@ -204,6 +248,14 @@ class RooseveltIslander implements RegisterCommandInterface {
 	}
 
 	public function cmd_roosevelt_islander_create_scrape_urls( array $args, array $assoc_args ) {
+		// phpcs:ignore Squiz.PHP.CommentedOutCode.Found
+		/* @var $wp_filesystem WP_Filesystem_Base */
+		global $wp_filesystem;
+		if ( ! $wp_filesystem ) {
+			require_once ABSPATH . 'wp-admin/includes/file.php';
+			WP_Filesystem();
+		}
+
 		$filename = $assoc_args['url-list-filename'];
 
 		if ( file_exists( $filename ) ) {
@@ -219,18 +271,24 @@ class RooseveltIslander implements RegisterCommandInterface {
 				)
 			);
 
-			rename( $filename, $new_filename );
+			$wp_filesystem->move( $filename, $new_filename );
 		}
 
 		require_once trailingslashit( WP_PLUGIN_DIR ) . 'newspack-scraper-migrator/configs/config-roosevelt-islander.php';
 
-		$handle = fopen( $filename, 'w' );
-		WP_CLI::log( 'URL list file created' );
+		if ( ! $wp_filesystem->exists( $filename ) && $wp_filesystem->touch( $filename ) ) {
+			WP_CLI::log( 'URL list file created' );
+		}
+
+		if ( ! $wp_filesystem->exists( $filename ) ) {
+			WP_CLI::error( 'Failed to create URL list file' );
+		}
 
 		$post_urls = get_post_urls( [ 'https://rooseveltislander.blogspot.com/sitemap.xml' ] );
 
 		global $wpdb;
 		foreach ( $post_urls as $url ) {
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$post_id = $wpdb->get_var(
 				$wpdb->prepare(
 					"SELECT ID FROM $wpdb->posts WHERE guid = %s",
@@ -255,10 +313,10 @@ class RooseveltIslander implements RegisterCommandInterface {
 				)
 			);
 
-			fwrite( $handle, "\"$url\"," . PHP_EOL );
+			$wp_filesystem->put_contents( $filename, "\"$url\"," . PHP_EOL, FILE_APPEND );
 		}
 
-		fclose( $handle );
+		$wp_filesystem->put_contents( $filename, '[' . $wp_filesystem->get_contents( $filename ) . ']' );
 		file_put_contents( $filename, '[' . file_get_contents( $filename ) . ']' );
 	}
 }
