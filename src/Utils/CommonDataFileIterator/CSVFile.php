@@ -82,7 +82,13 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 	public function get_header(): array {
 		rewind( $this->get_handle() );
 
-		return $this->get_row( $this->get_handle() );
+		$row = $this->get_row( $this->get_handle() );
+
+		if ( is_bool( $row ) ) {
+			throw new Exception( 'File does not exist or is not readable.' );
+		}
+
+		return $row;
 	}
 
 	/**
@@ -99,7 +105,11 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 
 		$row_count = 1;
 		while ( $row_count < $this->get_start() ) {
-			$this->get_row( $handle ); // Move the file handle to the desired starting position.
+			$row = $this->get_row( $handle ); // Move the file handle to the desired starting position.
+
+			if ( is_bool( $row ) ) { // We've somehow reached the end of the file before reaching the starting position.
+				return;
+			}
 
 			if ( feof( $handle ) ) {
 				yield [];
@@ -111,6 +121,10 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 
 		while ( $row_count <= $this->get_end() && ! feof( $handle ) ) {
 			$raw_row = $this->get_row( $handle );
+
+			if ( is_bool( $raw_row ) ) {
+				return;
+			}
 
 			if ( count( $raw_row ) !== $header_count ) {
 				throw new Exception(
@@ -229,9 +243,11 @@ class CSVFile extends AbstractIterableFile implements CSVFileInterface {
 	 * Convenience function to facilitate obtaining a CSV row.
 	 *
 	 * @param resource $handle The open file handle for the CSV file.
+	 *
+	 * @return array|bool The CSV row, or false if end of file is reached.
 	 * @throws Exception Exception thrown if $handle is not a resource.
 	 */
-	protected function get_row( $handle ): array {
+	protected function get_row( $handle ): array|bool {
 		if ( ! is_resource( $handle ) ) {
 			throw new Exception( '$handle is not a resource.' );
 		}
