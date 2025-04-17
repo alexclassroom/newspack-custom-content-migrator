@@ -23,7 +23,7 @@ class Users {
 	 *
 	 * @return string|null A unique value for the user field, or null if it couldn't be obtained.
 	 */
-	public function obtain_unique_user_field_value( CAPRelatedUserFields $field, string $desired_value, callable $value_manipulation_callback, int $exclude_user_id = 0, int $attempt = 1, int $max_attempts = 3 ): ?string {
+	public function get_unique_user_field_value( CAPRelatedUserFields $field, string $desired_value, callable $value_manipulation_callback, int $exclude_user_id = 0, int $attempt = 1, int $max_attempts = 3 ): ?string {
 		if ( $attempt > $max_attempts ) {
 			if ( $this->is_user_field_value_unique( $field, $desired_value, $exclude_user_id ) ) {
 				return $desired_value;
@@ -35,7 +35,7 @@ class Users {
 		if ( ! $this->is_user_field_value_unique( $field, $desired_value, $exclude_user_id ) ) {
 			$new_value = $value_manipulation_callback( $desired_value );
 
-			return $this->obtain_unique_user_field_value( $field, $new_value, $value_manipulation_callback, $exclude_user_id, $attempt + 1, $max_attempts );
+			return $this->get_unique_user_field_value( $field, $new_value, $value_manipulation_callback, $exclude_user_id, $attempt + 1, $max_attempts );
 		}
 
 		return $desired_value;
@@ -49,7 +49,7 @@ class Users {
 	 *
 	 * @return string|null
 	 */
-	final public function obtain_unique_user_login( string $desired_user_login, int $exclude_user_id = 0 ): ?string {
+	final public function get_unique_user_login( string $desired_user_login, int $exclude_user_id = 0 ): ?string {
 		if ( empty( $desired_user_login ) ) {
 			return null;
 		}
@@ -63,7 +63,7 @@ class Users {
 		}
 
 		if ( ! $this->is_user_field_value_unique( CAPRelatedUserFields::LOGIN, $desired_user_login, $exclude_user_id ) ) {
-			$desired_user_login = $this->obtain_unique_user_field_value(
+			$desired_user_login = $this->get_unique_user_field_value(
 				CAPRelatedUserFields::LOGIN,
 				$desired_user_login,
 				$this->callback_random_string_appender(),
@@ -75,7 +75,7 @@ class Users {
 				$user_provided_make_unique_callback = apply_filters( 'newspack_provide_make_unique_user_login_callback', $this->callback_random_string_appender() );
 
 				if ( ! in_array( $user_provided_seed, $logins, true ) ) {
-					$desired_user_login = $this->obtain_unique_user_field_value(
+					$desired_user_login = $this->get_unique_user_field_value(
 						CAPRelatedUserFields::LOGIN,
 						$user_provided_seed,
 						$user_provided_make_unique_callback,
@@ -96,11 +96,11 @@ class Users {
 	 *
 	 * @return string|null The unique user nicename, or null if it couldn't be obtained.
 	 */
-	final public function obtain_unique_user_nicename( string $desired_user_nicename, int $exclude_user_id = 0 ): ?string {
+	final public function get_unique_user_nicename( string $desired_user_nicename, int $exclude_user_id = 0 ): ?string {
 		// Let's try and see if we can get away with doing this quickly.
 		$copy_desired_user_nicename = $desired_user_nicename;
 		$start_at                   = 0;
-		$unique_user_nicename       = $this->obtain_unique_user_field_value(
+		$unique_user_nicename = $this->get_unique_user_field_value(
 			CAPRelatedUserFields::NICE_NAME,
 			$copy_desired_user_nicename,
 			fn( $value ) => $this->callback_simple_user_nicename_incrementer()( $value, $start_at ),
@@ -126,7 +126,7 @@ class Users {
 			)
 		);
 
-		return $this->obtain_unique_user_field_value(
+		return $this->get_unique_user_field_value(
 			CAPRelatedUserFields::NICE_NAME,
 			$desired_user_nicename,
 			fn( $value ) => $this->callback_strip_number_user_nicename_incrementer()( $value, $number_of_similar_nicenames ),
@@ -272,7 +272,7 @@ class Users {
 			if ( ! $this->is_user_field_value_unique( CAPRelatedUserFields::LOGIN, $user_login, $clone->ID ) ) {
 				$first_attempt_user_login = $user_login;
 
-				$user_login = $this->obtain_unique_user_field_value(
+				$user_login = $this->get_unique_user_field_value(
 					CAPRelatedUserFields::LOGIN,
 					$user_login,
 					$this->callback_random_string_appender(),
@@ -284,7 +284,7 @@ class Users {
 					$user_provided_make_unique_callback = apply_filters( 'newspack_provide_make_unique_user_login_callback', $this->callback_random_string_appender(), new WP_User( clone $user->data ) );
 
 					if ( $user_provided_seed !== $first_attempt_user_login ) {
-						$user_login = $this->obtain_unique_user_field_value(
+						$user_login = $this->get_unique_user_field_value(
 							CAPRelatedUserFields::LOGIN,
 							$user_provided_seed,
 							$user_provided_make_unique_callback,
@@ -308,13 +308,13 @@ class Users {
 
 		if ( ! empty( $clone->display_name ) && ! is_email( $clone->display_name ) ) {
 			$sanitized_display_name = sanitize_title( $clone->display_name );
-			$unique_user_nicename   = $this->obtain_unique_user_nicename( $sanitized_display_name, $clone->ID );
+			$unique_user_nicename = $this->get_unique_user_nicename( $sanitized_display_name, $clone->ID );
 
 			if ( null === $unique_user_nicename ) {
 				if ( ! empty( $clone->first_name ) && ! empty( $clone->last_name ) ) {
 					$clone->display_name    = "{$clone->first_name} {$clone->last_name}";
 					$sanitized_display_name = sanitize_title( $clone->display_name );
-					$unique_user_nicename   = $this->obtain_unique_user_nicename( $sanitized_display_name, $clone->ID );
+					$unique_user_nicename = $this->get_unique_user_nicename( $sanitized_display_name, $clone->ID );
 				}
 			}
 
@@ -331,7 +331,7 @@ class Users {
 			// At this point we know that $clone->display_name is either empty or an email, so it should be set/updated.
 			$clone->display_name    = "{$clone->first_name} {$clone->last_name}";
 			$sanitized_display_name = sanitize_title( $clone->display_name );
-			$unique_user_nicename   = $this->obtain_unique_user_nicename( $sanitized_display_name, $clone->ID );
+			$unique_user_nicename = $this->get_unique_user_nicename( $sanitized_display_name, $clone->ID );
 
 			if ( null === $unique_user_nicename ) {
 				return new WP_Error( 'newspack-unable-to-obtain-unique-user-nicename-from-names', 'Unable to obtain a unique user nicename from first and last name fields.' );

@@ -30,14 +30,13 @@ fi
 
 # Compare the hashes.
 if [ "$LOCAL_HASH" != "$REMOTE_HASH" ]; then
-	echo "Error: The local $REPO hash ($LOCAL_HASH) does not match the remote hash ($REMOTE_HASH)."
-	echo "Please update the repo dependency before pushing, you can use:"
+	echo "Error: NMT in your PR ($LOCAL_HASH) is behind the live NMT repo ($REMOTE_HASH)."
+	echo "Please update the Composer hash and then try merging again. You can use the following from your PR branch:"
 	echo "  rm -rf vendor/$REPO && \\"
-	echo "  git checkout trunk && \\"
 	echo "  composer update $REPO && \\"
 	echo "  git add composer.lock && \\"
 	echo "  git commit -m 'Updating $REPO composer pointer' && \\"
-	echo "  git push"
+	echo "  git push origin \$(git symbolic-ref --short HEAD)"
 	exit 1
 fi
 
