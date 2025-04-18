@@ -13,6 +13,10 @@ use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 use WP_Error;
 
+// use Newspack\MigrationTools\Logic\GuestContributorsHelper;
+use NewspackCustomContentMigrator\Command\PublisherSpecific\AmericaMagMigratorTempGC as GuestContributorsHelper;
+
+
 class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
@@ -287,65 +291,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 				// -- New User.
 
-				$userdata = [];
-
-				// Use the pretty post title for the display name.
-				// core bug if display name is not cut to 250 chars: https://core.trac.wordpress.org/ticket/53109
-				$userdata['display_name'] = trim( mb_substr( trim( $post->post_title ), 0, 250 ) ); // trim and cut to db max.
-				if ( empty( $userdata['display_name'] ) ) {
-					$this->logger->warning( 'Skip: Profile display_name must not be empty.' );
-					return;
-				}
-
-				// Set this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
-				$userdata['nickname'] = $userdata['display_name'];
-
-				// Build the user_nicename using the pretty title and the wp_insert_user functions. Try to pre-catch insert errors.
-				// Do this ourselves so it doesn't match user_login for better security (P2 Guest Contributors standization).
-				$userdata['user_nicename'] = trim( mb_substr( sanitize_title( sanitize_user( trim( $post->post_title ), true ) ), 0, 50 ) );
-				if ( empty( $userdata['user_nicename'] ) ) {
-					$this->logger->warning( 'Skip: Profile user_nicename must not be empty.' );
-					return;
-				}
-
-				// Cut down on errors by getting a unique user login with random value for better security (P2 Guest Contributors standization).
-				$userdata['user_login'] = $this->util_user_login_unique_with_random( $post->post_title );
-				if( is_wp_error( $userdata['user_login'] ) ) {
-					$this->logger->error( "util_user_login_unique_with_random failed with wp_error: " . json_encode( $userdata['user_login'] ) );
-					exit();
-				}
-
-				// Cut down on errors by getting a unique user email with random value for better security (P2 Guest Contributors standization).
-				$userdata['user_email'] = $this->util_user_dummy_email_unique_with_random( $post->post_title );
-				if( is_wp_error( $userdata['user_email'] ) ) {
-					$this->logger->error( "util_user_dummy_email_unique_with_random failed with wp_error: " . json_encode( $userdata['user_email'] ) );
-					exit();
-				}
-				
-				// Other user values.
-				$userdata['user_pass']     = wp_generate_password(); // generate else wp will write to debug.log.
-				$userdata['description']   = $post->post_content;
-				$userdata['role']          = Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME;
-
-				// User meta.
-				$userdata['meta_input'] = [];
-				$userdata['meta_input'][ self::META_KEY_PROFILE_POST_ID ] = $post->ID;
-
-				// Insert.
-				$user_id = wp_insert_user( $userdata );
-
-				// Fail on any errors.
-				if ( is_wp_error( $user_id ) ) {
-					$this->logger->error( "wp_insert_user failed with wp_error: " . json_encode( $user_id ) );
-					exit();
-				}
-				// Fail if wp_insert_user didn't return a positive int (return of 0 can happen on other failures...)
-				// core bug that results in 0 integer value: https://core.trac.wordpress.org/ticket/53109
-				if ( ! is_int( $user_id ) || ! ( $user_id > 0 ) ) {
-					// encode error incase type isn't a scalar.
-					$this->logger->error( "wp_insert_user returned a non-positive integer: " . json_encode( $user_id ) );
-					exit();
-				}
+				// todo
+				WP_CLI::line( $post->post_title );
+				WP_CLI::line( $post->post_name );
+				// GuestContributorsHelper::create_by_display_name( $post->post_title, [], true );
+				// user_nicename (see doc block) // how does this compare to wp santized post_title??
+				// $userdata['description']   = $post->post_content;
+				// $userdata['meta_input'] = [];
+				// $userdata['meta_input'][ self::META_KEY_PROFILE_POST_ID ] = $post->ID;
+				return;
 
 				$this->logger->info( 'Inserted wp user id: ' . $user_id );
 
@@ -791,70 +745,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// import_duplicates = 1;
 
 		return $options;
-	}
-
-	/************************************
-	  UTILS
-	************************************/
-
-	private function util_user_dummy_email_unique_with_random( $username_in ): string|WP_Error {
-
-		// sanitize since input could be "Pretty Name".
-		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
-
-		// hard code char length from db.
-		$db_max_chars = 100; 
-
-		$email_suffix = '@' . Guest_Contributor_Role::get_dummy_email_domain();
-
-		// stop infinite loops.
-		$attempts = 0;
-
-		do {
-
-			if( ++$attempts > 9999 ) {
-				// stop...this could cause an ininite loop.
-				return new WP_Error( 'Might be in an infinite loop.' );
-			}
-
-			// try a different random suffix on each loop
-			$suffix = '-' . rand( 11111, 99999 ) . $email_suffix;
-
-			// make room in the username if needed for the random suffix, then add it to the string.
-			$username_out = trim( mb_substr( $username_in, 0, $db_max_chars - mb_strlen( $suffix ) ) ) . $suffix;
-
-		} while( \username_exists( $username_out ) );
-				
-		return $username_out;
-	}
-
-	private function util_user_login_unique_with_random( $username_in ): string|WP_Error {
-
-		// sanitize since input could be "Pretty Name".
-		$username_in = trim( sanitize_title( sanitize_user( trim( $username_in ), true ) ) );
-
-		// hard code char length from db.
-		$db_max_chars = 60; 
-
-		// stop infinite loops.
-		$attempts = 0;
-
-		do {
-
-			if( ++$attempts > 9999 ) {
-				// stop...this could cause an ininite loop.
-				return new WP_Error( 'Might be in an infinite loop.' );
-			}
-
-			// try a different random suffix on each loop
-			$suffix = '-' . rand( 11111, 99999 );
-
-			// make room in the username if needed for the random suffix, then add it to the string.
-			$username_out = trim( mb_substr( $username_in, 0, $db_max_chars - mb_strlen( $suffix ) ) ) . $suffix;
-
-		} while( \username_exists( $username_out ) );
-				
-		return $username_out;
 	}
 
 }
