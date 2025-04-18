@@ -299,6 +299,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				// $userdata['description']   = $post->post_content;
 				// $userdata['meta_input'] = [];
 				// $userdata['meta_input'][ self::META_KEY_PROFILE_POST_ID ] = $post->ID;
+
+				// Insert user with force since there can be multiple authors with the same display name.
+				// $user_id = GuestContributorsHelper::create_by_display_name( $json_item->title, [ 'user_nicename' => str_replace( self::LIVE_AUTHOR_PATH, '', $json_item->url ) ], true );
+				// if ( is_wp_error( $user_id ) ) {
+				// 	$this->logger->error( sprintf( 'Failed to create Guest Contributor: %s', $user_id->get_error_message() ) );
+				// 	exit();
+				// }
 				return;
 
 				$this->logger->info( 'Inserted wp user id: ' . $user_id );
