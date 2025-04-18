@@ -197,12 +197,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
 		if ( isset( $assoc_args['batch-max'] ) ) $this->batch_max = (int) $assoc_args['batch-max'];
-
-		// Verify the FG Drupal "Entity Reference" add-on is active.
-		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
-			$this->logger->error( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
-			exit();
-		}
 		
 		// Verify America/New_York (eastern / utc-4 timezone):
 		if( wp_timezone_string() !== $this->required_timezone ) {
@@ -232,8 +226,22 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( "option_fgd2wp_options",             [ $this, 'option_fgd2wp_options' ], 11 );
 		add_filter( "default_option_fgd2wp_options",     [ $this, 'option_fgd2wp_options' ], 11 );		
 		
-		// Call NMT's migrator using a unique migration name.
+		// Call NMT's migrator with cms type. Contructor will verify that FG plugin is installed.
 		$this->fg_helper = new FgHelper( 'drupal' );
+
+		// Other checks that constructor doesn't check.
+		if ( ! defined( 'NCCM_FG_MIGRATOR_PREFIX' ) ) {
+			$this->logger->error( 'NCCM_FG_MIGRATOR_PREFIX is not defined in wp-config.php' );
+			exit();
+		}
+
+		// Verify the FG Drupal "Entity Reference" add-on is active.
+		if ( ! is_plugin_active( "fg-drupal-to-wp-premium-entityreference-module/fg-drupal-to-wp-entityreference.php" ) ) {
+			$this->logger->error( 'FG Drupal Entity Refernce Add-on plugin not found. Install and activate it before using this class.' );
+			exit();
+		}
+		
+		// Do the import.
 		$this->fg_helper->import( $pos_args, $assoc_args );
 	}
 
