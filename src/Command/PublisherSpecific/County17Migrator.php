@@ -10,8 +10,6 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use WP_CLI;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use NewspackCustomContentMigrator\Logic\ContentDiffMigrator;
-use Newspack\MigrationTools\Logic\Taxonomy;
 
 /**
  * County17Migrator.
@@ -146,11 +144,9 @@ class County17Migrator implements RegisterCommandInterface {
 			foreach ( $new_postmeta as $postmeta_key => $postmeta ) {
 				$meta_key   = $postmeta['meta_key'];
 				$meta_value = $postmeta['meta_value'];
-				WP_CLI::line( sprintf( 'INSERTING META postID %d: %s => %s', $post_id, $meta_key, $meta_value ) );
 				$updated = update_post_meta( $post_id, $meta_key, $meta_value );
 				if ( false === $updated ) {
 					WP_CLI::warning( sprintf( 'ERROR: Failed to update postmeta for post ID %d: %s => %s', $post_id, $meta_key, $meta_value ) );
-					exit;
 				}
 			}
 
