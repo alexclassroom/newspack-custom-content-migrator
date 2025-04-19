@@ -614,23 +614,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wpp_post_init_premium_options( $premium_options ) {
 
-		// Available Premium options - FG plugin version 3.85.2 (default values)
-		// $this->premium_options = array(
-		// 	  'cpt_format'        => 'acf',
-		// 	  'unicode_usernames' => false,
-		// 	  'links'             => 'as_links',
-		// 	  'url_redirect'      => true,
-		// 	  'skip_taxonomies'   => false,
-		// 	  'skip_nodes'        => false,
-		// 	  'nodes_to_skip'     => array(),
-		// 	  'skip_users'        => false,
-		// 	  'only_authors'      => false,
-		// 	  'skip_menus'        => false,
-		// 	  'skip_comments'     => false,
-		// 	  'skip_blocks'       => false,
-		// 	  'skip_redirects'    => false,
-		// );
-	
+		// Override default values from file:
+		// fg-drupal-to-wp-premium/admin/class-fg-drupal-to-wp-premium-admin.php
+		// FG_Drupal_to_WordPress_Premium_Admin->set_premium_options()
+
 		// Only import authors.
 		// @todo: remove fgd2wpp_get_users_sql above.
 		$premium_options['only_authors'] = true;
@@ -716,37 +703,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// For when options don't exist yet in the db.
 		if( false === $options ) $options = [];
 
-		// Default values from FG plugin version 3.85.2
-		// $this->plugin_options = array(
-		// 	'automatic_empty'			=> 0,
-		// 	'url'						=> null,
-		// 	'download_protocol'			=> 'http',
-		// 	'base_dir'					=> '',
-		// 	'driver'					=> 'mysql',
-		// 	'hostname'					=> 'localhost',
-		// 	'port'						=> 3306,
-		// 	'database'					=> null,
-		// 	'username'					=> 'root',
-		// 	'password'					=> '',
-		// 	'sqlite_file'				=> '',
-		// 	'prefix'					=> '',
-		// 	'summary'					=> 'in_content',
-		// 	'skip_media'				=> 0,
-		// 	'file_public_path_source'	=> 'default',
-		// 	'file_public_path'			=> 'sites/default/files',
-		// 	'file_private_path_source'	=> 'default',
-		// 	'file_private_path'			=> 'sites/default/private/files',
-		// 	'featured_image'			=> 'featured',
-		// 	'only_featured_image'		=> 0,
-		// 	'remove_first_image'		=> 0,
-		// 	'skip_thumbnails'			=> 0,
-		// 	'import_external'			=> 0,
-		// 	'import_duplicates'			=> 0,
-		// 	'force_media_import'		=> 0,
-		// 	'timeout'					=> 20,
-		// 	'logger_autorefresh'		=> 1,
-		// );
-
+		// Override default values from file:
+		// fg-drupal-to-wp-premium/admin/class-fg-drupal-to-wp-admin.php
+		// FG_Drupal_to_WordPress_Admin->set_plugin_options();
 
 		// Keep default: 'force_media_import' => 0 so that already downloaded images aren't fetched again from Live site.
 		$options['force_media_import'] = 0;
