@@ -230,8 +230,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_post_import_post',            [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_action( 'fgd2wp_post_register_custom_fields', [ $this, 'fgd2wp_post_register_custom_fields' ] );
 		add_filter( 'fgd2wp_pre_insert_post',             [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
-		add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
-		add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
+		// add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
+		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
 		// add_filter( 'fgd2wpp_get_users_sql',          [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
