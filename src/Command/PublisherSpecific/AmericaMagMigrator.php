@@ -2,7 +2,6 @@
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
-use Newspack\Guest_Contributor_Role;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\FgHelper;
@@ -11,7 +10,6 @@ use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
-use WP_Error;
 
 // use Newspack\MigrationTools\Logic\GuestContributorsHelper;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\AmericaMagMigratorTempGC as GuestContributorsHelper;
