@@ -258,7 +258,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		// Setup FG plugin's filters.
-		// add_filter( 'fgd2wp_get_node_types',           [ $this, 'fgd2wp_get_node_types' ], 11, 1 );
 		add_filter( 'fgd2wp_get_nodes_sql',               [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
 		add_filter( 'fgd2wp_map_taxonomy',                [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
 		add_filter( 'fgd2wp_post_import_post',            [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
@@ -416,39 +415,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/************************************
 	  FG DRUPAL HOOKS (non-premium)
 	************************************/
-
-	/**
-	 * FG Drupal get nodes types.
-	 * 
-	 * Only use this filter to create an "allow list" for custom node types. By default, FG Drupal will
-	 * migrate all node types and uses the filter fgd2wpp_post_init_premium_options to set
-	 * $premium_options['nodes_to_skip'] if a certain node type needs to be skipped. It's preferred to 
-	 * skip nodes using $premium_options['nodes_to_skip']. But if that is too much management,
-	 * and instead you just want an "allow list", then use this filter.
-	 *
-	 * @param array $node_types
-	 * @return array
-	 */
-	public function fgd2wp_get_node_types( array $node_types ): array {
-		
-		// @todo remove this filter completely?
-		return $node_types;
-
-		// Always allow the following core node types in this filter. To remove these core node types
-		// from a migration they must be removed instead by using filter fgd2wpp_post_init_premium_options
-		// and adding the core node type to $premium_options['nodes_to_skip'] .
-		$allow = [ 'article', 'page', 'post', 'story' ];
-		
-		// Add custom node types to this list. Be advised that $premium_options['nodes_to_skip'] will take
-		// precedence over this list. To remove a custom node from a migration, do not add below, but instead
-		// add to filter fgd2wpp_post_init_premium_options / $premium_options['nodes_to_skip']
-		$allow[] = 'profile'; // entity reference (FG plugin add-on required) | database table: node__field_by_author
-		// @todo: $allow[] = 'book_review',
-		// @todo: .. add more custom node types here?
-
-		// Only return the node types that are in both $node_types and $allow.
-		return array_filter( $node_types, fn( $type ) => in_array( $type, $allow ), ARRAY_FILTER_USE_KEY );
-	}
 
 	/**
 	 * FG Drupal get nodes sql.
@@ -688,34 +654,35 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// By default FG drupal will migrate all core and custom node types.
 		// The core node types are 'article', 'page', 'post', 'story'
 		// To skip a core or custom node type add to the following array. 
-		// Note: if using fgd2wp_get_node_types it is possible to use that filter to skip
-		// custom nodes (but not core nodes).  
+		// Note: if using hook fgd2wp_get_node_types it is possible to use that filter to skip
+		// custom nodes (but not core nodes), so this list below is better.
 		// to get node types with content: select distinct type from node order by type;
 		// to get all node types from config:  select name from config where name like 'node.type.%' order by name;
+		// keep:
+		// 	 'article',
+		// 	 'book',
+		// 	 'book_review',
+		// 	 'issue',
+		// 	 'podcast',
+		// 	 'profile', // authors
+		// 	 'the_word',
+		// 	 'video',
 		$premium_options['nodes_to_skip']  = [ 
-			'america_special_topics',
-			'app_america_today_curated_articl',
-			'app_reels',
-			// 'article',
-			'audio_news_update',
-			'audio_prayer',
-			'book',
-			'book_review',
-			'global_module_configuration',
-			'issue',
-			'lectionary_date',
-			'modular_page',
-			'page',
-			'photo_gallery',
-			'podcast',
-			'press_release',
-			// 'profile',
-			'sponsorship',
-			'subscription_offer',
-			'the_word',
-			'video',
-			'webform_page',
-			'who_we_are_page',
+			'america_special_topics', // skip, replace by hand to listings.
+			'app_america_today_curated_articl', // only 1.
+			'app_reels', // only 4
+			'audio_news_update', // no longer used.
+			'audio_prayer', // never activaly used.
+			'global_module_configuration', // no longer used.
+			'lectionary_date', // not front-end visible?
+			'modular_page', // no longer used.
+			'page', // rebuild by hand.
+			'photo_gallery', // only 26.
+			'press_release', // only 9.
+			'sponsorship', // only 2.
+			'subscription_offer', //no longer used.
+			'webform_page', // no longer used.
+			'who_we_are_page', // not activaly used.
 		];
 
 		$premium_options['skip_blocks']    = true; // sidebar widgets
