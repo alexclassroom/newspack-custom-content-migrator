@@ -81,14 +81,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator america-mag-examine-db',
-			self::get_command_closure( 'cmd_examine_db' ),
-			[
-				'shortdesc' => 'Examine the db tables.',
-			]
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-import',
 			self::get_command_closure( 'cmd_import' ),
 			[
@@ -194,77 +186,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		); // throttled posts
 
 		$this->logger->info( 'Done.' ); 
-	}
-
-	/**
-	 * Examine the db.
-	 */
-	public function cmd_examine_db( array $pos_args, array $assoc_args ): void {
-
-		$this->logger_set( __FUNCTION__ );
-		$this->logger->info( 'Running command: ' . __FUNCTION__ );
-		$this->logger->notice( 'Drupal tables must be in same DB as WordPress tables.' );
-
-		// List all tables.
-		global $wpdb;
-		$db_tables = $wpdb->get_col( "SHOW TABLES" );
-		if ( empty( $db_tables ) ) {
-			$this->logger->error( 'No tables found' );
-			exit();
-		}
-
-		// filter out tables.
-		$filter_tables = [
-			'am_legacy',
-			'ban_ip',
-			'batch',
-			'block_content_field_revision', // revisions.
-			'block_content_r__', // 'old, corrupted, limited data',
-			'block_content_revision', // 'revisions',
-			'cache',
-			'comment', // probably not migrate.
-			'contact', // contact form entries.
-			'field_deleted_',
-			'flag',
-			'flood',
-			'gdocs',
-			'history',
-			'node__body_', // 'backups'
-			'node_access',
-			'node_counter',
-			'node_field_revision',
-			'node_revision',
-			'old_',
-			'paragraph_r__',
-			'paragraph_revision',
-			'paragraphs_item_revision',
-			'path_alias_revision',
-			'queue',
-			'search',
-			'semaphore',
-			'sequences',
-			'sessions',
-			'shortcut',
-			'taxonomy_term_field_revision',
-			'taxonomy_term_r__04be4e5c72',
-			'taxonomy_term_revision',
-			'watchdog',
-			'webform',
-			'wp_',
-			'z_',
-		];
-		foreach( $filter_tables as $prefix ) {
-			$db_tables = array_filter( $db_tables, function( $table ) use( $prefix ) {
-				return ! preg_match( '/^' . $prefix . '/', $table );
-			} );
-			// $this->logger->info( 'Filtered ' . $prefix );
-		}
-
-		foreach( $db_tables as $table ) {
-			$this->logger->info( 'Drupal table: ' . $table );
-			
-		}
-		
 	}
 
 	/**
