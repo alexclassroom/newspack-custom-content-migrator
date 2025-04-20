@@ -80,6 +80,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private $logger;
 
 	/**
+	 * Nodes to keep - lookup array.
+	 *
+	 * @var array
+	 */
+	private array $nodes_to_keep;
+
+	/**
 	 * Required timezone setting.
 	 *
 	 * @var string
@@ -436,7 +443,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		
 		// Only for nodes and types.
 		if ( 'node' !== $entity_type ) return $sql;
-		if ( ! in_array( $content_type, [ 'article', 'profile' ] ) ) return $sql;
+		if ( ! in_array( $content_type, $this->nodes_to_keep ) ) return $sql;
 		
 		// @todo - testing by profile ids:
 		// if ( 'node' === $entity_type && 'profile' === $content_type ) {
@@ -658,15 +665,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// custom nodes (but not core nodes), so this list below is better.
 		// to get node types with content: select distinct type from node order by type;
 		// to get all node types from config:  select name from config where name like 'node.type.%' order by name;
-		// keep:
-		// 	 'article',
-		// 	 'book',
-		// 	 'book_review',
-		// 	 'issue',
-		// 	 'podcast',
-		// 	 'profile', // authors
-		// 	 'the_word',
-		// 	 'video',
 		$premium_options['nodes_to_skip']  = [ 
 			'america_special_topics', // skip, replace by hand to listings.
 			'app_america_today_curated_articl', // only 1.
@@ -683,6 +681,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'subscription_offer', //no longer used.
 			'webform_page', // no longer used.
 			'who_we_are_page', // not activaly used.
+		];
+		
+		// store the keep nodes in local lookup array.
+		$this->nodes_to_keep = [
+			 'article',
+			 'book',
+			 'book_review',
+			 'issue',
+			 'podcast',
+			 'profile', // authors
+			 'the_word',
+			 'video',
 		];
 
 		$premium_options['skip_blocks']    = true; // sidebar widgets
