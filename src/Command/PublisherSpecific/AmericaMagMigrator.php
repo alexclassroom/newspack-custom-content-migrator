@@ -32,10 +32,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Batch max of imported nodes per type per CLI run.
+	 * 
+	 * Default to -1 so that 0 can be used to cause an "empty query" if needed.
 	 *
 	 * @var int
 	 */
-	private int $batch_max = 5;
+	private int $batch_max = -1;
 
 	/**
 	 * Custom Fields holds the related field definitions that are attached to nodes.
@@ -51,6 +53,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	private FgHelper $fg_helper;
 	
+	/**
+	 * Flag for importer to order descending.
+	 *
+	 * @var bool
+	 */
+	private bool $flag_order_desc = false;
+
 	/**
 	 * Flag for importer to set redirects.
 	 *
@@ -104,6 +113,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'batch-max',
 						'description' => 'Max nodes to import (per type). Integer. Default: 5',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'order-desc',
+						'description' => 'Import by order descending.',
 						'optional'    => true,
 					],
 					[
@@ -222,7 +237,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
-		if ( isset( $assoc_args['batch-max'] ) )     $this->batch_max = (int) $assoc_args['batch-max'];
+		if ( isset( $assoc_args['batch-max'] ) ) {
+			if( ! preg_match( '/^\d+$/', $assoc_args['batch-max'] ) ) {
+				$this->logger->error( 'Batch-max must be int 0 or greater.');
+				exit();
+			}
+			$this->batch_max = (int) $assoc_args['batch-max'];
+		}
+		
+		if ( isset( $assoc_args['order-desc'] ) )    $this->flag_order_desc = true;
 		if ( isset( $assoc_args['set-redirects'] ) ) $this->flag_set_redirects = true;
 		if ( isset( $assoc_args['skip-media'] ) )    $this->flag_skip_media = true;
 		
@@ -447,6 +470,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_get_nodes_sql( $sql, $prefix, $last_drupal_id, $limit, $content_type, $entity_type ) {
 		
+		// Only for nodes and types.
+		if ( 'node' !== $entity_type ) return $sql;
+		if ( ! in_array( $content_type, [ 'article', 'profile' ] ) ) return $sql;
+		
 		// @todo - testing by profile ids:
 		// if ( 'node' === $entity_type && 'profile' === $content_type ) {
 		// 	$sql = str_replace( 'WHERE ', 'WHERE n.nid IN ( 234552 ) AND ', $sql );
@@ -457,22 +484,32 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// articles, profiles, etc, will be imported before the newer ones. The following will
 		// change the SQL to import the newest content first.
 			
-		// Order by nid desc to force newest content first.
-		$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
+		// Ordering.
+		if ( $this->flag_order_desc ) {
 
-		// Where ids are less than the last imported id since we're doing the newest (largest) ids first.
-		// But the first time this is called, the $last_drupal_id will be 0 so don't change the sql.
-		if ( $last_drupal_id > 0 ) {
-			$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+			// Order by nid desc to force newest content first.
+			$sql = str_replace( 'ORDER BY n.nid', 'ORDER BY n.nid DESC', $sql );
+
+			// Where ids are less than the last imported id since we're doing the newest (largest) ids first.
+			// But the first time this is called, the $last_drupal_id will be 0 so don't change the sql.
+			if ( $last_drupal_id > 0 ) {
+				$sql = str_replace( 'AND n.nid > ', 'AND n.nid < ', $sql );
+			}
+
 		}
 		
-		// Stop at batch limit.
-		if ( $this->batch_stop( $content_type, $entity_type ) ) {
-			$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 0', $sql );
-		}
-		else {
-			// To make debugging and batching easier, change the limit to just 1 row.
-			$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 1', $sql );
+		// Batching.
+		if ( $this->batch_max >= 0 ) {
+
+			// Stop at batch limit.
+			if ( $this->batch_stop( $content_type, $entity_type ) ) {
+				$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 0', $sql );
+			}
+			else {
+				// To make debugging and batching easier, change the limit to just 1 row.
+				$sql = str_replace( 'LIMIT ' . $limit, 'LIMIT 1', $sql );
+			}
+
 		}
 
 		return $sql;
