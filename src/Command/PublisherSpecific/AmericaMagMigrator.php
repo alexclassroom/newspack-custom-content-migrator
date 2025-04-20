@@ -50,6 +50,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * @var FgHelper FG Helper instance.
 	 */
 	private FgHelper $fg_helper;
+	
+	/**
+	 * Flag for importer to set redirects.
+	 *
+	 * @var bool
+	 */
+	private bool $flag_set_redirects = false;
 
 	/**
 	 * Logger
@@ -92,6 +99,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						'description' => 'Max nodes to import (per type). Integer. Default: 5',
 						'optional'    => true,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'set-redirects',
+						'description' => 'FG only sets redirects once. This will allow multiple runs.',
+						'optional'    => true,
+					],
+										
 				],
 			]
 		);
@@ -197,6 +211,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
 		if ( isset( $assoc_args['batch-max'] ) ) $this->batch_max = (int) $assoc_args['batch-max'];
+		if ( isset( $assoc_args['set-redirects'] ) ) $this->flag_set_redirects = true;
 		
 		// Verify America/New_York (eastern / utc-4 timezone):
 		if( wp_timezone_string() !== $this->required_timezone ) {
@@ -659,9 +674,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$premium_options['skip_comments']  = true;
 		$premium_options['skip_menus']     = true;
 
-		// @todo: Redirects?
-		// keep default: 'skip_redirects'    => false, so that redirects are added to wp_fg_redirects
-		// but possibly don't use FG to do the redirects or not? This is after the site is launched.
+		// FG will only set redirects once due to option 'fgd2wp_last_drupal_url_id' increment so keep off until requested.
+		$premium_options['skip_redirects'] = true;
+
+		// Allow the redirects to be added.
+		if( $this->flag_set_redirects ) {
+			// Reset the redirects counter so that new content can be "INSERT IGNORE" into the wp_fg_redirects table.
+			update_option('fgd2wp_last_drupal_url_id', 0);
+			// Allow import.
+			$premium_options['skip_redirects'] = false;
+		}
+				
+		// @todo: Launch: move redirects to Redirection plugin or turn on FG's redirect mechanism.
 		$premium_options['url_redirect']   = false;
 
 		return $premium_options;
