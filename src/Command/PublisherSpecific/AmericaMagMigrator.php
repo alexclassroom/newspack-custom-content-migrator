@@ -59,6 +59,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private bool $flag_set_redirects = false;
 
 	/**
+	 * Flag for importer to skip media.
+	 *
+	 * @var bool
+	 */
+	private bool $flag_skip_media = false;
+
+	/**
 	 * Logger
 	 *
 	 * @var MultiLog
@@ -105,7 +112,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						'description' => 'FG only sets redirects once. This will allow multiple runs.',
 						'optional'    => true,
 					],
-										
+					[
+						'type'        => 'flag',
+						'name'        => 'skip-media',
+						'description' => 'Skip media for faster testing.',
+						'optional'    => true,
+					],										
 				],
 			]
 		);
@@ -210,8 +222,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
-		if ( isset( $assoc_args['batch-max'] ) ) $this->batch_max = (int) $assoc_args['batch-max'];
+		if ( isset( $assoc_args['batch-max'] ) )     $this->batch_max = (int) $assoc_args['batch-max'];
 		if ( isset( $assoc_args['set-redirects'] ) ) $this->flag_set_redirects = true;
+		if ( isset( $assoc_args['skip-media'] ) )    $this->flag_skip_media = true;
 		
 		// Verify America/New_York (eastern / utc-4 timezone):
 		if( wp_timezone_string() !== $this->required_timezone ) {
@@ -730,6 +743,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Override default values from file:
 		// fg-drupal-to-wp-premium/admin/class-fg-drupal-to-wp-admin.php
 		// FG_Drupal_to_WordPress_Admin->set_plugin_options();
+
+		// For testing only.
+		if( $this->flag_skip_media ) {
+			$options['skip_media'] = 1;
+		}
 
 		// Keep default: 'force_media_import' => 0 so that already downloaded images aren't fetched again from Live site.
 		$options['force_media_import'] = 0;
