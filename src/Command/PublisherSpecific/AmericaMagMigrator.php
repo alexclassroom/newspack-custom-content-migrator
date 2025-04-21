@@ -117,7 +117,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					[
 						'type'        => 'assoc',
 						'name'        => 'batch-max',
-						'description' => 'Max nodes to import (per type). Integer. Default: 5',
+						'description' => 'Max nodes to import. Integer.',
 						'optional'    => true,
 					],
 					[
