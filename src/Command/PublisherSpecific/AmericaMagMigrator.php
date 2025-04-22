@@ -274,7 +274,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
-		// add_filter( 'fgd2wpp_get_users_sql',          [ $this, 'fgd2wpp_get_users_sql' ], 10, 2 );
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 	
 		// Filter DB options.
@@ -614,34 +613,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	  FG DRUPAL HOOKS (premium)
 	************************************/
 
-	// @todo - remove?
-	public function fgd2wpp_get_users_sql( string $sql ): string {
-		
-		// Replaced with premium option: 'only_authors' => true
-		// @todo remove this filter completely?
-		return $sql;
-
-		$limit        = 10; // Possibly used to "batch" x number at a time?
-		$last_user_id = (int) get_option( 'fgd2wp_last_user_id' ); // to restore the import where it left
-		
-		// @todo: change this to use a standardized function in NMT Drupal Migrator or NMT FG Helper.
-		$prefix       = FgHelper->get_import_tables_prefix();
-
-		$sql = "
-			SELECT u.uid, u.name, u.mail, u.pass, u.created, up.user_picture_target_id AS picture
-			FROM {$prefix}users_field_data u
-			LEFT JOIN {$prefix}user__user_picture up ON up.entity_id = u.uid
-			JOIN user__roles ur ON u.uid = ur.entity_id 
-			WHERE ur.roles_target_id IN ('editor', 'web_editor')
-			AND u.uid > '$last_user_id'
-			AND u.status = 1
-			ORDER BY u.uid
-			LIMIT $limit
-		";
-
-		return $sql;
-	}
-
 	/**
 	 * FG Drupal after premium options are initialized.
 	 * 
@@ -655,7 +626,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// FG_Drupal_to_WordPress_Premium_Admin->set_premium_options()
 
 		// Only import authors.
-		// @todo: remove fgd2wpp_get_users_sql above.
 		$premium_options['only_authors'] = true;
 
 		// By default FG drupal will migrate all core and custom node types.
