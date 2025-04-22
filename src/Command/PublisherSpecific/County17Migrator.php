@@ -74,7 +74,7 @@ class County17Migrator implements RegisterCommandInterface {
 		 */
 		$attachments_oldnew_ids               = [];
 		$posts_oldnew_ids                     = [];
-		$content_diff__imported_post_ids_file = file_get_contents( $content_diff__imported_post_ids_path );
+		$content_diff__imported_post_ids_file = file_get_contents( $content_diff__imported_post_ids_path ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
 		$lines                                = explode( "\n", $content_diff__imported_post_ids_file );
 		foreach ( $lines as $line ) {
 			$line = trim( $line );
@@ -129,14 +129,13 @@ class County17Migrator implements RegisterCommandInterface {
 					}
 				}
 
-				$new_postmeta[ $postmeta_key ]['meta_value'] = $meta_value_updated;
+				$new_postmeta[ $postmeta_key ]['meta_value'] = $meta_value_updated; // phpcs:ignore -- WordPress.DB.SlowDBQuery.slow_db_query_meta_value.
 				$new_postmeta[ $postmeta_key ]['meta_key']   = $meta_key;
 			}
 
 			// If meta count old != new, error and exit.
 			if ( count( $old_postmeta ) !== count( $new_postmeta ) ) {
 				WP_CLI::warning( sprintf( 'ERROR: Meta count mismatch for post ID %d, old count: %d, new count: %d', $post_id, count( $old_postmeta ), count( $new_postmeta ) ) );
-				exit;
 				continue;
 			}
 
@@ -144,7 +143,7 @@ class County17Migrator implements RegisterCommandInterface {
 			foreach ( $new_postmeta as $postmeta_key => $postmeta ) {
 				$meta_key   = $postmeta['meta_key'];
 				$meta_value = $postmeta['meta_value'];
-				$updated = update_post_meta( $post_id, $meta_key, $meta_value );
+				$updated    = update_post_meta( $post_id, $meta_key, $meta_value );
 				if ( false === $updated ) {
 					WP_CLI::warning( sprintf( 'ERROR: Failed to update postmeta for post ID %d: %s => %s', $post_id, $meta_key, $meta_value ) );
 				}
