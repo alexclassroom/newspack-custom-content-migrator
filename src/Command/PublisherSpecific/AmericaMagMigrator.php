@@ -266,6 +266,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// Setup FG plugin's filters.
 		add_filter( 'fgd2wp_get_nodes_sql',               [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_map_acf_field_type',          [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
 		add_filter( 'fgd2wp_map_taxonomy',                [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
 		add_filter( 'fgd2wp_post_import_post',            [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_action( 'fgd2wp_post_register_custom_fields', [ $this, 'fgd2wp_post_register_custom_fields' ] );
@@ -486,6 +487,26 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Adjust postmeta (acf types) if needed.
+	 *
+	 * @param string $acf_type
+	 * @param string $field_type
+	 * @param array $field
+	 * @return $acf_type
+	 */
+	function fgd2wp_map_acf_field_type( $acf_type, $field_type, $field ) {
+
+		// Change "oembed" to just normal postmeta since Youtube links can't be imported as videos.
+		if( $acf_type === 'oembed' && $field_type === 'video' ) {
+			if( $field['node_type'] === 'video' && $field['table_name'] === 'node__field_op_video_embed' ) {
+				return ''; // plain postmeta value
+			}
+		}
+		
+		return $acf_type;
+	}
+
+	/**
 	 * FG Drupal map drupal-to-wordpress taxonomies.
 	 */
 	public function fgd2wp_map_taxonomy( $wp_taxonomy, $taxonomy ) {
@@ -651,7 +672,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'subscription_offer', //no longer used.
 			'webform_page', // no longer used.
 			'who_we_are_page', // not activaly used.
-		];
+	   ];
 		
 		// store the keep nodes in local lookup array.
 		$this->nodes_to_keep = [
