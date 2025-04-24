@@ -680,7 +680,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'page', // rebuild by hand.
 			'photo_gallery', // only 26.
 			'press_release', // only 9.
-			'sponsorship', // only 2.
 			'subscription_offer', //no longer used.
 			'webform_page', // no longer used.
 			'who_we_are_page', // not activaly used.
@@ -694,6 +693,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			 'issue',
 			 'podcast',
 			 'profile', // authors
+			 'sponsorship', // only 2, keep them for reference.
 			 'the_word',
 			 'video',
 		];
