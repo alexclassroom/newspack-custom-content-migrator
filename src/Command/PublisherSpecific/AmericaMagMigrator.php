@@ -520,9 +520,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				$wp_taxonomy = 'category';
 				break;
 			case 'topics':
-				$wp_taxonomy = 'post_tag';
+				$wp_taxonomy = 'category'; // some will go into tags, some will be categories
 				break;
+			case 'blog':
+				// blog	2024
+				// long gap....
+				// blog	2017
+			case 'podcast_series':
+				// podcast_series 2019
 		}
+
+		// ignore:
+		// related_view_position 2019
 
 		return $wp_taxonomy;
 	}
