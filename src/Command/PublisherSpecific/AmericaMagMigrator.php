@@ -298,6 +298,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		
 		// Do the import.
 		$this->fg_helper->import( $pos_args, $assoc_args );
+
+		// Done
+		$this->logger->info( 'Done.' );
 	}
 
 	/**
