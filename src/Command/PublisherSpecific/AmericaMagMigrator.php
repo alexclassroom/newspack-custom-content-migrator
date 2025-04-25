@@ -675,7 +675,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			'audio_news_update', // no longer used.
 			'audio_prayer', // never activaly used.
 			'global_module_configuration', // no longer used.
-			'lectionary_date', // not front-end visible?
 			'modular_page', // no longer used.
 			'page', // rebuild by hand.
 			'photo_gallery', // only 26.
@@ -691,6 +690,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			 'book',
 			 'book_review',
 			 'issue',
+			 'lectionary_date', // for app usage...keep/review content.
 			 'podcast',
 			 'profile', // authors
 			 'sponsorship', // only 2, keep them for reference.
