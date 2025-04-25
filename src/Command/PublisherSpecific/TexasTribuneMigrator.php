@@ -201,6 +201,22 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator tt-remove-uncategorized-category',
+			[ new self(), 'cmd_remove_uncategorized_category' ],
+			[
+				'shortdesc' => 'Removes the "Uncategorized" category.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-from',
+						'description' => 'Index from which to start removing posts',
+						'optional'    => true,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -281,6 +297,49 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		}
 
 		WP_CLI::success( sprintf( 'Processed %d articles%s', $processed, $skip_imported ? sprintf( ' (skipped %d)', $this->skipped ) : '' ) );
+	}
+
+	/**
+	 * Command to remove the "Uncategorized" category.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_remove_uncategorized_category( $args, $assoc_args ): void {
+		$index_from = $assoc_args['index-from'] ?? 0;
+
+		// Get all posts from the "Uncategorized" category.
+		$posts = get_posts(
+			[
+				'category'    => 'uncategorized',
+				'numberposts' => -1,
+			]
+		);
+
+		foreach ( $posts as $index => $post ) {
+			if ( $index < $index_from ) {
+				continue;
+			}
+
+			ConsoleColor::white( 'Processing post' )
+				->blue( $post->ID )
+				->white( ' (' )
+				->blue( $index )
+				->white( '/' )
+				->blue( count( $posts ) )
+				->output();
+
+			$posts_categories = wp_get_post_categories( $post->ID );
+
+			// If the post have more than one category, remove the "Uncategorized" category.
+			if ( count( $posts_categories ) > 1 ) {
+				wp_remove_object_terms( $post->ID, 'uncategorized', 'category' );
+
+				ConsoleColor::green( 'Removed "Uncategorized" category from post' )
+					->bright_green( $post->ID )
+					->output();
+			}
+		}
 	}
 
 	/**
