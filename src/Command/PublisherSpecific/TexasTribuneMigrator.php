@@ -311,7 +311,8 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 		// Get all posts from the "Uncategorized" category.
 		$posts = get_posts(
 			[
-				'category'    => 'uncategorized',
+				'category'    => 1, // Uncategorized category ID.
+				'post_status' => 'any',
 				'numberposts' => -1,
 			]
 		);
