@@ -4,6 +4,7 @@ namespace NewspackCustomContentMigrator\Command\General;
 
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Util\Log\Logger;
 use WP_CLI;
 
@@ -26,17 +27,51 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 	private $logger;
 
 	/**
+	 * CoAuthors Plus instance.
+	 *
+	 * @var CoAuthorsPlusHelper CoAuthors Plus instance.
+	 */
+	private $coauthors_plus;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
-		$this->logger        = new Logger();
-		$this->site_timezone = new \DateTimeZone( 'America/Los_Angeles' );
+		$this->logger         = new Logger();
+		$this->coauthors_plus = new CoAuthorsPlusHelper();
+		$this->site_timezone  = new \DateTimeZone( 'America/Los_Angeles' );
 	}
 
 	/**
 	 * Register commands.
 	 */
 	public static function register_commands(): void {
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-check-posts-without-primary-category',
+			self::get_command_closure( 'cmd_embarcadero_check_posts_without_primary_category' ),
+			[
+				'shortdesc' => 'Check posts without primary category.',
+				'synopsis'  => [],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-delete-issue-date-categories',
+			self::get_command_closure( 'cmd_embarcadero_delete_issue_date_categories' ),
+			[
+				'shortdesc' => 'Delete issue date categories.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'print-editions-category-id',
+						'description' => 'The ID of the print editions category',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
 		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-blog-comments',
 			self::get_command_closure( 'cmd_embarcadero_fix_blog_comments' ),
@@ -235,6 +270,110 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 		);
 	}
 
+	/**
+	 * Check posts without primary category.
+	 * Callable for "newspack-content-migrator embarcadero-check-posts-without-primary-category".
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_embarcadero_check_posts_without_primary_category( $args, $assoc_args ) {
+		global $wpdb;
+		$log_file        = 'embarcadero_check_posts_without_primary_category.csv';
+		$log_file_handle = fopen( $log_file, 'w' );
+		fputcsv( $log_file_handle, [ 'post_id', 'post_title', 'post_date', 'categories', 'WP User', 'authors', 'has_one_category', 'is_blog_post', 'has_primary_category', 'primary_category_id' ] );
+
+		// Select all the published posts without the primary category meta.
+		$posts_with_primary_category_ids = $wpdb->get_col(
+			"SELECT DISTINCT post_id FROM {$wpdb->postmeta} WHERE meta_key = '_yoast_wpseo_primary_category'"
+		);
+
+		$all_published_posts = $wpdb->get_results(
+			"SELECT ID, post_title, post_date, post_author FROM {$wpdb->posts} WHERE post_status = 'publish' AND post_type = 'post' ORDER BY post_date DESC"
+		);
+
+		foreach ( $all_published_posts as $post ) {
+			$post_categories       = wp_get_post_categories( $post->ID );
+			$post_categories_names = array_map(
+				function ( $category ) {
+					return get_category( $category )->name;
+				},
+				$post_categories ?? []
+			);
+
+			$post_authors = array_map(
+				function ( $author ) {
+					return $author->user_nicename;
+				},
+				$this->coauthors_plus->get_all_authors_for_post( $post->ID )
+			);
+
+			$has_primary_category = in_array( $post->ID, $posts_with_primary_category_ids );
+			$category_names       = implode( '#', $post_categories_names );
+			$is_blog              = str_contains( strtolower( $category_names ), 'blog' );
+			$primary_category_id  = get_post_meta( $post->ID, '_yoast_wpseo_primary_category', true );
+			fputcsv(
+				$log_file_handle,
+				[
+					$post->ID,
+					$post->post_title,
+					$post->post_date,
+					$category_names,
+					$post->post_author,
+					implode( '#', $post_authors ),
+					1 === count( $post_categories_names ) ? 'Yes' : 'No',
+					$is_blog ? 'Yes' : 'No',
+					$has_primary_category ? 'Yes' : 'No',
+					$primary_category_id,
+				]
+			);
+		}
+
+		fclose( $log_file_handle );
+	}
+
+	/**
+	 * Delete issue date categories.
+	 * Callable for "newspack-content-migrator embarcadero-delete-issue-date-categories".
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_embarcadero_delete_issue_date_categories( $args, $assoc_args ) {
+		$log_file        = 'embarcadero_delete_issue_date_categories.csv';
+		$log_file_handle = fopen( $log_file, 'a' );
+		fputcsv( $log_file_handle, [ 'year_category_id', 'year_category_name', 'date_category_id', 'date_category_name' ] );
+
+		$print_editions_category_id = $assoc_args['print-editions-category-id'];
+
+		$year_categories = get_categories( [ 'parent' => $print_editions_category_id ] );
+
+		WP_CLI::line( 'Year categories: ' . count( $year_categories ) );
+		foreach ( $year_categories as $year_category ) {
+			$date_categories = get_categories( [ 'parent' => $year_category->term_id ] );
+
+			foreach ( $date_categories as $date_category ) {
+				// Make sure the date category is in the format Apr 7.
+				if ( ! preg_match( '/^[A-Z][a-z]{2} \d{1,2}$/', $date_category->name ) ) {
+					WP_CLI::warning( 'Probably not a date category: ' . $date_category->term_id . ' - ' . $date_category->name );
+					continue;
+				}
+
+				WP_CLI::line( 'Deleting date category: ' . $date_category->term_id . ' - ' . $date_category->name );
+				wp_delete_category( $date_category->term_id );
+
+				fputcsv(
+					$log_file_handle,
+					[
+						$year_category->term_id,
+						$year_category->name,
+						$date_category->term_id,
+						$date_category->name,
+					]
+				);
+			}
+		}
+	}
 	/**
 	 * Fix blog comments.
 	 * Callable for "newspack-content-migrator embarcadero-fix-blog-comments".
