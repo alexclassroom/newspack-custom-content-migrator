@@ -446,7 +446,6 @@ class ContentDiffMigrator {
 				is_null( $term_taxonomy ) || is_null( $term_id ) || is_null( $term_row )
 				|| is_null( $taxonomy )
 			) {
-				// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] since this record is missing.
 				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
 				continue;
 			}
