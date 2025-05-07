@@ -425,16 +425,16 @@ class ContentDiffMigrator {
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = $term_relationships_rows;
 
 		// Get all wp_term_taxonomy records.
-		$term_ids                            = [];
-		$keys_with_missing_term_taxonomy_ids = [];
-		$missing_term_ids                    = [];
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_termrelationship_row => $term_relationship_row ) {
 			$term_taxonomy_id = $term_relationship_row['term_taxonomy_id'];
 			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
 
 			// Handle if the term_taxonomy record for this $term_taxonomy_id is missing in Live DB.
 			if ( is_null( $term_taxonomy ) ) {
-				$keys_with_missing_term_taxonomy_ids[] = $key_termrelationship_row;
+				// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] since records are missing.
+				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
+				// Re-index the array.
+				$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
 				continue;
 			}
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
@@ -445,7 +445,6 @@ class ContentDiffMigrator {
 			
 			// Handle if the term record is missing in Live DB.
 			if ( is_null( $term_row ) || empty( $term_row ) ) {
-				$missing_term_ids[] = $term_id;
 				continue;
 			}
 			$data[ self::DATAKEY_TERMS ][] = $term_row;
@@ -460,14 +459,6 @@ class ContentDiffMigrator {
 				$data[ self::DATAKEY_TERMMETA ],
 				$termmeta_rows
 			);
-		}
-
-		// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] in case some $term_taxonomy_id records are missing from live DB.
-		if ( ! empty( $keys_with_missing_term_taxonomy_ids ) ) {
-			foreach ( $keys_with_missing_term_taxonomy_ids as $key_with_missing_term_taxonomy_id ) {
-				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_with_missing_term_taxonomy_id ] );
-			}
-			$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
 		}
 
 		return $data;
