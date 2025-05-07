@@ -431,7 +431,7 @@ class ContentDiffMigrator {
 
 			// Handle if the term_taxonomy record for this $term_taxonomy_id is missing in Live DB.
 			if ( is_null( $term_taxonomy ) ) {
-				// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] since records are missing.
+				// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] since this record is missing.
 				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
 				// Re-index the array.
 				$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
