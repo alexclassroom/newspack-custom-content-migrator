@@ -606,6 +606,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_3_row                 = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_3_id );
 		$term_3_termmeta_rows       = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_3_id );
 		$term_4_id                  = 71;
+		$term_taxonomy_4_id         = 4;
 		// This term record is missing in Live DB, for test purposes. $term_4_row will return null. $term_4_termmeta_rows will return empty array.
 		$term_4_row                 = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_4_id );
 		$term_4_termmeta_rows       = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_4_id );
@@ -714,17 +715,61 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 			'select_termmeta_rows',
 			[
 				[ $live_table_prefix, $term_1_id, [] ],
-				// Terms 2 and 3 will have some meta.
 				[ $live_table_prefix, $term_2_id, $term_2_termmeta_rows ],
-				[ $live_table_prefix, $term_3_id, $term_3_termmeta_rows ],
 			]
 		);
 
+		// Prepare expected data.
+		$data_expected         = $data;
+		$taxonomies_to_migrate = [ 'category', 'post_tag' ];
+		/**
+		 * Remove from expected data the terms and relationships which are missing in the live DB.
+		 */
+		$term_taxonomy_ids_to_unset = [];
+		foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ] as $key_termtaxonomy_row => $termtaxonomy_row ) {
+			if ( is_null( $this->logic->filter_array_element( $data_expected[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $termtaxonomy_row['term_id'] ) ) ) {
+				$term_taxonomy_ids_to_unset[] = $termtaxonomy_row['term_taxonomy_id'];
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ][ $key_termtaxonomy_row ] );
+			}
+		}
+		foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ] as $key_termrelationship_row => $termrelationship_row ) {
+			if ( in_array( $termrelationship_row['term_taxonomy_id'], $term_taxonomy_ids_to_unset ) ) {
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
+			}
+		}
+		/**
+		 * Remove from expected data taxonomies which are not in $taxonomies_to_migrate.
+		 */
+		$term_taxonomy_ids_to_unset = [];
+		$term_ids_to_unset = [];
+		foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ] as $key_termtaxonomy_row => $termtaxonomy_row ) {
+			if ( ! in_array( $termtaxonomy_row['taxonomy'], $taxonomies_to_migrate ) ) {
+				$term_taxonomy_ids_to_unset[] = $termtaxonomy_row['term_taxonomy_id'];
+				$term_ids_to_unset[]          = $termtaxonomy_row['term_id'];
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMTAXONOMY ][ $key_termtaxonomy_row ] );
+			}
+		}
+		foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ] as $key_termrelationship_row => $termrelationship_row ) {
+			if ( in_array( $termrelationship_row['term_taxonomy_id'], $term_taxonomy_ids_to_unset ) ) {
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
+			}
+		}
+			foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMS ] as $key_term_row => $term_row ) {
+			if ( in_array( $term_row['term_id'], $term_ids_to_unset ) ) {
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMS ][ $key_term_row ] );
+			}
+		}
+		foreach ( $data_expected[ ContentDiffMigrator::DATAKEY_TERMMETA ] as $key_termmeta_row => $termmeta_row ) {
+			if ( in_array( $termmeta_row['term_id'], $term_ids_to_unset ) ) {
+				unset( $data_expected[ ContentDiffMigrator::DATAKEY_TERMMETA ][ $key_termmeta_row ] );
+			}
+		}
+
 		// Run.
-		$data_actual = $logic_partial_mock->get_post_data( $post_id, $live_table_prefix );
+		$data_actual = $logic_partial_mock->get_post_data( $post_id, $live_table_prefix, $taxonomies_to_migrate );
 
 		// Assert.
-		$this->assertEquals( $data, $data_actual );
+		$this->assertEquals( $data_expected, $data_actual );
 	}
 
 	/**
