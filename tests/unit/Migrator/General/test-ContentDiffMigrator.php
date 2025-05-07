@@ -605,6 +605,10 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 		$term_3_id                  = 70;
 		$term_3_row                 = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_3_id );
 		$term_3_termmeta_rows       = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_3_id );
+		$term_4_id                  = 71;
+		// This term record is missing in Live DB, for test purposes. $term_4_row will return null. $term_4_termmeta_rows will return empty array.
+		$term_4_row                 = $this->logic->filter_array_element( $data[ ContentDiffMigrator::DATAKEY_TERMS ], 'term_id', $term_4_id );
+		$term_4_termmeta_rows       = $this->logic->filter_array_elements( $data[ ContentDiffMigrator::DATAKEY_TERMMETA ], 'term_id', $term_4_id );
 
 		// Mock.
 		$logic_partial_mock = $this->getMockBuilder( ContentDiffMigrator::class )
@@ -702,6 +706,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 				[ $live_table_prefix, $term_1_id, $term_1_row ],
 				[ $live_table_prefix, $term_2_id, $term_2_row ],
 				[ $live_table_prefix, $term_3_id, $term_3_row ],
+				[ $live_table_prefix, $term_4_id, $term_4_row ],
 			]
 		);
 		$this->mock_consecutive_value_maps(
@@ -3482,9 +3487,10 @@ BLOCK;
 							'parent'           => 0,
 							'count'            => 0,
 						],
+						// This term_taxonomy record is missing in Live DB.
 						[
 							'term_taxonomy_id' => 4,
-							'term_id'          => 70,
+							'term_id'          => 71,
 							'taxonomy'         => 'mood',
 							'description'      => 'Mood',
 							'parent'           => 0,
