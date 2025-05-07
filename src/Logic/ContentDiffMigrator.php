@@ -352,8 +352,9 @@ class ContentDiffMigrator {
 	/**
 	 * Fetches a Post and all core WP relational objects belonging to the post. Can fetch from a custom table prefix.
 	 *
-	 * @param int    $post_id      Post ID.
-	 * @param string $table_prefix Table prefix to fetch from.
+	 * @param int    $post_id               Post ID.
+	 * @param string $table_prefix          Table prefix to fetch from.
+	 * @param array  $taxonomies_to_migrate List of all taxonomies to migrate.
 	 *
 	 * @return array $args {
 	 *     Post and all core WP Post-related data.
@@ -369,7 +370,7 @@ class ContentDiffMigrator {
 	 *     @type array self::DATAKEY_TERMS             Post's `terms` rows.
 	 * }
 	 */
-	public function get_post_data( $post_id, $table_prefix ) {
+	public function get_post_data( $post_id, $table_prefix, $taxonomies_to_migrate ) {
 
 		$data = $this->get_empty_data_array();
 
@@ -427,39 +428,45 @@ class ContentDiffMigrator {
 		// Get all wp_term_taxonomy records.
 		foreach ( $data[ self::DATAKEY_TERMRELATIONSHIPS ] as $key_termrelationship_row => $term_relationship_row ) {
 			$term_taxonomy_id = $term_relationship_row['term_taxonomy_id'];
-			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
 
-			// Handle if the term_taxonomy record for this $term_taxonomy_id is missing in Live DB.
-			if ( is_null( $term_taxonomy ) ) {
+			// Get Term Taxonomy and Term.
+			$term_taxonomy    = $this->select_term_taxonomy_row( $table_prefix, $term_taxonomy_id );
+			$term_id          = $term_taxonomy['term_id'] ?? null;
+			$term_row         = ! is_null( $term_id ) ? $this->select_term_row( $table_prefix, $term_id ) : null;
+
+			// Check if the this taxonomy should be fetched.
+			$taxonomy = $term_taxonomy['taxonomy'] ?? null;
+			if ( ! in_array( $taxonomy, $taxonomies_to_migrate ) ) {
+				$taxonomy = null;
+			}
+
+			// Handle if any of the records are missing in live DB -- term or term_taxonomy.
+			// Handle if this taxonomy should not be migrated.
+			if ( 
+				is_null( $term_taxonomy ) || is_null( $term_id ) || is_null( $term_row )
+				|| is_null( $taxonomy )
+			) {
 				// Clean up $data[ self::DATAKEY_TERMRELATIONSHIPS ] since this record is missing.
 				unset( $data[ self::DATAKEY_TERMRELATIONSHIPS ][ $key_termrelationship_row ] );
-				// Re-index the array.
-				$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
 				continue;
 			}
+
+			// Add term_taxonomy, term, and term_meta to $data.
 			$data[ self::DATAKEY_TERMTAXONOMY ][] = $term_taxonomy;
+			$data[ self::DATAKEY_TERMS ][]        = $term_row;
 
-			// Get Term.
-			$term_id  = $term_taxonomy['term_id'];
-			$term_row = $this->select_term_row( $table_prefix, $term_id );
-			
-			// Handle if the term record is missing in Live DB.
-			if ( is_null( $term_row ) || empty( $term_row ) ) {
-				continue;
-			}
-			$data[ self::DATAKEY_TERMS ][] = $term_row;
-
-			// Get Term Meta.
+			// Add term_meta to $data.
 			$termmeta_rows = $this->select_termmeta_rows( $table_prefix, $term_id );
-			// Handle if the term meta record is missing in Live DB.
-			if ( is_null( $termmeta_rows ) || empty( $termmeta_rows ) ) {
-				continue;
+			if ( ! is_null( $termmeta_rows ) && ! empty( $termmeta_rows ) ) {
+				$data[ self::DATAKEY_TERMMETA ] = array_merge(
+					$data[ self::DATAKEY_TERMMETA ],
+					$termmeta_rows
+				);
 			}
-			$data[ self::DATAKEY_TERMMETA ] = array_merge(
-				$data[ self::DATAKEY_TERMMETA ],
-				$termmeta_rows
-			);
 		}
+
+		// Re-index the array.
+		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
 
 		return $data;
 	}

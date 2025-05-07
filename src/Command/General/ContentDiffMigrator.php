@@ -600,7 +600,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 		$all_live_posts_ids = array_merge( $all_live_posts_ids, $modified_live_ids );
 
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
-		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates );
+		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates, $taxonomies_to_migrate );
 
 		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
@@ -839,6 +839,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 	 * @param array $all_live_posts_ids       Live IDs to be imported to local.
 	 * @param array $hierarchical_taxonomy_term_id_updates Map of updated hierarchical taxonomy term_ids. Keys are Taxonomies' term_ids on live, and values
 	 *                                        are corresponding Taxonomies' term_ids on local (staging).
+	 * @param array $taxonomies_to_migrate    All the taxonomies which should be migrated.
 	 *
 	 * @return array $imported_posts_data {
 	 *     Array with subarray records for all the imported post objects.
@@ -850,7 +851,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 	 *     }
 	 * }
 	 */
-	public function import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates ) {
+	public function import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates, $taxonomies_to_migrate ) {
 
 		$post_ids_for_import = $all_live_posts_ids;
 
@@ -884,7 +885,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 			}
 
 			// Get all Post data from DB.
-			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix );
+			$post_data = self::$logic->get_post_data( (int) $post_id_live, $this->live_table_prefix, $taxonomies_to_migrate );
 			$post_type = $post_data[ self::$logic::DATAKEY_POST ]['post_type'];
 
 			// First just insert a new blank `wp_posts` record to get the new ID.
