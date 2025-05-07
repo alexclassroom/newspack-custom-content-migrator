@@ -573,7 +573,7 @@ class TestContentDiffMigrator extends WP_UnitTestCase {
 	 *
 	 * @dataProvider db_data_provider
 	 */
-	public function test_should_correctly_load_data_array( $data ) {
+	public function test_get_post_data_should_correctly_load_data_array( $data ) {
 		// Prepare test data.
 		$live_table_prefix          = 'live_wp_';
 		$post_id                    = 123;
