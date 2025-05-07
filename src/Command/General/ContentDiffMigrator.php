@@ -103,10 +103,13 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 	 */
 	private $log_updated_blocks_ids;
 
+	/**
+	 * Constructor.
+	 */
 	private function __construct() {
 		global $wpdb;
 
-		self::$logic    = new ContentDiffMigratorLogic( $wpdb );
+		self::$logic = new ContentDiffMigratorLogic( $wpdb );
 	}
 
 	/**
@@ -115,7 +118,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-search-new-content-on-live',
-			self::get_command_closure('cmd_search_new_content_on_live' ),
+			self::get_command_closure( 'cmd_search_new_content_on_live' ),
 			[
 				'shortdesc' => 'Searches for new posts existing in the Live site tables and not in the local site tables, and exports the IDs to a file.',
 				'synopsis'  => [
@@ -145,7 +148,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-migrate-live-content',
-			self::get_command_closure('cmd_migrate_live_content' ),
+			self::get_command_closure( 'cmd_migrate_live_content' ),
 			[
 				'shortdesc' => 'Migrates content from Live site tables to local site tables.',
 				'synopsis'  => [
@@ -176,7 +179,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-fix-image-ids-in-post-content',
-			self::get_command_closure('cmd_fix_image_ids_in_post_content' ),
+			self::get_command_closure( 'cmd_fix_image_ids_in_post_content' ),
 			[
 				'shortdesc' => 'Standalone command which fixes attachment IDs in Block content. It does so by loading all the posts, goes through post_content and gets all the WP Blocks which use attachments IDs (see \NewspackCustomContentMigrator\Logic\ContentDiffMigrator::update_blocks_ids), then it takes every single attachment file and checks if its attachment ID has changed, and if it has it updates the IDs.',
 				'synopsis'  => [
@@ -207,7 +210,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator display-collations-comparison',
-			self::get_command_closure('cmd_compare_collations_of_live_and_core_wp_tables' ),
+			self::get_command_closure( 'cmd_compare_collations_of_live_and_core_wp_tables' ),
 			[
 				'shortdesc' => 'Display a table comparing collations of Live and Core WP tables.',
 				'synopsis'  => [
@@ -237,7 +240,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator correct-collations-for-live-wp-tables',
-			self::get_command_closure('cmd_correct_collations_for_live_wp_tables' ),
+			self::get_command_closure( 'cmd_correct_collations_for_live_wp_tables' ),
 			[
 				'shortdesc' => 'This command will handle the necessary operations to match collations across Live and Core WP tables',
 				'synopsis'  => [
@@ -283,7 +286,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator content-diff-update-featured-images-ids',
-			self::get_command_closure('cmd_update_feat_images_ids' ),
+			self::get_command_closure( 'cmd_update_feat_images_ids' ),
 			[
 				'shortdesc' => 'A helper/fixer command which can be run on any site to pick up and update leftover featured image IDs. Fix to a previous bug that ignored some _thumbnail_ids. It automatically picks up "old_attachment_ids"=>"new_attachment_ids" from DB and updates those (unless provided with an optional --attachment-ids-json-file).',
 				'synopsis'  => [

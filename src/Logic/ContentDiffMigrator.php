@@ -465,7 +465,7 @@ class ContentDiffMigrator {
 			}
 		}
 
-		// Re-index the array.
+		// Re-index the array after removing records.
 		$data[ self::DATAKEY_TERMRELATIONSHIPS ] = array_values( $data[ self::DATAKEY_TERMRELATIONSHIPS ] );
 
 		return $data;
