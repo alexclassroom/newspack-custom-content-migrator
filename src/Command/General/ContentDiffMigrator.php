@@ -563,7 +563,7 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 		// phpcs:ignore -- table prefix string value was escaped.
 		$live_table_prefix_escaped = esc_sql( $live_table_prefix );
 		$live_taxonomies = $wpdb->get_col( "SELECT DISTINCT( taxonomy ) FROM {$live_table_prefix_escaped}term_taxonomy ;" ); // phpcs:ignore -- table prefix string value was escaped.
-		WP_CLI::log( sprintf( 'Migrating taxonomies %s. To migrate additional taxonomies, use the --custom-taxonomies-csv argument. These are all the taxonomies which exist in the live DB:%s', implode( ",", $taxonomies_to_migrate ), "\n- " . implode( "\n- ", $live_taxonomies ) ) );
+		WP_CLI::log( sprintf( 'Migrating taxonomies %s. To migrate additional taxonomies, use the --custom-taxonomies-csv argument. Here are all the taxonomies which exist in the live DB:%s', implode( ",", $taxonomies_to_migrate ), "\n- " . implode( "\n- ", $live_taxonomies ) ) );
 
 		// Before we create hierarchical taxonomies, let's make sure all hierarchical taxonomies have valid parents. If they don't they should be fixed first.
 		WP_CLI::log( sprintf( 'Validating all the taxonomies which will be migrated: %s', "\n- " . implode( "\n- ", $taxonomies_to_migrate ) ) );
