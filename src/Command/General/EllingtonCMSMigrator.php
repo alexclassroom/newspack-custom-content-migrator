@@ -247,6 +247,37 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ellington-cms-migrator migrate-video',
+			self::get_command_closure( 'cmd_migrate_video' ),
+			[
+				'shortdesc' => 'Migrates the Video posts',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'category_id',
+						'description' => 'The ID of the Category that will contain all Video Posts.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author',
+						'description' => 'The ID of the default Author to be used for Video Posts.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -945,6 +976,231 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 			if ( ! empty( $document_thumbnail_id ) ) {
 				$update_data['meta_input'] = [
 					'_thumbnail_id' => $document_thumbnail_id,
+				];
+			}
+
+			if ( ! empty( $update_data ) ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					...$update_data,
+				] );
+			}
+
+			$logger->info( sprintf( '✅ Post inserted. Post ID: %d', $post_id ) );
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$row_number,
+					$row['id'],
+					$post_id,
+					get_the_title( $post_id ),
+					$source_url,
+					get_permalink( $post_id ),
+				] 
+			);
+		}
+
+		$progress_bar->finish();
+
+		fclose( $csv_file_pointer );
+
+		wp_cache_flush();
+		
+		$this->logger->info( 'Completed! 🎉' );
+	}
+
+	/**
+	 * Migrates video posts.
+	 *
+	 * @param  array $args
+	 * @param  array $assoc_args
+	 * @return void
+	 */
+	public function cmd_migrate_video( array $args, array $assoc_args ) {
+		$csv_filepath   = (string) $assoc_args['csv-path'];
+		$category_id    = (int) $assoc_args['category_id'];
+		$default_author = (int) $assoc_args['default-author'];
+
+		if ( ! file_exists( $csv_filepath ) ) {
+			WP_CLI::error( sprintf( 'Provided CSV is missing — %s', $csv_filepath ) );
+
+			return;
+		}
+
+		if ( ! category_exists( $category_id ) ) {
+			WP_CLI::error( sprintf( 'Category with ID %d does not exist', $category_id ) );
+
+			return;
+		}
+
+		$category          = get_category( $category_id );
+		$csv_file_iterator = ( new FileImportFactory() )->get_file( $csv_filepath );
+
+		// Logger.
+		$log_slug = 'ellingtoncms-migrate-video';
+        $logger   = MultiLog::get_logger( 
+			'multi-' . $log_slug,
+			[
+				CliLog::get_logger( $log_slug ),
+				FileLog::get_logger( $log_slug ),
+			]
+		);
+
+		// CSV.
+		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date
+		$csv = sprintf( 'ellingtoncms-migrate-video-%s.csv', date( 'Y-m-d H-i-s' ) );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		$csv_file_pointer = fopen( $csv, 'w' );
+
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Source ID',
+				'Post ID',
+				'Post Title',
+				'Source URL',
+				'Post URL',
+			]
+		);
+
+		$total_posts = count( [ ...$csv_file_iterator->getIterator() ] );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( '[EllingtonCMS] Migrating Videos', $total_posts );
+
+		foreach ( $csv_file_iterator->getIterator() as $row_number => $row ) {
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory: %s] [EllingtonCMS] Migrating Videos %d/%d',
+					size_format( memory_get_usage( true ) ),
+					$row_number + 1,
+					$total_posts
+				)
+			);
+
+			$logger->info( sprintf( '⏳ Processing Row %s', wp_json_encode( $row ) ) );
+
+			// Search for post locally.
+			$local_post = $this->get_local_post( (int) $row['id'], $category );
+
+			if ( $local_post ) {
+				$logger->notice( sprintf( '⚠️ Post exists locally with ID %d', $local_post ) );
+			} else {
+				$logger->info( 'ℹ️ Post does not exist locally' );
+			}
+
+			$source_url = sprintf(
+				'https://www.jacksonfreepress.com/videos/%s/%s/',
+				date( 'Y/M/d', strtotime( $row['creation_date'] ) ),
+				$row['id']
+			);
+
+			$upsert_data = [
+				'post_type'     => 'post',
+				'post_status'   => 'publish',
+				'post_author'   => $default_author,
+				'post_title'    => (string) $row['title'],
+				'post_excerpt'  => (string) $row['caption'],
+				'post_content'  => ! empty( $row['caption'] ) ? serialize_block( $this->gutenberg_block_generator->get_paragraph( (string) $row['caption'] ) ) : '',
+				'post_date_gmt' => '',
+				'post_date'     => date( 'Y-m-d H:i:s', strtotime( $row['creation_date'] ) ),
+				'post_category' => [ $category->term_id ],
+				'meta_input'    => [
+					'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+					'_newspack_source_id'              => $row['id'],
+					'_newspack_source_url'             => $source_url,
+				]
+			];
+
+			if ( $local_post ) {
+				$post_id = wp_update_post( [
+					'ID' => $local_post,
+					...$upsert_data,
+				], true );
+			} else {
+				$post_id = wp_insert_post( $upsert_data, true );
+			}
+
+			if ( is_wp_error( $post_id ) ) {
+				$logger->critical( sprintf( '❌ Post could not be inserted. Reason: %s', wp_json_encode( $post_id->get_error_messages() ) ) );
+
+				continue;
+			}
+
+			$video_thumbnail_id = null;
+			$video_id           = null;
+
+			$post_content         = get_post_field( 'post_content', $post_id );
+			$updated_post_content = parse_blocks( $post_content );
+
+			if ( ! empty( $row['thumbnail'] ) ) {
+				try {
+					$logger->info( '⏳ Uploading Thumbnail...' );
+
+					$video_thumbnail_id = $this->upload_file(
+						$row['thumbnail_photo'],
+						[
+							'post_date' => date( 'Y-m-d H:i:s', strtotime( $row['creation_date'] ) )
+						],
+						$post_id
+					);
+				} catch ( \Exception $e ) {
+					$logger->critical( sprintf( '❌ Post Thumbnail could not be inserted. Reason: %s', $e->getMessage() ) );
+				}
+			}
+
+			if ( ! empty( $row['file'] ) ) {
+				try {
+					$logger->info( '⏳ Uploading Video File...' );
+	
+					$video_id = $this->upload_file(
+						$row['file'],
+						[
+							'post_date' => date( 'Y-m-d H:i:s', strtotime( $row['creation_date'] ) )
+						],
+						$post_id
+					);
+
+					$updated_post_content = [
+						$this->gutenberg_block_generator->get_video( get_post( $video_id ) ),
+						...$updated_post_content
+					];
+				} catch ( \Exception $e ) {
+					$logger->critical( sprintf( '❌ Post Video could not be inserted. Reason: %s', $e->getMessage() ) );
+				}
+			}
+
+			if ( ! empty( $row['url'] ) ) {
+				$video_block = null;
+
+				if ( str_contains( $row['url'], 'youtube' ) ) {
+					$video_block = $this->gutenberg_block_generator->get_youtube( $row['url'] );
+				} else  {
+					$video_block = $this->gutenberg_block_generator->get_iframe( $row['url'] );
+				}
+
+				$updated_post_content = [
+					$video_block,
+					...$updated_post_content
+				];
+			}
+
+			$updated_post_content = serialize_blocks( $updated_post_content );
+
+			// Update data.
+			$update_data = [];
+
+			if ( $updated_post_content !== $post_content ) {
+				$update_data['post_content'] = $updated_post_content;
+			}
+
+			if ( ! empty( $video_thumbnail_id ) ) {
+				$update_data['meta_input'] = [
+					'_thumbnail_id' => $video_thumbnail_id,
 				];
 			}
 
