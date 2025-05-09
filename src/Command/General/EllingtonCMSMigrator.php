@@ -14,10 +14,14 @@ use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use WP_CLI;
 use WP_Error;
 use WP_User;
 use simplehtmldom\HtmlDocument;
+use WP_Post;
+use WP_Query;
+use WP_Term;
 
 /**
  * Custom migration scripts for Posts' and Comments' content.
@@ -25,6 +29,22 @@ use simplehtmldom\HtmlDocument;
 class EllingtonCMSMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
+
+	/**
+	 * EllingtonCMS Post Status map.
+	 * 
+	 * @var array
+	 */
+	const POST_STATUS_MAP = [
+		1 => 'publish', // Live
+		2 => 'draft', // Draft
+		3 => 'trash', // Deleted
+		4 => 'draft', // Unreviewed
+	];
+
+	const CDN_BASE_URL = 'https://jacksonfreepress.media.clients.ellingtoncms.com/';
+
+	const MAX_CURL_RETRIES = 10;
 
 	/**
 	 * Posts Logic.
@@ -62,6 +82,13 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 	private MultiLog $logger;
 
 	/**
+	 * CSV Iterator.
+	 * 
+	 * @var CsvIterator
+	 */
+	private CsvIterator $csv_iterator;
+
+	/**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -69,6 +96,7 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$this->attachments               = new Attachments();
 		$this->cap                       = new CoAuthorsPlusHelper();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->csv_iterator              = new CsvIterator();
 		$this->logger                    = MultiLog::get_logger(
 			'ellingtoncms-migrator',
 			[
@@ -152,6 +180,68 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 						'name'        => 'source-csv-path',
 						'description' => 'Path to the CSV file containing the comments.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ellington-cms-migrator migrate-audio',
+			self::get_command_closure( 'cmd_migrate_audio' ),
+			[
+				'shortdesc' => 'Migrates the Audio posts',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'category_id',
+						'description' => 'The ID of the Category that will contain all Audio Posts.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author',
+						'description' => 'The ID of the default Author to be used for Audio Posts.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator ellington-cms-migrator migrate-documents',
+			self::get_command_closure( 'cmd_migrate_documents' ),
+			[
+				'shortdesc' => 'Migrates the Documents',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'csv-path',
+						'description' => 'Path to the CSV file.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'category_id',
+						'description' => 'The ID of the Category that will contain all Documents Posts.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'default-author',
+						'description' => 'The ID of the default Author to be used for Posts.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -433,6 +523,456 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		$progress_bar->finish();
 
 		fclose( $qa_file );
+
+		wp_cache_flush();
+		
+		$this->logger->info( 'Completed! 🎉' );
+	}
+
+	/**
+	 * Migrates audio posts.
+	 *
+	 * @param  array $args
+	 * @param  array $assoc_args
+	 * @return void
+	 */
+	public function cmd_migrate_audio( array $args, array $assoc_args ) {
+		$csv_filepath   = (string) $assoc_args['csv-path'];
+		$category_id    = (int) $assoc_args['category_id'];
+		$default_author = (int) $assoc_args['default-author'];
+
+		if ( ! file_exists( $csv_filepath ) ) {
+			WP_CLI::error( sprintf( 'Provided CSV is missing — %s', $csv_filepath ) );
+
+			return;
+		}
+
+		if ( ! category_exists( $category_id ) ) {
+			WP_CLI::error( sprintf( 'Category with ID %d does not exist', $category_id ) );
+
+			return;
+		}
+
+		$category          = get_category( $category_id );
+		$csv_file_iterator = ( new FileImportFactory() )->get_file( $csv_filepath );
+
+		// Logger.
+		$log_slug = 'ellingtoncms-migrate-audio';
+        $logger   = MultiLog::get_logger( 
+			'multi-' . $log_slug,
+			[
+				CliLog::get_logger( $log_slug ),
+				FileLog::get_logger( $log_slug ),
+			]
+		);
+
+		// CSV.
+		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date
+		$csv = sprintf( 'ellingtoncms-migrate-audio-%s.csv', date( 'Y-m-d H-i-s' ) );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		$csv_file_pointer = fopen( $csv, 'w' );
+
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Source ID',
+				'Post ID',
+				'Post Title',
+				'Source URL',
+				'Post URL',
+			]
+		);
+
+		$total_posts = count( [ ...$csv_file_iterator->getIterator() ] );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( '[EllingtonCMS] Migrating Audio Posts', $total_posts );
+
+		foreach ( $csv_file_iterator->getIterator() as $row_number => $row ) {
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory: %s] [EllingtonCMS] Migrating Audio Posts %d/%d',
+					size_format( memory_get_usage( true ) ),
+					$row_number + 1,
+					$total_posts
+				)
+			);
+
+			$logger->info( sprintf( '⏳ Processing Row %s', wp_json_encode( $row ) ) );
+
+			// Search for post locally.
+			$local_post = $this->get_local_post( (int) $row['id'], $category );
+
+			if ( $local_post ) {
+				// TODO: Handle refresh
+				$logger->notice( sprintf( '⚠️ Post exists locally with ID %d', $local_post ) );
+			}
+
+			$logger->info( 'ℹ️ Post does not exist locally' );
+
+			$source_url = sprintf(
+				'https://www.jacksonfreepress.com/audioclips/%d',
+				$row['id']
+			);
+
+			if ( $local_post ) {
+				$post_id = wp_insert_post( [
+					'ID'            => $local_post,
+					'post_type'     => 'post',
+					'post_status'   => self::POST_STATUS_MAP[ $row['status'] ],
+					'post_author'   => $default_author,
+					'post_title'    => (string) $row['topic'],
+					'post_excerpt'  => (string) $row['description'],
+					'post_content'  => serialize_block( $this->gutenberg_block_generator->get_paragraph( (string) $row['description'] ) ),
+					'post_date_gmt' => '',
+					'post_date'     => date( 'Y-m-d H:i:s', strtotime( $row['posted_date'] ) ),
+					'post_category' => [ $category->term_id ],
+					'meta_input'    => [
+						'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+						'_newspack_source_id'              => $row['id'],
+						'_newspack_source_length'          => $row['length'],
+						'_newspack_source_url'             => $source_url,
+					]
+				], true );
+			} else {
+				$post_id = wp_insert_post( [
+					'post_type'     => 'post',
+					'post_status'   => self::POST_STATUS_MAP[ $row['status'] ],
+					'post_author'   => $default_author,
+					'post_title'    => (string) $row['topic'],
+					'post_excerpt'  => (string) $row['description'],
+					'post_content'  => serialize_block( $this->gutenberg_block_generator->get_paragraph( (string) $row['description'] ) ),
+					'post_date_gmt' => '',
+					'post_date'     => date( 'Y-m-d H:i:s', strtotime( $row['posted_date'] ) ),
+					'post_category' => [ $category->term_id ],
+					'meta_input'    => [
+						'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+						'_newspack_source_id'              => $row['id'],
+						'_newspack_source_length'          => $row['length'],
+						'_newspack_source_url'             => $source_url,
+					]
+				], true );
+			}
+
+			if ( is_wp_error( $post_id ) ) {
+				$logger->critical( sprintf( '❌ Post could not be inserted. Reason: %s', wp_json_encode( $post_id->get_error_messages() ) ) );
+
+				continue;
+			}
+
+			$post_content         = get_post_field( 'post_content', $post_id );
+			$updated_post_content = parse_blocks( $post_content );
+
+			if ( ! empty( $row['file'] ) ) {
+				try {
+					$logger->info( '⏳ Uploading Audio...' );
+	
+					$audio_id = $this->upload_file(
+						$row['file'],
+						[
+							'post_date' => date( 'Y-m-d H:i:s', strtotime( $row['posted_date'] ) )
+						],
+						$post_id
+					);
+
+					$updated_post_content = [
+						$this->gutenberg_block_generator->get_audio( get_post( $audio_id ) ),
+						...$updated_post_content
+					];
+				} catch ( \Exception $e ) {
+					$logger->critical( sprintf( '❌ Post Audio could not be inserted. Reason: %s', $e->getMessage() ) );
+				}
+			}
+
+			$updated_post_content = serialize_blocks( $updated_post_content );
+
+			// Update data.
+			$update_data = [];
+
+			if ( $updated_post_content !== $post_content ) {
+				$update_data['post_content'] = $updated_post_content;
+			}
+
+			if ( ! empty( $update_data ) ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					...$update_data,
+				] );
+			}
+
+			$logger->info( sprintf( '✅ Post upserted. Post ID: %d', $post_id ) );
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$row_number,
+					$row['id'],
+					$post_id,
+					get_the_title( $post_id ),
+					$source_url,
+					get_permalink( $post_id ),
+				] 
+			);
+		}
+
+		$progress_bar->finish();
+
+		fclose( $csv_file_pointer );
+
+		wp_cache_flush();
+		
+		$this->logger->info( 'Completed! 🎉' );
+	}
+
+	/**
+	 * Migrates document posts.
+	 * 
+	 * The following columns are available for each CSV Row:
+	 * - id — The ID of the Document on JFP
+	 * - title — The Document Title
+	 * - pub_date — Publication Date in YYYY-MM-DD format
+	 * - slug — Document slug
+	 * - document_date - Document Date in YYYY-MM-DD format
+	 * - document - The path to document file relative to CDN
+	 * - source — The source of the document
+	 * - thumbnail — The path to thumbnail file relative to CDN
+	 * - description — The description of the document
+	 * - notes — Document notes
+	 * - document_set_id - Document Set (ignored)
+	 * - originating_site_id - Originating Site ID (ignored)
+	 *
+	 * @param  array $args
+	 * @param  array $assoc_args
+	 * @return void
+	 */
+	public function cmd_migrate_documents( array $args, array $assoc_args ) {
+		$csv_filepath   = (string) $assoc_args['csv-path'];
+		$category_id    = (int) $assoc_args['category_id'];
+		$default_author = (int) $assoc_args['default-author'];
+
+		if ( ! file_exists( $csv_filepath ) ) {
+			WP_CLI::error( sprintf( 'Provided CSV is missing — %s', $csv_filepath ) );
+
+			return;
+		}
+
+		if ( ! category_exists( $category_id ) ) {
+			WP_CLI::error( sprintf( 'Category with ID %d does not exist', $category_id ) );
+
+			return;
+		}
+
+		$category          = get_category( $category_id );
+		$csv_file_iterator = ( new FileImportFactory() )->get_file( $csv_filepath );
+
+		// Logger.
+		$log_slug = 'ellingtoncms-migrate-documents';
+        $logger   = MultiLog::get_logger( 
+			'multi-' . $log_slug,
+			[
+				CliLog::get_logger( $log_slug ),
+				FileLog::get_logger( $log_slug ),
+			]
+		);
+
+		// CSV.
+		// phpcs:ignore WordPress.DateTime.RestrictedFunctions.date_date
+		$csv = sprintf( 'ellingtoncms-migrate-documents-%s.csv', date( 'Y-m-d H-i-s' ) );
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen
+		$csv_file_pointer = fopen( $csv, 'w' );
+
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv
+		fputcsv(
+			$csv_file_pointer,
+			[
+				'#',
+				'Source ID',
+				'Post ID',
+				'Post Title',
+				'Source URL',
+				'Post URL',
+			]
+		);
+
+		$total_posts = count( [ ...$csv_file_iterator->getIterator() ] );
+
+		$progress_bar = WP_CLI\Utils\make_progress_bar( '[EllingtonCMS] Migrating Documents', $total_posts );
+
+		foreach ( $csv_file_iterator->getIterator() as $row_number => $row ) {
+			$progress_bar->tick(
+				1,
+				sprintf(
+					'[Memory: %s] [EllingtonCMS] Migrating Documents %d/%d',
+					size_format( memory_get_usage( true ) ),
+					$row_number + 1,
+					$total_posts
+				)
+			);
+
+			$logger->info( sprintf( '⏳ Processing Row %s', wp_json_encode( $row ) ) );
+
+			// Search for post locally.
+			$local_post = $this->get_local_post( (int) $row['id'], $category );
+
+			if ( $local_post ) {
+				$logger->notice( sprintf( '⚠️ Post exists locally with ID %d', $local_post ) );
+			} else {
+				$logger->info( 'ℹ️ Post does not exist locally' );
+			}
+
+			$source_url = sprintf(
+				'https://www.jacksonfreepress.com/documents/%s/%s/',
+				strtolower( ( DateTime::createFromFormat( 'Y-m-d', $row['pub_date'] ) )?->format( 'Y/M/d' ) ),
+				$row['slug']
+			);
+
+			if ( $local_post ) {
+				$post_id = wp_update_post( [
+					'ID'            => $local_post,
+					'post_type'     => 'post',
+					'post_status'   => 'publish',
+					'post_author'   => $default_author,
+					'post_title'    => (string) $row['title'],
+					'post_excerpt'  => (string) $row['description'],
+					'post_content'  => serialize_block( $this->gutenberg_block_generator->get_paragraph( (string) $row['description'] ) ),
+					'post_name'     => (string) $row['slug'],
+					'post_date_gmt' => '',
+					'post_date'     => sprintf( '%s 00:00:00', $row['pub_date'] ),
+					'post_category' => [ $category->term_id ],
+					'meta_input'    => [
+						'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+						'_newspack_source_id'              => $row['id'],
+						'_newspack_source_pub_date'        => $row['pub_date'],
+						'_newspack_source_slug'            => $row['slug'],
+						'_newspack_source_document_date'   => $row['document_date'],
+						'_newspack_source_source'          => $row['source'],
+						'_newspack_source_url'             => $source_url,
+					]
+				] );
+			} else {
+				$post_id = wp_insert_post( [
+					'post_type'     => 'post',
+					'post_status'   => 'publish',
+					'post_author'   => $default_author,
+					'post_title'    => (string) $row['title'],
+					'post_excerpt'  => (string) $row['description'],
+					'post_content'  => serialize_block( $this->gutenberg_block_generator->get_paragraph( (string) $row['description'] ) ),
+					'post_name'     => (string) $row['slug'],
+					'post_date_gmt' => '',
+					'post_date'     => sprintf( '%s 00:00:00', $row['pub_date'] ),
+					'post_category' => [ $category->term_id ],
+					'meta_input'    => [
+						'newspack_featured_image_position' => 'hidden', // Default Featured Image should be hidden, by default.
+						'_newspack_source_id'              => $row['id'],
+						'_newspack_source_pub_date'        => $row['pub_date'],
+						'_newspack_source_slug'            => $row['slug'],
+						'_newspack_source_document_date'   => $row['document_date'],
+						'_newspack_source_source'          => $row['source'],
+						'_newspack_source_url'             => $source_url,
+					]
+				] );
+			}
+
+			if ( is_wp_error( $post_id ) ) {
+				$logger->critical( sprintf( '❌ Post could not be inserted. Reason: %s', wp_json_encode( $post_id->get_error_messages() ) ) );
+
+				continue;
+			}
+
+			$document_thumbnail_id = null;
+			$document_id           = null;
+
+			$post_content         = get_post_field( 'post_content', $post_id );
+			$updated_post_content = parse_blocks( $post_content );
+
+			if ( ! empty( $row['thumbnail'] ) ) {
+				try {
+					$logger->info( '⏳ Uploading Thumbnail...' );
+
+					$document_thumbnail_id = $this->upload_file(
+						$row['thumbnail'],
+						[
+							'post_date' => sprintf( '%s 00:00:00', $row['pub_date'] )
+						],
+						$post_id
+					);
+				} catch ( \Exception $e ) {
+					$logger->critical( sprintf( '❌ Post Thumbnail could not be inserted. Reason: %s', $e->getMessage() ) );
+				}
+			}
+
+			if ( ! empty( $row['document'] ) ) {
+				try {
+					$logger->info( '⏳ Uploading Document...' );
+	
+					$document_id = $this->upload_file(
+						$row['document'],
+						[
+							'post_date' => sprintf( '%s 00:00:00', $row['pub_date'] )
+						],
+						$post_id
+					);
+
+					if ( in_array( get_post_mime_type( $document_id ), [ 'application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ] ) ) {
+						$updated_post_content = [
+							$this->gutenberg_block_generator->get_iframe( wp_get_attachment_url( $document_id ) ),
+							...$updated_post_content
+						];
+					} else {
+						$updated_post_content = [
+							$this->gutenberg_block_generator->get_image( get_post( $document_id ), 'full', false ),
+							...$updated_post_content
+						];
+					}
+				} catch ( \Exception $e ) {
+					$logger->critical( sprintf( '❌ Post Document could not be inserted. Reason: %s', $e->getMessage() ) );
+				}
+			}
+
+			$updated_post_content = serialize_blocks( $updated_post_content );
+
+			// Update data.
+			$update_data = [];
+
+			if ( $updated_post_content !== $post_content ) {
+				$update_data['post_content'] = $updated_post_content;
+			}
+
+			if ( ! empty( $document_thumbnail_id ) ) {
+				$update_data['meta_input'] = [
+					'_thumbnail_id' => $document_thumbnail_id,
+				];
+			}
+
+			if ( ! empty( $update_data ) ) {
+				wp_update_post( [
+					'ID' => $post_id,
+					...$update_data,
+				] );
+			}
+
+			$logger->info( sprintf( '✅ Post inserted. Post ID: %d', $post_id ) );
+
+			fputcsv(
+				$csv_file_pointer,
+				[
+					$row_number,
+					$row['id'],
+					$post_id,
+					get_the_title( $post_id ),
+					$source_url,
+					get_permalink( $post_id ),
+				] 
+			);
+		}
+
+		$progress_bar->finish();
+
+		fclose( $csv_file_pointer );
 
 		wp_cache_flush();
 		
@@ -952,5 +1492,98 @@ class EllingtonCMSMigrator implements RegisterCommandInterface {
 		}
 
 		return $filtered_content;
+	}
+
+	/**
+	 * Search local Post by given ID and Category.
+	 * 
+	 * @param  int      $ID       The Source ID of the Post.
+	 * @param  \WP_Term $category The belonging Category.
+	 * @return int|null The found WP_Post ID. Otherwise, false.
+	 */
+	private function get_local_post( int $ID, WP_Term $category ): int|null {
+		$local_posts = new WP_Query( [
+			'post_type'      => 'post',
+			'posts_per_page' => 1,
+			'fields'         => 'ids',
+			'cat'            => $category->term_id,
+			'meta_query'     => [
+				[
+					'key'   => '_newspack_source_id',
+					'value' => $ID,
+				]
+			]
+		] );
+
+		if ( $local_posts->have_posts() ) {
+			return $local_posts->get_posts()[0];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Uploads a file from CDN.
+	 * 
+	 * @throws \Exception
+	 * 
+	 * @param  string   $filepath The path to file relative to EllingtonCMS CDN or a full url.
+	 * @param  string   $filedata The additional file data.
+	 * @param  int|null $post_ID  The ID of the related Post.
+	 * @return int The Attachment ID on success. Otherwise, an exception is thrown.
+	 */
+	private function upload_file( string $filepath, array $filedata, int|null $post_ID ): int {
+		add_filter( 'intermediate_image_sizes_advanced', '__return_null' ); // Prevent image resizing
+
+		if ( ! str_starts_with( $filepath, 'http' ) ) {
+			$filepath = untrailingslashit( self::CDN_BASE_URL ) . '/' . ltrim( $filepath, '/\\' );
+		}
+
+		$filedata = wp_parse_args( $filedata, [
+			'title'       => null,
+			'caption'     => null,
+			'description' => null,
+			'alt'         => null,
+			'post_date'   => null,
+			'filename'    => basename( $filepath ),
+		] );
+
+		$retry_counter = 0;
+
+		while ( $retry_counter < self::MAX_CURL_RETRIES ) {
+			$retry_counter++;
+
+			try {
+				$attachment_id = $this
+					->attachments
+					->import_external_file(
+						$filepath,
+						$filedata['title'],
+						$filedata['caption'],
+						$filedata['description'],
+						$filedata['alt'],
+						$post_ID ?? 0,
+						[
+							'post_date'     => $filedata['post_date'],
+							'post_date_gmt' => '',
+						],
+						$filedata['filename'],
+					);
+
+				if ( is_wp_error( $attachment_id ) ) {
+					throw new \Exception( $attachment_id->get_error_message() );
+				} else {
+					break;
+				}
+			} catch ( \Exception $e ) {
+				if ( $retry_counter === self::MAX_CURL_RETRIES ) {
+					throw $e;
+				}
+			}
+		}
+
+		update_post_meta( $attachment_id, '_newspack_attachment_source_url', $filepath );
+
+		return $attachment_id;
 	}
 }
