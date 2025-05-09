@@ -4588,6 +4588,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 			'year'       => null,
 			'month'      => null,
 			'day'        => null,
+			'Exists'     => null,
 		];
 		$file = fopen( 'missing-media-filepaths.csv', 'w' );
 		fputcsv( $file, array_keys( $header ) );
@@ -4658,6 +4659,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 				$filenames[] = $photo_data['photo_name'] . '_main.jpg';
 				$filenames[] = $photo_data['photo_name'] . '_thumb.jpg';
 
+				$exists = false;
+
 				foreach ( $filenames as $filename ) {
 					$file_dir_path     = $media_dir;
 					$new_file_dir_path = str_replace( $story_photos_dir_path, './files-for-import', $file_dir_path );
@@ -4671,6 +4674,7 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					}
 
 					copy( $file_dir_path . '/' . $filename, $new_file_dir_path . '/' . $filename );
+					$exists = true;
 					break;
 				}
 
@@ -4681,7 +4685,8 @@ class EmbarcaderoMigrator implements InterfaceCommand {
 					$photo_data['photo_name'],
 					$media_year,
 					$media_month,
-					$photo_data['photo_day']
+					$photo_data['photo_day'],
+					$exists ? 'YES' : 'NO',
 				] );
 			}
 		}
