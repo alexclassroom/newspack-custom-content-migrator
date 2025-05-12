@@ -564,7 +564,7 @@ class ContentDiffMigrator {
 		);
 		// phpcs:enable
 
-		// Go through all the $live_taxonomies and get or create them on local, and mark their term_id changes in $hierarchical_taxonomy_term_id_updates.
+		// Go through all the $live_taxonomies and get or create them on local , and mark their term_id changes in $hierarchical_taxonomy_term_id_updates.
 		$hierarchical_taxonomy_term_id_updates = [];
 		foreach ( $live_hierarchical_taxonomies as $live_hierarchical_taxonomy ) {
 			$live_hierarchical_taxonomy_tree = $this->get_hierarchical_taxonomy_tree( $live_table_prefix, $live_hierarchical_taxonomy );
