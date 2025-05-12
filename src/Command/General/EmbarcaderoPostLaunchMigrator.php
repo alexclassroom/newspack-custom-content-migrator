@@ -340,6 +340,7 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_embarcadero_delete_issue_date_categories( $args, $assoc_args ) {
+		global $wpdb;
 		$log_file        = 'embarcadero_delete_issue_date_categories.csv';
 		$log_file_handle = fopen( $log_file, 'a' );
 		fputcsv( $log_file_handle, [ 'year_category_id', 'year_category_name', 'date_category_id', 'date_category_name' ] );
@@ -350,7 +351,16 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 
 		WP_CLI::line( 'Year categories: ' . count( $year_categories ) );
 		foreach ( $year_categories as $year_category ) {
-			$date_categories = get_categories( [ 'parent' => $year_category->term_id ] );
+			// $date_categories = get_categories( [ 'parent' => $year_category->term_id ] );
+			$date_categories = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT  t.term_id, t.name
+			 FROM wp_terms AS t  INNER JOIN wp_term_taxonomy AS tt ON t.term_id = tt.term_id
+			 WHERE tt.taxonomy IN ('category') AND tt.parent = %d
+			 ORDER BY t.name ASC",
+					$year_category->term_id
+				)
+			);
 
 			foreach ( $date_categories as $date_category ) {
 				// Make sure the date category is in the format Apr 7.
@@ -558,7 +568,9 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 			// The seo_link from the CSV is in the format "2007/02/06/headline".
 			// We need to convert it to the format "2007-02-06".
 			$seo_link_splitted = explode( '/', $blog_topic['seo_link'] );
-			$csv_date          = $seo_link_splitted[0] . '-' . $seo_link_splitted[1] . '-' . $seo_link_splitted[2];
+			$csv_date          = ( 1 < count( $seo_link_splitted ) )
+			? $seo_link_splitted[0] . '-' . $seo_link_splitted[1] . '-' . $seo_link_splitted[2]
+			: $blog_topic['posted_date'];
 
 			$post_date = ( new \DateTime( $migrated_post->post_date ) )->format( 'Y-m-d' );
 			$post_time = ( new \DateTime( $migrated_post->post_date ) )->format( 'H:i:s' );
