@@ -433,6 +433,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * this is the SQL that it runs. The default sql will get 10 nodes in ascending node id order where the 
 	 * node ids are greater than the last previously imported node id. This sql will be run over-and-over again until
 	 * there are no more nodes remaining to import. 
+	 * 	
+	 * When importing, it's easier to test and QA the content when importing the newest nodes first. The default sql
+	 * will import the lower node ids first so this means the oldest articles, profiles, etc, will be imported before
+	 * the newer ones. The following will change the SQL to import the newest content first.
+	 * 
+	 * Also, don't import drafts for articles (maybe other types too?)
 	 * 
 	 * @param [type] $sql            Default sql.
 	 * @param [type] $prefix         Database table prefix.
@@ -447,17 +453,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Only for nodes and types.
 		if ( 'node' !== $entity_type ) return $sql;
 		if ( ! in_array( $content_type, $this->nodes_to_keep ) ) return $sql;
-		
-		// @todo - testing by profile ids:
-		// if ( 'node' === $entity_type && 'profile' === $content_type ) {
-		// 	$sql = str_replace( 'WHERE ', 'WHERE n.nid IN ( 234552 ) AND ', $sql );
-		// }
+					
+		// Remove drafts.
+		if( 'article' == $content_type ) {
+			$sql = str_replace( 'WHERE n.type = ', 'WHERE n.status <> 0 AND n.type = ', $sql );
+		}
 
-		// When importing, it's easier to test and QA the content when importing the newest nodes
-		// first. The default sql will import the lower node ids first so this means the oldest
-		// articles, profiles, etc, will be imported before the newer ones. The following will
-		// change the SQL to import the newest content first.
-			
 		// Ordering.
 		if ( $this->flag_order_desc ) {
 
