@@ -638,18 +638,20 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 
 		if ( ! str_starts_with( $original_permalink, $original_post_date ) ) {
 			$relative_permalink = wp_make_link_relative( get_permalink( $post_id ) );
-			$this->redirection->create_redirection_rule_in_group(
-				'Different date permalink: ' . $article_data['metadata']['headline'],
-				$original_permalink,
-				$relative_permalink,
-				'articlelink'
-			);
+			if ( $original_permalink !== $relative_permalink ) {
+				$this->redirection->create_redirection_rule_in_group(
+					'Different date permalink: ' . $article_data['metadata']['headline'],
+					$original_permalink,
+					$relative_permalink,
+					'articlelink'
+				);
 
-			ConsoleColor::green( 'Created redirection group for articlelink post' )
-				->bright_green( $post_id . ':' )
-				->green( "$original_permalink => " )
-				->green( $relative_permalink )
-				->output();
+				ConsoleColor::green( 'Created redirection group for articlelink post' )
+					->bright_green( $post_id . ':' )
+					->green( "$original_permalink => " )
+					->green( $relative_permalink )
+					->output();
+			}
 		}
 
 		// Update modification date directly in the database.
@@ -2722,20 +2724,22 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 	 * @param string $url_override The URL override.
 	 */
 	private function handle_articlelink( int $post_id, string $post_title, string $url_override ): void {
-		// TODO: Check if both URLs are the same.
 		$post_url_relative = $this->get_post_url_relative( $post_id );
-		$this->redirection->create_redirection_rule_in_group(
-			$post_title,
-			$post_url_relative,
-			$url_override,
-			'articlelink'
-		);
+		$post_full_url     = get_permalink( $post_id );
+		if ( $post_full_url !== $url_override ) {
+			$this->redirection->create_redirection_rule_in_group(
+				$post_title,
+				$post_url_relative,
+				$url_override,
+				'articlelink'
+			);
 
-		ConsoleColor::green( 'Created redirection group for articlelink post' )
+			ConsoleColor::green( 'Created redirection group for articlelink post' )
 			->bright_green( $post_id . ':' )
-			->green( "$post_url_relative => " )
-			->green( $url_override )
-			->output();
+				->green( "$post_url_relative => " )
+				->green( $url_override )
+				->output();
+		}
 	}
 
 	/**
