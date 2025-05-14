@@ -265,12 +265,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		// Setup FG plugin's filters.
-		add_filter( 'fgd2wp_get_nodes_sql',               [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
-		add_filter( 'fgd2wp_map_acf_field_type',          [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
-		add_filter( 'fgd2wp_map_taxonomy',                [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
-		add_filter( 'fgd2wp_post_import_post',            [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
-		add_action( 'fgd2wp_post_register_custom_fields', [ $this, 'fgd2wp_post_register_custom_fields' ] );
-		add_filter( 'fgd2wp_pre_insert_post',             [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
+		add_filter( 'fgd2wp_get_node_taxonomies_terms_sql', [ $this, 'fgd2wp_get_node_taxonomies_terms_sql' ], 10, 5 );
+		add_filter( 'fgd2wp_get_nodes_sql',                 [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_map_acf_field_type',            [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
+		add_filter( 'fgd2wp_map_taxonomy',                  [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_post_import_post',              [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
+		add_action( 'fgd2wp_post_register_custom_fields',   [ $this, 'fgd2wp_post_register_custom_fields' ] );
+		add_filter( 'fgd2wp_pre_insert_post',               [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
 		// add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
 		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
@@ -427,6 +428,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	************************************/
 
 	/**
+	 * FG hard codes 'categories' as the taxonomy lookup.  Change to 'channel' (primary) and 'sections' (secondary).
+	 */
+	function fgd2wp_get_node_taxonomies_terms_sql( $sql, $node_id, $entity_type, $taxonomy, $extra_cols ) {
+
+		if( 'node' === $entity_type ) {
+			$sql = str_replace( "AND t.vid = 'categories'", "AND t.vid IN( 'channel', 'sections' )", $sql );
+		}
+
+		return $sql;
+	}
+
+	/**
 	 * FG Drupal get nodes sql.
 	 *
 	 * Use this filter to modify the sql query for the main import loop. When FG Drupal selects nodes to import
@@ -455,7 +468,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		if ( ! in_array( $content_type, $this->nodes_to_keep ) ) return $sql;
 					
 		// Remove drafts.
-		if( 'article' == $content_type ) {
+		if( 'article' === $content_type ) {
 			$sql = str_replace( 'WHERE n.type = ', 'WHERE n.status <> 0 AND n.type = ', $sql );
 		}
 
