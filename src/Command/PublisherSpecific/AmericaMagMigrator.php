@@ -87,11 +87,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private array $nodes_to_keep;
 
 	/**
-	 * Required timezone setting.
-	 *
-	 * @var string
+	 * Required wp-admin setting.
 	 */
-	private string $required_timezone = 'America/New_York';
+	private string $required_permalink = '/%category%/%year%/%monthnum%/%day%/%postname%/';
+	private string $required_timezone  = 'America/New_York';
 
 	/**
 	 * CLI Commands
@@ -159,12 +158,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
-		// CAP Plugin is required.
-		if ( ! is_plugin_active( "co-authors-plus/co-authors-plus.php" ) ) {
-			$this->logger->error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
-			exit();
-		}
-		
+		$this->validate_setup();
+
 		global $coauthors_plus;
 
 		// Loop through all posts.
@@ -242,6 +237,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
+		$this->validate_setup();
+
 		if ( isset( $assoc_args['batch-max'] ) ) {
 			if( ! preg_match( '/^\d+$/', $assoc_args['batch-max'] ) ) {
 				$this->logger->error( 'Batch-max must be int 0 or greater.');
@@ -253,25 +250,16 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		if ( isset( $assoc_args['order-desc'] ) )    $this->flag_order_desc = true;
 		if ( isset( $assoc_args['set-redirects'] ) ) $this->flag_set_redirects = true;
 		if ( isset( $assoc_args['skip-media'] ) )    $this->flag_skip_media = true;
-		
-		// Verify America/New_York (eastern / utc-4 timezone):
-		if( wp_timezone_string() !== $this->required_timezone ) {
-			// if we want to set this programatically (via wp_cli::confirm [yes/no]), the DB must match:
-			//   timezone_string	America/New_York	auto
-			//   gmt_offset		(null)				on|auto (?)
-			// so just force this to be done by-hand in wp-admin instead.  exit if not set.
-			$this->logger->error( 'WP-admin > settings > timezone must be set to: ' . $this->required_timezone );
-			exit();
-		}
-
+	
 		// Setup FG plugin's filters.
-		add_filter( 'fgd2wp_get_node_taxonomies_terms_sql', [ $this, 'fgd2wp_get_node_taxonomies_terms_sql' ], 10, 5 );
-		add_filter( 'fgd2wp_get_nodes_sql',                 [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
-		add_filter( 'fgd2wp_map_acf_field_type',            [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
-		add_filter( 'fgd2wp_map_taxonomy',                  [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
-		add_filter( 'fgd2wp_post_import_post',              [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
-		add_action( 'fgd2wp_post_register_custom_fields',   [ $this, 'fgd2wp_post_register_custom_fields' ] );
-		add_filter( 'fgd2wp_pre_insert_post',               [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
+		add_filter( 'fgd2wp_get_node_taxonomies_terms_sql',      [ $this, 'fgd2wp_get_node_taxonomies_terms_sql' ], 10, 5 );
+		add_filter( 'fgd2wp_get_nodes_sql',                      [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_map_acf_field_type',                 [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
+		add_filter( 'fgd2wp_map_taxonomy',                       [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
+		add_filter( 'fgd2wp_post_import_post',                   [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
+		add_action( 'fgd2wp_post_register_custom_fields',        [ $this, 'fgd2wp_post_register_custom_fields' ] );
+		add_action( 'fgd2wp_post_set_node_taxonomies_relations', [ $this, 'fgd2wp_post_set_node_taxonomies_relations' ], 10, 3 );
+		add_filter( 'fgd2wp_pre_insert_post',                    [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
 		// add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
 		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
@@ -321,18 +309,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
-		// Newspack Plugin is required.
-		if ( ! defined( '\Newspack\Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME' ) ) {
-			$this->logger->error( 'Newspack Plugin Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME not found.' );
-			exit();
-		}
+		$this->validate_setup();
 
-		// Simple Local Avatars is required..
-		if ( ! is_plugin_active( "simple-local-avatars/simple-local-avatars.php" ) ) {
-			$this->logger->error( 'Simple Local Avatars plugin not found. Install and activate it before using this command.' );
-			exit();
-		}
-		
 		$simple_avatars = new \Simple_Local_Avatars();
 
 		// Loop through all profile post type rows.
@@ -429,8 +407,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	/**
 	 * FG hard codes 'categories' as the taxonomy lookup.  Change to 'channel' (primary) and 'sections' (secondary).
+	 * 
+	 * This hook is also important since it runs during post creation, otherwise no categories would be associated
+	 * with the post during wp_insert_post which will result in 'uncategorized' being added. This hook will stop
+	 * uncategorized being added to all the posts.
+	 * 
 	 */
-	function fgd2wp_get_node_taxonomies_terms_sql( $sql, $node_id, $entity_type, $taxonomy, $extra_cols ) {
+	public function fgd2wp_get_node_taxonomies_terms_sql( $sql, $node_id, $entity_type, $taxonomy, $extra_cols ) {
 
 		if( 'node' === $entity_type ) {
 			$sql = str_replace( "AND t.vid = 'categories'", "AND t.vid IN( 'channel', 'sections' )", $sql );
@@ -511,7 +494,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * @param array $field
 	 * @return $acf_type
 	 */
-	function fgd2wp_map_acf_field_type( $acf_type, $field_type, $field ) {
+	public function fgd2wp_map_acf_field_type( $acf_type, $field_type, $field ) {
 
 		// Change "oembed" to just normal postmeta since Youtube links can't be imported as videos.
 		if( $acf_type === 'oembed' && $field_type === 'video' ) {
@@ -570,6 +553,45 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_post_register_custom_fields( $custom_fields ) {
 		$this->custom_fields = $custom_fields;
+	}
+
+	/**
+	 * After post is inserted (and taxonomy relationships are added) set Yoast primary.
+	 * 
+	 * This hook runs after the post is created.  See hook above (fgd2wp_get_node_taxonomies_terms_sql) that runs
+	 * before post is created.  That hook is important to cut down on all the 'uncategorized' being added to posts.
+	 * 
+	 * This hook runs after post is created so we have a $new_post_id for setting Yoast primary.
+	 * 
+	 */
+	public function fgd2wp_post_set_node_taxonomies_relations( $new_post_id, $node, $node_terms ) {
+
+		// Make sure just for articles to be safe.
+		if( ! isset( $node['type'] ) || 'article' !== $node['type'] ) return;
+
+		// Look for primary taxonomy: "channel".
+		foreach( $node_terms as $node_term ) {
+			
+			// Must be the primary taxonomy we want.
+			if( ! isset( $node_term['taxonomy'] ) || 'channel' !== $node_term['taxonomy'] ) continue;
+
+			// Verify id exists to be safe.
+			if( ! isset( $node_term['tid'] ) ) continue;
+
+			// Access the global FG Drupal Premium object (note the extra "p" in the name).
+			global $fgd2wpp;
+			
+			// Convert tid to term_id. 
+			if ( isset( $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] ) ) {
+				update_post_meta( $new_post_id, '_yoast_wpseo_primary_category', $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] );
+				$this->logger->info( 'Yoast primary set to term_id: ' . $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] );
+				$this->logger->info( 'Original term info: ' . print_r( $node_term, true ) );
+				return;
+			}
+		}
+
+		$this->logger->notice( 'Did not set Yoast primary.' );
+
 	}
 
 	/**
@@ -781,6 +803,49 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// import_duplicates = 1;
 
 		return $options;
+	}
+
+	/************************************
+	  VALIDATIONS
+	************************************/
+
+	private function validate_setup() {
+
+		// Verify America/New_York (eastern / utc-4 timezone):
+		if( wp_timezone_string() !== $this->required_timezone ) {
+			$this->logger->error( 'WP-admin > settings > timezone must be set to: ' . $this->required_timezone );
+			exit();
+		}
+        // Verify permalink.
+        if( get_option( 'permalink_structure' ) !== $this->required_permalink ) {
+            $this->logger->error( 'WP-admin > settings > permalinks must be set to: ' . $this->required_permalink );
+			exit();
+        }
+
+		// Newspack Plugin is required.
+		if ( ! defined( '\Newspack\Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME' ) ) {
+			$this->logger->error( 'Newspack Plugin Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME not found.' );
+			exit();
+		}
+
+		// CAP Plugin is required.
+		if ( ! is_plugin_active( "co-authors-plus/co-authors-plus.php" ) ) {
+			$this->logger->error( 'Co-Authors Plus plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+
+		// Simple Local Avatars is required..
+		if ( ! is_plugin_active( "simple-local-avatars/simple-local-avatars.php" ) ) {
+			$this->logger->error( 'Simple Local Avatars plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+
+		// Yoast is required..
+		if ( ! is_plugin_active( "wordpress-seo/wp-seo.php" ) ) {
+			$this->logger->error( 'Yoast (wordpress-seo) plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+
 	}
 
 }
