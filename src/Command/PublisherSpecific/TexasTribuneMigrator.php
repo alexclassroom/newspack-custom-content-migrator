@@ -663,7 +663,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			[ 'ID' => $post_id ]
 		);
 
-		ConsoleColor::green( sprintf( 'MIGRATED_POST,%s,%s', $article_data['metadata']['article_url'], get_permalink( $post_id ) ) )->output();
+		ConsoleColor::green( sprintf( 'MIGRATED_POST, %s, %s', $article_data['metadata']['article_url'], get_permalink( $post_id ) ) )->output();
 	}
 
 	/**
@@ -2459,7 +2459,7 @@ class TexasTribuneMigrator implements RegisterCommandInterface {
 			$this->block_generator->get_heading(
 				$component['title'],
 				'h3',
-				$component['cta_url']
+				$component['cta_url'] ?? ''
 			)
 		);
 

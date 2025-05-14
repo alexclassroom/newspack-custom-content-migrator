@@ -86,6 +86,7 @@ class TexasTribuneAttachmentMetadataObject {
 		$this->decoded_url        = urldecode( $image_url );
 		$this->decoded_file_name  = \WP_CLI\Utils\basename( $this->decoded_url );
 
+		$round_image_url  = strpos( $image_url, 'round_corner' );
 		$static_image_url = strpos( $image_url, 'static.texastribune.org' );
 
 		$matches = [];
@@ -99,7 +100,10 @@ class TexasTribuneAttachmentMetadataObject {
 			$this->dimensions     = '';
 		}
 
-		if ( false !== $static_image_url ) {
+		if ( false !== $round_image_url ) {
+			$this->download_url         = $image_url;
+			$this->decoded_download_url = urldecode( $this->download_url );
+		} elseif ( false !== $static_image_url ) {
 			$image_url = substr( $image_url, $static_image_url );
 
 			if ( ! str_starts_with( $image_url, 'http' ) ) {
