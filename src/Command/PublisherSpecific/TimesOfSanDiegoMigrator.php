@@ -87,9 +87,10 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'List Co-Authors for posts, outputs formatted list of post IDs and their Co-Authors.',
 				'synopsis'  => [
 					[
-						'type'     => 'assoc',
-						'name'     => 'file-post-ids-csv',
-						'optional' => false,
+						'type'        => 'assoc',
+						'description' => 'Path to the post IDs, one ID per line.',
+						'name'        => 'file-post-ids',
+						'optional'    => false,
 					],
 				],
 			]
@@ -224,11 +225,11 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 	 * @throws \Exception If something goes wrong.
 	 */
 	public function cmd_list_coauthors_for_posts( array $pos_args, array $assoc_args ): void {
-		$file_post_ids_csv = $assoc_args['file-post-ids-csv'];
+		$file_post_ids = $assoc_args['file-post-ids'];
 
 		// Get post IDs from CSV file.
 		$post_ids = [];
-		$file = file_get_contents( $file_post_ids_csv ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown
+		$file = file_get_contents( $file_post_ids ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown
 		if ( false === $file ) {
 			echo( "Failed to read post IDs CSV file.\n" );
 			exit( 1 );
@@ -280,7 +281,7 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 		}
 
 		// Write post_coauthors_data to JSON file, one post & authors per line.
-		$file_post_ids_csv_json = $file_post_ids_csv . '_coauthors.txt';
+		$file_post_ids_csv_json = $file_post_ids . '_coauthors.txt';
 		if ( file_exists( $file_post_ids_csv_json ) ) {
 			unlink( $file_post_ids_csv_json ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink
 		}
