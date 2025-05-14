@@ -87,6 +87,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
 		Command\PublisherSpecific\OrthopedicsThisWeekMigrator::class,
 		Command\PublisherSpecific\County17Migrator::class,
+		Command\PublisherSpecific\TimesOfSanDiegoMigrator::class,
 	]
 );
 
