@@ -13,6 +13,7 @@ use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\Posts;
 use WP_CLI;
+use WP_User;
 
 class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 
@@ -78,12 +79,25 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator times-of-san-diego list-coauthors-for-posts',
+			self::get_command_closure( 'cmd_list_coauthors_for_posts' ),
+			[
+				'shortdesc' => 'List Co-Authors for posts, outputs formatted list of post IDs and their Co-Authors.',
+				'synopsis'  => [
+					[
+						'type'     => 'assoc',
+						'name'     => 'file-post-ids-csv',
+						'optional' => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
-	 * Callback for the `bw-download-xml` command.
-	 *
-	 * Downloads XML files for a given date range.
+	 * Callback for the `newspack-content-migrator times-of-san-diego migrate-gas` command.
 	 *
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
@@ -138,12 +152,18 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
+			echo( sprintf( "Found %d GA terms:\n", esc_html( count( $ga_terms ) ) ) );
+
 			// Co-Authors author terms can represent either 1) GA objects, or 2) WP_User objects.
 			$authors = [];
-			foreach ( $ga_terms as $ga_term ) {
-				
+			foreach ( $ga_terms as $key_ga_term => $ga_term ) {
+				$ga_term_id   = $ga_term['term_id'];
+				$ga_term_slug = $ga_term['slug'];
+				$ga_term_name = $ga_term['name'];
+				echo( sprintf( "- (%d) term_id:%d slug:'%s' name:'%s'", esc_html( $key_ga_term + 1 ), esc_attr( count( $ga_terms ) ), esc_attr( $ga_term_id ), esc_html( $ga_term_slug ), esc_html( $ga_term_name ) ) );
+
 				// 1) Check if this term represents a GA object -- where wp_posts.post_name = term.slug.
-				$guest_author_display_name = $wpdb->get_var( $wpdb->prepare( "select post_title from wp_posts where post_name = %s and post_type = 'guest-author'", $ga_term['slug'] ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching
+				$guest_author_display_name = $wpdb->get_var( $wpdb->prepare( "select post_title from wp_posts where post_name = %s and post_type = 'guest-author'", $ga_term_slug ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching
 				if ( ! is_null( $guest_author_display_name ) ) {
 					// Get GA object by display name.
 					$ga = $this->coauthors_plus_helper->get_guest_author_by_display_name( $guest_author_display_name );
@@ -154,11 +174,12 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 	
 					// Found GA.
 					$authors[] = $ga;
+					echo( " ===> GA\n" );
 					continue;
 				} 
 
 				// 2) Check if this term represents a WP_User object -- where wp_users.user_login = term.name.
-				$user_id = $wpdb->get_var( $wpdb->prepare( 'select ID from wp_users where user_login = %s', $ga_term['name'] ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching
+				$user_id = $wpdb->get_var( $wpdb->prepare( 'select ID from wp_users where user_login = %s', $ga_term_name ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching
 				if ( ! is_null( $user_id ) ) {
 					// Get WP_User object by ID.
 					$user = get_user_by( 'id', $user_id );
@@ -169,11 +190,12 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 
 					// Found WP_User.
 					$authors[] = $user;
+					echo( " ===> WP_User\n" );
 					continue;
 				}
 
 				// No user found from term, that's an error.
-				echo( sprintf( "ERROR: No user found for old post ID:%d guest-author term_id:%d term_name:%s\n", esc_attr( $post_id_old ), esc_attr( $ga_term['term_id'] ), esc_html( $ga_term['name'] ) ) );
+				echo( sprintf( "ERROR: No user found for old post ID:%d guest-author term_id:%d term_name:%s\n", esc_attr( $post_id_old ), esc_attr( $ga_term_id ), esc_html( $ga_term_name ) ) );
 				exit( 1 );
 			}
 
@@ -191,6 +213,91 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 
 		wp_cache_flush();
 		echo( "Done.\n" );
+	}
+
+	/**
+	 * Callback for the `newspack-content-migrator times-of-san-diego list-coauthors-for-posts` command.
+	 *
+	 * @param array $pos_args   Positional arguments from WP_CLI.
+	 * @param array $assoc_args Associative arguments from WP_CLI.
+	 *
+	 * @throws \Exception If something goes wrong.
+	 */
+	public function cmd_list_coauthors_for_posts( array $pos_args, array $assoc_args ): void {
+		$file_post_ids_csv = $assoc_args['file-post-ids-csv'];
+
+		// Get post IDs from CSV file.
+		$post_ids = [];
+		$file = file_get_contents( $file_post_ids_csv ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown
+		if ( false === $file ) {
+			echo( "Failed to read post IDs CSV file.\n" );
+			exit( 1 );
+		}
+		$lines = explode( "\n", $file );
+		foreach ( $lines as $line ) {
+			if ( empty( $line ) ) { 
+				continue;
+			}
+			$post_ids[] = trim( $line );
+		}
+		if ( empty( $post_ids ) ) {
+			echo( "No post IDs found.\n" );
+			exit( 1 );
+		}
+
+		// Get Co-Authors for each post.
+		$post_coauthors_data = [];
+		foreach ( $post_ids as $post_id ) {
+			$post_coauthors_data[ $post_id ]['post_id'] = $post_id;
+			
+			$coauthors = $this->coauthors_plus_helper->get_all_authors_for_post( $post_id );
+			if ( empty( $coauthors ) ) {
+				echo( sprintf( "Post ID:%d , no coauthors found, skipping.\n", esc_attr( $post_id ) ) );
+				continue;
+			}
+			
+			foreach ( $coauthors as $coauthor ) {
+				// If coauthor is a WP_User, get display name.
+				$display_name = null;
+				if ( $coauthor instanceof WP_User ) {
+					$display_name = $coauthor->display_name;
+				} elseif ( is_object( $coauthor ) ) {
+					// If coauthor is a GA, get display name.
+					$display_name = $coauthor->display_name;
+				} else {
+					// Unknown coauthor type.
+					echo( sprintf( "ERROR: post ID:%d ; unknown coauthor type: %s\n", esc_attr( $post_id ), esc_attr( gettype( $coauthor ) ) ) );
+					exit( 1 );
+				}
+				$post_coauthors_data[ $post_id ]['coauthors_names'][] = $display_name;
+			}
+			echo( sprintf(
+				"ID:%d ; CA_Number:%d ; CA_DisplayNames:%s\n",
+				esc_attr( $post_id ),
+				esc_attr( count( $post_coauthors_data[ $post_id ]['coauthors_names'] ) ),
+				"'" . implode( "','", $post_coauthors_data[ $post_id ]['coauthors_names'] ) . "'" // phpcs:ignore -- WordPress.Security.EscapeOutput.OutputNotEscaped
+			) );
+		}
+
+		// Write post_coauthors_data to JSON file, one post & authors per line.
+		$file_post_ids_csv_json = $file_post_ids_csv . '_coauthors.txt';
+		if ( file_exists( $file_post_ids_csv_json ) ) {
+			unlink( $file_post_ids_csv_json ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink
+		}
+		foreach ( $post_coauthors_data as $post_data ) {
+			file_put_contents( // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents
+				$file_post_ids_csv_json,
+				sprintf(
+					"%d\t%s\t%s\n",
+					$post_data['post_id'],
+					isset( $post_data['coauthors_names'] ) ? count( $post_data['coauthors_names'] ) : 0,
+					isset( $post_data['coauthors_names'] ) ? "'" . implode( "','", $post_data['coauthors_names'] ) . "'" : ''
+				),
+				FILE_APPEND
+			);
+		}
+		
+		echo( sprintf( "Done, saved to %s.\n", esc_html( $file_post_ids_csv_json ) ) );
 	}
 
 	/**
