@@ -55,10 +55,10 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 	public static function register_commands(): void {
 
 		WP_CLI::add_command(
-			'newspack-content-migrator times-of-san-diego migrate-gas',
-			self::get_command_closure( 'cmd_migrate_gas' ),
+			'newspack-content-migrator times-of-san-diego assign-coauthors-to-imported-posts',
+			self::get_command_closure( 'cmd_assign_coauthors_to_imported_posts' ),
 			[
-				'shortdesc' => 'Migrate Guest Authors.',
+				'shortdesc' => 'Posts and GAs are already migrated using CDiff. This command assigns all coauthors to these posts which were migrated using CDiff. It takes the content-diff__imported-post-ids.log file as input, and needs cdiff_ tables in DB. It then loops over all imported posts, and assigns all coauthors to them.',
 				'synopsis'  => [
 					[
 						'type'     => 'flag',
@@ -97,14 +97,14 @@ class TimesOfSanDiegoMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Callback for the `newspack-content-migrator times-of-san-diego migrate-gas` command.
+	 * Callback for the `newspack-content-migrator times-of-san-diego assign-coauthors-to-imported-posts` command.
 	 *
 	 * @param array $pos_args   Positional arguments from WP_CLI.
 	 * @param array $assoc_args Associative arguments from WP_CLI.
 	 *
 	 * @throws \Exception If something goes wrong.
 	 */
-	public function cmd_migrate_gas( array $pos_args, array $assoc_args ): void {
+	public function cmd_assign_coauthors_to_imported_posts( array $pos_args, array $assoc_args ): void {
 		$dry_run               = $assoc_args['dry-run'] ?? false;
 		$imported_post_ids_log = $assoc_args['content-diff__imported-post-ids'];
 		$live_table_prefix     = $assoc_args['live-table-prefix'] ?? '';
