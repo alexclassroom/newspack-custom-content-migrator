@@ -434,7 +434,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * will import the lower node ids first so this means the oldest articles, profiles, etc, will be imported before
 	 * the newer ones. The following will change the SQL to import the newest content first.
 	 * 
-	 * Also, don't import drafts for articles (maybe other types too?)
+	 * Also, don't import drafts.
 	 * 
 	 * @param [type] $sql            Default sql.
 	 * @param [type] $prefix         Database table prefix.
@@ -451,9 +451,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		if ( ! in_array( $content_type, $this->nodes_to_keep ) ) return $sql;
 					
 		// Remove drafts.
-		if( 'article' === $content_type ) {
-			$sql = str_replace( 'WHERE n.type = ', 'WHERE n.status <> 0 AND n.type = ', $sql );
-		}
+		$sql = str_replace( 'WHERE n.type = ', 'WHERE n.status <> 0 AND n.type = ', $sql );
 
 		// Ordering.
 		if ( $this->flag_order_desc ) {
@@ -674,22 +672,16 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		return $args;
 	}
 
-	// @todo - See CarsonNow migrator.
+	/**
+	 * Change node types to post types.
+	 */
 	public function fgd2wp_pre_register_post_type( $post_type, $node_type ) {
 		
-		// @todo Look at how CarsonNow migrator will convert a node type to "post"
-		// and then it will add the node type as a category to the post.
-
-		// Example: "book_review" nodes will migrate to posts with category "Book Review"
-
 		// Map to post.
-		// if ( 'book_review' === $node_type ) {
-		// 	$post_type = 'post';
-		// }
+		if ( 'book_review' === $node_type ) {
+			$post_type = 'post';
+		}
 		
-		// See also Carson now for how the category is added during inset post;
-		// $new_post['post_category'][] = self::READER_CONTENT_CATEGORY_ID;
-
 		return $post_type;
 	}
 
