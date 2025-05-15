@@ -261,7 +261,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_action( 'fgd2wp_post_set_node_taxonomies_relations', [ $this, 'fgd2wp_post_set_node_taxonomies_relations' ], 10, 3 );
 		add_filter( 'fgd2wp_pre_insert_post',                    [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_taxonomy_term',           [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
-		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
@@ -603,6 +602,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_pre_insert_post( $new_post, $node ) {
 	
+		// Convert content types to "post"?  No, don't change the post_type during FG migaration.
+		// Also, don't use 'fgd2wp_map_post_type' either because the needed post_meta will not be 
+		// imported for the content_type. Example: 'book_review' will not get the book_node
+		// relationship in the postmeta. Only change the post_type after FG migration.
+
+// todo? do we need the following date conversion for all node types???
+
 		// Only do this for article ("post") types.
 		if ( 'article' !== $node['type'] ) return $new_post;
 	
@@ -670,19 +676,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$args['slug'] = basename( $row['alias'] );
 
 		return $args;
-	}
-
-	/**
-	 * Change node types to post types.
-	 */
-	public function fgd2wp_pre_register_post_type( $post_type, $node_type ) {
-		
-		// Map to post.
-		if ( 'book_review' === $node_type ) {
-			$post_type = 'post';
-		}
-		
-		return $post_type;
 	}
 
 	/************************************
