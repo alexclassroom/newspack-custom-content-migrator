@@ -260,7 +260,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_action( 'fgd2wp_post_register_custom_fields',        [ $this, 'fgd2wp_post_register_custom_fields' ] );
 		add_action( 'fgd2wp_post_set_node_taxonomies_relations', [ $this, 'fgd2wp_post_set_node_taxonomies_relations' ], 10, 3 );
 		add_filter( 'fgd2wp_pre_insert_post',                    [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
-		// add_filter( 'fgd2wp_pre_insert_taxonomy_term',    [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
+		add_filter( 'fgd2wp_pre_insert_taxonomy_term',           [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
 		// add_filter( 'fgd2wp_pre_register_post_type',      [ $this, 'fgd2wp_pre_register_post_type' ], 11, 3 );
 
 		// Premium filters. Note the extra "p" in hook name.
@@ -585,7 +585,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			if ( isset( $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] ) ) {
 				update_post_meta( $new_post_id, '_yoast_wpseo_primary_category', $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] );
 				$this->logger->info( 'Yoast primary set to term_id: ' . $fgd2wpp->imported_taxonomies[ $node_term['tid'] ] );
-				$this->logger->info( 'Original term info: ' . print_r( $node_term, true ) );
+				$this->logger->info( 'Original term info: ' . json_encode( $node_term ) );
 				return;
 			}
 		}
@@ -638,15 +638,39 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * FG Drupal before inserting a taxonomy term.
 	 * 
 	 * FG Drupal by default will sanitize taxonomy titles into slugs by removing "-" dashes.
-	 * In WordPress we'd like to keep the dashes. Example: "My Category" should have slug "my-category".
+	 * Use the following to keep the existing taxonomy slugs.
 	 *
 	 */
 	public function fgd2wp_pre_insert_taxonomy_term( $args, $term, $wp_taxonomy ) {
-		if ( isset( $args['slug'] ) ) {
-			// Undo FG Drupal's taxonomy slug since it removes "-" from slugs.
-			// Just let the wordpress's insert term function create the slug naturally.
-			unset( $args['slug'] );
+
+		if( ! in_array( $wp_taxonomy, [ 'category', 'post_tag' ], true ) ) {
+			return $args;
 		}
+
+		// Get the alias from drupal.
+		global $fgd2wpp;
+		$prefix = $this->fg_helper->get_import_tables_prefix();
+		$term_tid = (int) $term['tid'];
+		$sql = "
+			SELECT alias
+			FROM {$prefix}path_alias
+			WHERE path LIKE '/taxonomy/term/{$term_tid}'
+			AND status = 1 AND langcode IN( 'und', 'en' )
+			ORDER BY revision_id DESC
+			LIMIT 1
+		";
+		$result = $fgd2wpp->drupal_query( $sql );
+
+		// Verify alias was found.
+		if( empty( $result ) ) {
+			$this->logger->warning( 'Taxonomy slug alias not found: ' . json_encode( $term ) );
+			return $args;
+		}
+
+		// Get the end of the url after last "/".
+		$row = end( $result );
+		$args['slug'] = basename( $row['alias'] );
+
 		return $args;
 	}
 
