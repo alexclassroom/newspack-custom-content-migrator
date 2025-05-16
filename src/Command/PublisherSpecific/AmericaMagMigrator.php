@@ -602,25 +602,23 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_pre_insert_post( $new_post, $node ) {
 	
-		// Convert content types to "post"?  No, don't change the post_type during FG migaration.
+		// Convert content types to "post"?? No, don't change the post_type during FG migaration.
 		// Also, don't use 'fgd2wp_map_post_type' either because the needed post_meta will not be 
 		// imported for the content_type. Example: 'book_review' will not get the book_node
 		// relationship in the postmeta. Only change the post_type after FG migration.
 
-// todo? do we need the following date conversion for all node types???
-
-		// Only do this for article ("post") types.
-		if ( 'article' !== $node['type'] ) return $new_post;
+		// Only do this for types have have Publication Date.
+		if ( ! in_array( $node['type'], [ 'article', 'book_review', 'podcast', 'the_word', 'video' ] ) ) return $new_post;
 	
 		// Verify the custom field key exists.
-		if ( empty( $this->custom_fields['node']['article']['publication_date'] ) ) {
-			$this->logger->error( 'Missing custom field for: node > article > publication_date' );
+		if ( empty( $this->custom_fields['node'][ $node['type'] ]['publication_date'] ) ) {
+			$this->logger->error( 'Missing custom field for publication_date for type: ' . $node['type'] );
 			exit();
 		}
 		
 		// Access the global FG Drupal Premium object (note the extra "p" in the name) to get the value.
 		global $fgd2wpp;
-		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_fields['node']['article']['publication_date'] );
+		$pub_date_arr = $fgd2wpp->get_node_custom_field_values( $node, $this->custom_fields['node'][ $node['type'] ]['publication_date'] );
 
 		// Verify value.
 		if ( 1 !== count( $pub_date_arr )
