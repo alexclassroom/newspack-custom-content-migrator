@@ -592,9 +592,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * FG Drupal before inserting a post. 
+	 * FG Drupal before inserting a post. Use this to make adjustments to a post prior to insertion.
 	 * 
-	 * Use this to make adjustments to a post prior to insertion.
+	 * Do not convert content_types to "post"! Do not change the post_type during FG migaration!
+	 * Nor use 'fgd2wp_map_post_type' either because the needed post_meta will not be imported for
+	 * the content_type. Example: 'book_review' will not get the book_node relationship in the postmeta.
+	 * Only change the post_type after FG migration.
 	 *
 	 * @param  array $new_post The new post array prior to insertion.
 	 * @param  array $node     The drupal node being migrated into new post.
@@ -602,18 +605,21 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function fgd2wp_pre_insert_post( $new_post, $node ) {
 	
-		// Convert content types to "post"?? No, don't change the post_type during FG migaration.
-		// Also, don't use 'fgd2wp_map_post_type' either because the needed post_meta will not be 
-		// imported for the content_type. Example: 'book_review' will not get the book_node
-		// relationship in the postmeta. Only change the post_type after FG migration.
+		// Logging before post is inserted.
+		$this->logger->info( 'fgd2wp_pre_insert_post (BEFORE): ' . json_encode( array( 
+			'nid'     => $node['nid'] ?? '',
+			'title'   => $node['title'] ?? '',
+			'type'    => $node['type'] ?? '',
+			'created' => $node['created'] ?? '',			
+		) ) );
 
 		// Only do this for types have have Publication Date.
 		if ( ! in_array( $node['type'], [ 'article', 'book_review', 'podcast', 'the_word', 'video' ] ) ) return $new_post;
 	
 		// Verify the custom field key exists.
 		if ( empty( $this->custom_fields['node'][ $node['type'] ]['publication_date'] ) ) {
-			$this->logger->error( 'Missing custom field for publication_date for type: ' . $node['type'] );
-			exit();
+			$this->logger->warning( 'Missing custom field for publication_date.' );
+			return $new_post;
 		}
 		
 		// Access the global FG Drupal Premium object (note the extra "p" in the name) to get the value.
@@ -623,10 +629,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Verify value.
 		if ( 1 !== count( $pub_date_arr )
 			|| empty( $pub_date_arr[0]['field_publication_date_value'] )
-			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'])
+			|| false === strtotime( $pub_date_arr[0]['field_publication_date_value'] )
 		) {
-			$this->logger->error( 'Custom post field value is not a valid datetime for: publication_date' );
-			exit();
+			$this->logger->warning( 'Custom field for publication_date is not valid date.' );
+			return $new_post;
 		}
 
 		// Set new_post to use the publication date from field_publication_date_value (which is GMT).		
