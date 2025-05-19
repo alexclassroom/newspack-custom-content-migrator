@@ -785,7 +785,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			 'lectionary_date', // for app usage...keep/review content.
 			 'podcast',
 			 'profile', // authors
-			 'sponsorship', // only 2, keep them for reference.
+			 'sponsorship', // only 2, but keep them for sponsor->post reference.
 			 'the_word',
 			 'video',
 		];
