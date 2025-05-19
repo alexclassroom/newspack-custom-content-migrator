@@ -100,6 +100,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public static function register_commands(): void {
 
 		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-books',
+			self::get_command_closure( 'cmd_books' ),
+			[
+				'shortdesc' => 'Convert books and book reviews.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-co-authors',
 			self::get_command_closure( 'cmd_co_authors' ),
 			[
@@ -148,6 +156,50 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
 			]
 		);
+	}
+
+	/**
+	 * Convert books and book reviews.
+	 */
+	public function cmd_books( array $pos_args, array $assoc_args ): void {
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup();
+
+		// Loop through all book reviews
+		(new Posts())->throttled_posts_loop( 
+			[ 
+				'post_type' => 'book_review'
+			], 
+			function( $post ) {
+
+				// make sure post has: <p>[view:book_in_review]</p>
+				// and postmeta has: book_node: a:3:{i:0;s:3:"252";i:1;s:3:"252";i:2;s:3:"252";}
+				// then build html using related 'book' post
+				$html = '<div class="np-migrated-view-book-in-review" style="display: flex;">
+							<div style="flex: 1">
+								<a href="http://www.amazon.com/dp/0374176426?tag=americ01-20" target="_blank">
+									<img src="/sites/default/files/styles/book_in_review_105_x_159/public/book_cover/2024/12/08/Fanon.jpeg.jpeg.jpg?itok=3G-TMA03" width="108" height="159" alt="" typeof="Image" class="image-style-book-in-review-105-x-159" />
+								</a>
+							</div>
+							<div style="flex: 1">
+								<a href="http://www.amazon.com/dp/0374176426?tag=americ01-20" target="_blank">The Rebel&#039;s Clinic</a>
+								<p>by Adam Shatz</p>
+								<p>Farrar, Straus and Giroux<br />464p $32</p>
+								<p>content</p>
+							</div>
+						</div>';
+				// insert html into post_content.
+
+
+
+			} // callback function
+		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
+
 	}
 
 	/**
