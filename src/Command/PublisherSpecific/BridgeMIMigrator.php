@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Publisher Specific migrator for BridgeMI.
  * 
