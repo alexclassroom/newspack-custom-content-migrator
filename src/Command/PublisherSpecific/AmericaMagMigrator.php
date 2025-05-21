@@ -881,6 +881,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			$this->logger->error( 'WP-admin > settings > timezone must be set to: ' . $this->required_timezone );
 			exit();
 		}
+
         // Verify permalink.
         if( get_option( 'permalink_structure' ) !== $this->required_permalink ) {
             $this->logger->error( 'WP-admin > settings > permalinks must be set to: ' . $this->required_permalink );
@@ -908,6 +909,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Yoast is required..
 		if ( ! is_plugin_active( "wordpress-seo/wp-seo.php" ) ) {
 			$this->logger->error( 'Yoast (wordpress-seo) plugin not found. Install and activate it before using this command.' );
+			exit();
+		}
+
+		// ACF PRO
+		if( ! defined('ACF_PRO') ) {
+			$this->logger->error( 'ACF PRO plugin not found. Install and activate it before using this command.' );
 			exit();
 		}
 
