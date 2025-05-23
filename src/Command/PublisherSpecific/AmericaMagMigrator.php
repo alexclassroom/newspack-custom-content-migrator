@@ -316,6 +316,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_post_import_post',                   [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
 		add_action( 'fgd2wp_post_register_custom_fields',        [ $this, 'fgd2wp_post_register_custom_fields' ] );
 		add_action( 'fgd2wp_post_set_node_taxonomies_relations', [ $this, 'fgd2wp_post_set_node_taxonomies_relations' ], 10, 3 );
+		add_filter( 'fgd2wp_pre_insert_comment',                 [ $this, 'fgd2wp_pre_insert_comment' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_post',                    [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_taxonomy_term',           [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
 
@@ -649,6 +650,36 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * FG comments import can only run after everything is imported.  This is handled
+	 * by the --set-final-data flag on the CLI.  But if the final data needs to run
+	 * again (maybe an error occured), then this filter function will make sure already
+	 * imported comments are not imported twice.
+	 *
+	 * @param array $data The WP comment object before imported.
+	 * @param array $comment The drupal comment
+	 * @return null|array Return null to stop the comment from being imported.
+	 */
+	public function fgd2wp_pre_insert_comment( $data, $comment ) {
+		
+		$comments = get_comments([
+			'meta_query' => [
+				[
+					'key'     => '_fgd2wp_old_comment_id',
+					'value'   => $comment['cid'],
+					'compare' => '=',
+				]
+			]
+		]);
+
+		// if comment was already imported.
+		if( ! empty( $comments ) ) { 
+			return null;
+		}
+
+		return $data;
+	}
+
+	/**
 	 * FG Drupal before inserting a post. Use this to make adjustments to a post prior to insertion.
 	 * 
 	 * Do not convert content_types to "post"! Do not change the post_type during FG migaration!
@@ -806,9 +837,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Allow the redirects to be added.
 		if( $this->flag_set_final_data ) {
 			
-			// Reset the redirects counter so that new content can be "INSERT IGNORE" into the wp_fg_redirects table.
-			update_option('fgd2wp_last_comment_id', 0);
-			update_option('fgd2wp_last_drupal_url_id', 0);
+			// Reset the counters so new content can be imported (if final data is being run again).
+			update_option('fgd2wp_last_comment_id', 0); // uses fgd2wp_pre_insert_comment (above) for uniqueness.
+			update_option('fgd2wp_last_drupal_url_id', 0); // uses "INSERT IGNORE" into wp_fg_redirects.
 			
 			// Allow import.
 			$premium_options['skip_comments']  = false;
