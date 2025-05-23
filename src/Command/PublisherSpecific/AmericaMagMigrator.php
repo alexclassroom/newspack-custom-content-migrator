@@ -59,11 +59,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private bool $flag_order_desc = false;
 
 	/**
-	 * Flag for importer to set redirects.
+	 * Flag for importer to set final data ( comments and redrects ).
 	 *
 	 * @var bool
 	 */
-	private bool $flag_set_redirects = false;
+	private bool $flag_set_final_data = false;
 
 	/**
 	 * Flag for importer to skip media.
@@ -135,8 +135,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'flag',
-						'name'        => 'set-redirects',
-						'description' => 'FG only sets redirects once. This will allow multiple runs.',
+						'name'        => 'set-final-data',
+						'description' => 'FG only sets comments and redirects once. Do this once after everything is imported.',
 						'optional'    => true,
 					],
 					[
@@ -298,11 +298,16 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			}
 			$this->batch_max = (int) $assoc_args['batch-max'];
 		}
+		$this->logger->info( '--batch-max: ' . $this->batch_max );
 		
-		if ( isset( $assoc_args['order-desc'] ) )    $this->flag_order_desc = true;
-		if ( isset( $assoc_args['set-redirects'] ) ) $this->flag_set_redirects = true;
-		if ( isset( $assoc_args['skip-media'] ) )    $this->flag_skip_media = true;
-	
+		if ( isset( $assoc_args['order-desc'] ) )     $this->flag_order_desc     = true;
+		if ( isset( $assoc_args['set-final-data'] ) ) $this->flag_set_final_data = true;
+		if ( isset( $assoc_args['skip-media'] ) )     $this->flag_skip_media     = true;
+
+		$this->logger->info( '--order-desc: ' . $this->flag_order_desc );
+		$this->logger->info( '--set-final-data: ' . $this->flag_set_final_data );
+		$this->logger->info( '--skip-media: ' . $this->flag_skip_media );
+
 		// Setup FG plugin's filters.
 		add_filter( 'fgd2wp_get_node_taxonomies_terms_sql',      [ $this, 'fgd2wp_get_node_taxonomies_terms_sql' ], 10, 5 );
 		add_filter( 'fgd2wp_get_nodes_sql',                      [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
@@ -791,18 +796,24 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		];
 
 		$premium_options['skip_blocks']    = true; // sidebar widgets
-		$premium_options['skip_comments']  = true;
 		$premium_options['skip_menus']     = true;
 
-		// FG will only set redirects once due to option 'fgd2wp_last_drupal_url_id' increment so keep off until requested.
+		// FG will only set redirects and comments once (wp_options: fgd2wp_last_comment_id / fgd2wp_last_drupal_url_id)
+		// only run these after importer is done.
+		$premium_options['skip_comments']  = true;
 		$premium_options['skip_redirects'] = true;
 
 		// Allow the redirects to be added.
-		if( $this->flag_set_redirects ) {
+		if( $this->flag_set_final_data ) {
+			
 			// Reset the redirects counter so that new content can be "INSERT IGNORE" into the wp_fg_redirects table.
+			update_option('fgd2wp_last_comment_id', 0);
 			update_option('fgd2wp_last_drupal_url_id', 0);
+			
 			// Allow import.
+			$premium_options['skip_comments']  = false;
 			$premium_options['skip_redirects'] = false;
+
 		}
 				
 		// @todo: Launch: move redirects to Redirection plugin or turn on FG's redirect mechanism.
