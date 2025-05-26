@@ -464,6 +464,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
             $limit = 10;
             
             $posts = get_posts( [ 
+				'post_type' => 'any',
                 'numberposts' => $limit,
                 'meta_query' => $meta_query
             ] );
@@ -473,6 +474,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
                 $this->logger->info( '------------ processing id: ' . $post->ID );
 
+				// Sanity: notice if not a video post type...just FYI.
+                if( 'video' !== $post->post_type ) {
+                    $this->logger->notice( 'Post type not video: ' . $post->post_type );
+                }
+
+				// Get the video link:
 				$video_url = trim( get_post_meta( $post->ID, $meta_key, true ) );
 
                 if( empty( $video_url ) ) {
