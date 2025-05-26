@@ -19,7 +19,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const META_KEY_PROFILE_POST_ID = '_np_migration_profile_post_id';
+	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
+	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
+	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
 
 	/**
 	 * Batch counts of imported nodes per type per CLI run.
@@ -87,6 +89,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private array $nodes_to_keep;
 
 	/**
+	 * Nodes only to process (override to defaults).
+	 *
+	 * @var array
+	 */
+	private array $nodes_only = [];
+
+	/**
 	 * Required wp-admin setting.
 	 */
 	private string $required_permalink = '/%category%/%year%/%monthnum%/%day%/%postname%/';
@@ -125,6 +134,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'batch-max',
 						'description' => 'Max nodes to import. Integer.',
+						'optional'    => true,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'nodes-only',
+						'description' => 'Limited list of node types to import.',
 						'optional'    => true,
 					],
 					[
@@ -309,6 +324,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 		$this->logger->info( '--batch-max: ' . $this->batch_max );
 		
+		if ( isset( $assoc_args['nodes-only'] ) ) {
+			if( ! preg_match( '/^[a-zA-Z_,]+$/', $assoc_args['nodes-only'] ) ) {
+				$this->logger->error( 'Nodes only must be list.');
+				exit();
+			}
+			$this->logger->info( '--nodes-only: ' . $assoc_args['nodes-only'] );
+			$this->nodes_only = explode( ',', $assoc_args['nodes-only'] );
+		}
+
 		if ( isset( $assoc_args['order-desc'] ) )     $this->flag_order_desc     = true;
 		if ( isset( $assoc_args['set-final-data'] ) ) $this->flag_set_final_data = true;
 		if ( isset( $assoc_args['skip-media'] ) )     $this->flag_skip_media     = true;
@@ -444,29 +468,21 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$this->validate_setup();
 
-		$meta_key = 'op_video_embed';
-		$meta_key_processed = '_np_import_processed_' . $meta_key;
+		$meta_key_processed = '_np_migration_processed_video';
+		$meta_key_embed = 'op_video_embed';
 
         do {
 
-			// Has video value, but not processed.
-            $meta_query = [
-                [
-                    'key'     => $meta_key,
-                    'compare' => 'EXISTS',
-                ],
-                [
-                    'key'     => $meta_key_processed,
-                    'compare' => 'NOT EXISTS',
-                ],
-            ];
-
-            $limit = 10;
-            
+			// videos that have not been processed
             $posts = get_posts( [ 
-				'post_type' => 'any',
-                'numberposts' => $limit,
-                'meta_query' => $meta_query
+				'post_type' => 'video',
+                'numberposts' => 10,
+                'meta_query' => [
+					[
+						'key'     => $meta_key_processed,
+						'compare' => 'NOT EXISTS',
+					],
+				]
             ] );
 
             // Process items.
@@ -474,34 +490,35 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
                 $this->logger->info( '------------ processing id: ' . $post->ID );
 
-				// Sanity: notice if not a video post type...just FYI.
-                if( 'video' !== $post->post_type ) {
-                    $this->logger->notice( 'Post type not video: ' . $post->post_type );
-                }
+				// Check for video link:
+				$video_url = trim( get_post_meta( $post->ID, $meta_key_embed, true ) );
 
-				// Get the video link:
-				$video_url = trim( get_post_meta( $post->ID, $meta_key, true ) );
+                if( ! empty( $video_url ) ) {
 
-                if( empty( $video_url ) ) {
-                    $this->logger->warning( 'Video url is empty.' );
-					update_post_meta( $post->ID, $meta_key_processed, 'yes' );
-                    continue;
-                }
+					// Make sure it's a link.
+					if( ! preg_match( '#https?://#i', $video_url ) ) {
+						$this->logger->warning( 'Video url not link: ' . $video_url );
+						update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+						continue;
+					}
+					
+					// Prepend to content.
+					$this->logger->info( 'Prepending video url: ' . $video_url );
+					$post->post_content = $video_url . "\n\n" . $post->post_content;
 
-                if( ! preg_match( '#https?://#i', $video_url ) ) {
-                    $this->logger->warning( 'Video url not link: ' . $video_url );
-					update_post_meta( $post->ID, $meta_key_processed, 'yes' );
-                    continue;
-                }
-				
-				$this->logger->info( 'Prepending video url: ' . $video_url );
+					// Hide the featured image to just use the youtube video instead.
+					update_post_meta( $post->ID, self::META_KEY_FEATURED_IMAGE_POSITION, 'hidden' );
 
-				// prepend to top of post.
-                wp_update_post( [
-                    'ID' => $post->ID,
-                    'post_content' => $video_url . "\n\n" . $post->post_content,
-                ]);
+				}
 
+				// Update to post type (with possible video at top of content).
+				wp_update_post( [
+					'ID'           => $post->ID,
+					'post_content' => $post->post_content,
+					'post_type'    => 'post'
+				]);
+
+				// Set to processed.
                 update_post_meta( $post->ID, $meta_key_processed, 'yes' );
 
             } // foreach post in query.
@@ -911,6 +928,29 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			 'the_word',
 			 'video',
 		];
+
+		// If CLI argument for nodes-only is being used, then skip all except for CLI list.
+		if( ! empty( $this->nodes_only ) ) {
+			
+			// put all into nodes to skip.
+			$premium_options['nodes_to_skip'] = array_merge( $premium_options['nodes_to_skip'], $this->nodes_to_keep );
+			
+			// clear nodes to keep.
+			$this->nodes_to_keep = []; 
+			
+			// rebuild lists.
+			foreach( $this->nodes_only as $node_only ) {
+
+				// Make sure it's a real node type.
+				if( ! in_array( $node_only, $premium_options['nodes_to_skip'] ) ) continue;
+
+				// Remove.
+			    unset( $premium_options['nodes_to_skip'][ array_search( $node_only, $premium_options['nodes_to_skip'] ) ]);
+
+				// Add.
+				$this->nodes_to_keep[] = $node_only;
+			}
+		}
 
 		$premium_options['skip_blocks']    = true; // sidebar widgets
 		$premium_options['skip_menus']     = true;
