@@ -156,6 +156,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-videos',
+			self::get_command_closure( 'cmd_videos' ),
+			[
+				'shortdesc' => 'Convert videos.',
+			]
+		);
+
 	}
 
 	/**
@@ -421,6 +430,76 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			} // callback function
 		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
+	}
+
+	/**
+	 * Convert videos.
+	 */
+	public function cmd_videos( array $pos_args, array $assoc_args ): void {
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup();
+
+		$meta_key = 'op_video_embed';
+		$meta_key_processed = '_np_import_processed_' . $meta_key;
+
+        do {
+
+			// Has video value, but not processed.
+            $meta_query = [
+                [
+                    'key'     => $meta_key,
+                    'compare' => 'EXISTS',
+                ],
+                [
+                    'key'     => $meta_key_processed,
+                    'compare' => 'NOT EXISTS',
+                ],
+            ];
+
+            $limit = 10;
+            
+            $posts = get_posts( [ 
+                'numberposts' => $limit,
+                'meta_query' => $meta_query
+            ] );
+
+            // Process items.
+            foreach( $posts as $post ) {
+
+                $this->logger->info( '------------ processing id: ' . $post->ID );
+
+				$video_url = trim( get_post_meta( $post->ID, $meta_key, true ) );
+
+                if( empty( $video_url ) ) {
+                    $this->logger->warning( 'Video url is empty.' );
+					update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+                    continue;
+                }
+
+                if( ! preg_match( '#https?://#i', $video_url ) ) {
+                    $this->logger->warning( 'Video url not link: ' . $video_url );
+					update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+                    continue;
+                }
+				
+				$this->logger->info( 'Prepending video url: ' . $video_url );
+
+				// prepend to top of post.
+                wp_update_post( [
+                    'ID' => $post->ID,
+                    'post_content' => $video_url . "\n\n" . $post->post_content,
+                ]);
+
+                update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+
+            } // foreach post in query.
+            
+        } while( ! empty( $posts ) ); // while posts to process.
 
 		$this->logger->info( 'Done.' ); 
 	}
