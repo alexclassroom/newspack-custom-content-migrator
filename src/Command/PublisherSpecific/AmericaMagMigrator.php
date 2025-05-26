@@ -497,7 +497,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 					// Make sure it's a link.
 					if( ! preg_match( '#https?://#i', $video_url ) ) {
-						$this->logger->warning( 'Video url not link: ' . $video_url );
+						$this->logger->warning( 'Skip: Video url not link: ' . $video_url );
 						update_post_meta( $post->ID, $meta_key_processed, 'yes' );
 						continue;
 					}
@@ -520,6 +520,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 				// Set to processed.
                 update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+
+				// Set only post type.
+				update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, 'video' );
+
+				$this->logger->info( '-- converted to post.' );
 
             } // foreach post in query.
             
