@@ -730,7 +730,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public function fgd2wp_post_set_node_taxonomies_relations( $new_post_id, $node, $node_terms ) {
 
 		// Make sure just for articles to be safe.
-		if( ! isset( $node['type'] ) || 'article' !== $node['type'] ) return;
+		if( ! isset( $node['type'] ) || ! in_array( $node['type'], $this->nodes_to_keep ) ) return;
 
 		// Look for primary taxonomy: "channel".
 		foreach( $node_terms as $node_term ) {
