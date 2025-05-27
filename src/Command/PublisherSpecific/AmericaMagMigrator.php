@@ -352,8 +352,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		add_filter( 'fgd2wp_pre_insert_comment',                 [ $this, 'fgd2wp_pre_insert_comment' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_post',                    [ $this, 'fgd2wp_pre_insert_post' ], 10, 2 );
 		add_filter( 'fgd2wp_pre_insert_taxonomy_term',           [ $this, 'fgd2wp_pre_insert_taxonomy_term' ], 10, 3);
+		add_filter( 'fgd2wp_pre_insert_user',                    [ $this, 'fgd2wp_pre_insert_user' ], 10, 3);
 
 		// Premium filters. Note the extra "p" in hook name.
+		add_action( 'fgd2wpp_post_add_user',             [ $this, 'fgd2wpp_post_add_user' ], 10, 2);
 		add_filter( 'fgd2wpp_post_init_premium_options', [ $this, 'fgd2wpp_post_init_premium_options' ] );
 	
 		// Filter DB options.
@@ -878,9 +880,32 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		return $args;
 	}
 
+	/**
+	 * Prior to inserting a user, do some clean up to make sure these users can't login without some
+	 * sort of by-hand approval.
+	 */
+	public function fgd2wp_pre_insert_user( $userdata, $name, $email) {
+		
+		// Make sure unique password.
+		$userdata['user_pass']  = wp_generate_password( 24 );
+
+		// Make sure an email address we control.
+		$userdata['user_email'] = str_replace( '@', '--at--', $email ) . '@example.com';
+
+		return $userdata;
+	}
+
 	/************************************
 	  FG DRUPAL HOOKS (premium)
 	************************************/
+
+	/**
+	 * After user is insterted, don't allow old drupal password login.
+	 */
+	public function fgd2wpp_post_add_user( $new_user_id, $user ) {
+		// delete the old drupal pass user meta.
+		delete_user_meta( $new_user_id, 'drupalpass' );
+	}
 
 	/**
 	 * FG Drupal after premium options are initialized.
