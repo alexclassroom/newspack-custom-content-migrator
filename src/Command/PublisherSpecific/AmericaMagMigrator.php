@@ -470,6 +470,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$this->validate_setup();
 
+		global $wpdb;
+
 		$meta_key_processed = '_np_migration_processed_video';
 		$meta_key_embed = 'op_video_embed';
 
@@ -513,12 +515,26 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 				}
 
-				// Update to post type (with possible video at top of content).
-				wp_update_post( [
-					'ID'           => $post->ID,
-					'post_content' => $post->post_content,
-					'post_type'    => 'post'
-				]);
+				// Don't use wp_update_post since that will update modified dates. But we still need to make
+				// sure post_name is unique (since we're not using wp_update_post - which would done it for us).
+				$unique_post_name = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
+
+				if( $unique_post_name !== $post->post_name ) {
+					$this->logger->notice( 'Post name was updated to be unique.' );
+				}
+
+				// Update to post type (with possible video at top of content) and unique post name.
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_type' => 'post',
+						'post_content' => $post->post_content,
+						'post_name' => $unique_post_name,
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
 
 				// Set to processed.
                 update_post_meta( $post->ID, $meta_key_processed, 'yes' );
