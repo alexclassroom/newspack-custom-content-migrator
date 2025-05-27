@@ -793,7 +793,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 * FG Drupal before inserting a post. Use this to make adjustments to a post prior to insertion.
 	 * 
 	 * Do not convert content_types to "post"! Do not change the post_type during FG migaration!
-	 * Nor use 'fgd2wp_map_post_type' either because the needed post_meta will not be imported for
+	 * Nor use 'fgd2wp_map_post_type' either because the needed post_meta (relationships) will not be imported for
 	 * the content_type. Example: 'book_review' will not get the book_node relationship in the postmeta.
 	 * Only change the post_type after FG migration.
 	 *
