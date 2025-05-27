@@ -73,6 +73,52 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator embarcadero-fix-blog-comments-display-names',
+			self::get_command_closure( 'cmd_embarcadero_fix_blog_comments_display_names' ),
+			[
+				'shortdesc' => 'Fix blog comments display names.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-comments-csv',
+						'description' => 'Path to the comments.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'network-display-names-csv',
+						'description' => 'Path to the network_display_names.csv file',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'old-users-table',
+						'description' => 'The name of the old users table',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'blog-site',
+						'description' => 'The target site domain (e.g. paloaltoonline.com)',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'index-from',
+						'description' => 'The index to start from',
+						'optional'    => true,
+						'default'     => 0,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator embarcadero-fix-blog-comments',
 			self::get_command_closure( 'cmd_embarcadero_fix_blog_comments' ),
 			[
@@ -384,6 +430,121 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 			}
 		}
 	}
+	/**
+	 * Fix blog comments.
+	 * Callable for "newspack-content-migrator embarcadero-fix-blog-comments-display-names".
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_embarcadero_fix_blog_comments_display_names( $args, $assoc_args ) {
+		global $wpdb;
+
+		$blog_comments_csv         = $assoc_args['blog-comments-csv'];
+		$network_display_names_csv = $assoc_args['network-display-names-csv'];
+		$old_users_table           = $assoc_args['old-users-table'];
+		$blog_site                 = $assoc_args['blog-site'];
+		$index_from                = $assoc_args['index-from'];
+
+		$blog_comments         = $this->get_data_from_csv_or_tsv( $blog_comments_csv );
+		$network_display_names = $this->get_data_from_csv_or_tsv( $network_display_names_csv );
+
+		$log_file     = $blog_site . '_fix_blog_comments_display_names.log';
+		$csv_log_file = $blog_site . '_fix_blog_comments_display_names.csv';
+
+		$csv_log_file_handle = fopen( $csv_log_file, 'w' );
+		fputcsv( $csv_log_file_handle, [ 'comment_id', 'user_id', 'current_display_name', 'network_display_name', 'old_display_name', 'same_old_name', 'same_network_name', 'same_network_as_old_name' ] );
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+		$already_migrated_comments = $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT meta_key, meta_value, wp_commentmeta.comment_id FROM $wpdb->commentmeta INNER JOIN $wpdb->comments ON $wpdb->commentmeta.comment_id = $wpdb->comments.comment_ID WHERE meta_key = %s AND comment_approved != 'trash'", self::EMBARCADERO_IMPORTED_BLOG_COMMENT_META_KEY ), ARRAY_A );
+
+		$checked_user_ids = [];
+
+		foreach ( $already_migrated_comments as $index => $already_migrated_comment ) {
+			if ( $index < $index_from ) {
+				continue;
+			}
+
+			// if ( 764081 != $already_migrated_comment['comment_id'] ) {
+			// continue;
+			// }
+
+			$already_migrated_comment_index = array_search( $already_migrated_comment['meta_value'], array_column( $blog_comments, 'blog_comment_id' ) );
+
+			if ( false === $already_migrated_comment_index ) {
+				$this->logger->log( $log_file, 'Comment not found in already migrated comments: ' . $already_migrated_comment['comment_id'], Logger::WARNING );
+				continue;
+			}
+
+			$migrated_comment = get_comment( $already_migrated_comment['comment_id'] );
+
+			if ( '0' === $migrated_comment->user_id ) {
+				continue;
+			}
+
+			if ( in_array( $migrated_comment->user_id, $checked_user_ids ) ) {
+				continue;
+			}
+
+			$checked_user_ids[] = $migrated_comment->user_id;
+
+			$comment_user = get_user_by( 'id', $migrated_comment->user_id );
+
+			$current_display_name = $comment_user->display_name;
+
+			// Network display names.
+			$network_name_index = array_search( $comment_user->user_email, array_column( $network_display_names, 'email' ) );
+
+			if ( false === $network_name_index ) {
+				$this->logger->log( $log_file, 'Network display name not found for comment: ' . $migrated_comment->comment_ID, Logger::WARNING );
+				// continue;
+			}
+
+			$network_display_name = false === $network_name_index
+				? ''
+				: $network_display_names[ $network_name_index ][ $blog_site ];
+
+			// Display name from the old users table.
+			$old_display_name = $wpdb->get_col( $wpdb->prepare( "SELECT display_name FROM $old_users_table WHERE ID = %d", $migrated_comment->user_id ) );
+
+			if ( empty( $old_display_name ) ) {
+				$this->logger->log( $log_file, 'Old display name not found for comment: ' . $migrated_comment->comment_ID, Logger::WARNING );
+				continue;
+			}
+
+			$old_display_name = $old_display_name[0];
+
+			if ( $old_display_name !== $current_display_name ) {
+				$this->logger->log( $log_file, 'Updating display name for user ID: ' . $migrated_comment->user_id . ' from "' . $current_display_name . '" to "' . $old_display_name . '"' );
+
+				$wpdb->update(
+					$wpdb->users,
+					[ 'display_name' => $old_display_name ],
+					[ 'ID' => $migrated_comment->user_id ]
+				);
+
+				fputcsv(
+					$csv_log_file_handle,
+					[
+						$migrated_comment->comment_ID,
+						$migrated_comment->user_id,
+						$current_display_name,
+						$network_display_name,
+						$old_display_name,
+						$current_display_name === $old_display_name ? 'Yes' : 'No',
+						$current_display_name === $network_display_name ? 'Yes' : 'No',
+						$network_display_name === $old_display_name ? 'Yes' : 'No',
+					]
+				);
+			}
+
+
+			$this->logger->log( $log_file, 'Comment with index ' . $index . ' / ' . count( $already_migrated_comments ) . ' checked.' );
+		}
+
+		fclose( $csv_log_file_handle );
+	}
+
 	/**
 	 * Fix blog comments.
 	 * Callable for "newspack-content-migrator embarcadero-fix-blog-comments".
