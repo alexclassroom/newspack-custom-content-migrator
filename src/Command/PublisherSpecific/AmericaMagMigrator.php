@@ -22,6 +22,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
 	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
+	const META_KEY_PROCESSED_CONTENT_TYPE  = '_np_migration_processed_content_type';
 
 	/**
 	 * Batch counts of imported nodes per type per CLI run.
@@ -125,6 +126,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-content-types',
+			self::get_command_closure( 'cmd_content_types' ),
+			[
+				'shortdesc' => 'Convert content types.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-import',
 			self::get_command_closure( 'cmd_import' ),
 			[
@@ -169,14 +178,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_profiles' ),
 			[
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
-			]
-		);
-
-		WP_CLI::add_command(
-			'newspack-content-migrator america-mag-videos',
-			self::get_command_closure( 'cmd_videos' ),
-			[
-				'shortdesc' => 'Convert videos.',
 			]
 		);
 
@@ -461,9 +462,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Convert videos.
+	 * Convert content types.
 	 */
-	public function cmd_videos( array $pos_args, array $assoc_args ): void {
+	public function cmd_content_types( array $pos_args, array $assoc_args ): void {
 
 		$this->logger_set( __FUNCTION__ );
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
@@ -472,18 +473,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		global $wpdb;
 
-		$meta_key_processed = '_np_migration_processed_video';
-		$meta_key_embed = 'op_video_embed';
-
         do {
 
-			// videos that have not been processed
+			// content types that have not been processed yet
             $posts = get_posts( [ 
-				'post_type' => 'video',
+				'post_type' => [ 'podcast' , 'video' ],
                 'numberposts' => 10,
                 'meta_query' => [
 					[
-						'key'     => $meta_key_processed,
+						'key'     => self::META_KEY_PROCESSED_CONTENT_TYPE,
 						'compare' => 'NOT EXISTS',
 					],
 				]
@@ -494,42 +492,47 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
                 $this->logger->info( '------------ processing id: ' . $post->ID );
 
-				// Check for video link:
-				$video_url = trim( get_post_meta( $post->ID, $meta_key_embed, true ) );
+				$original_content_type = $post->post_type;
+				$this->logger->info( 'original content type: ' . $original_content_type );
 
-                if( ! empty( $video_url ) ) {
+				$new_post_content = '';
 
-					// Make sure it's a link.
-					if( ! preg_match( '#https?://#i', $video_url ) ) {
-						$this->logger->warning( 'Skip: Video url not link: ' . $video_url );
-						update_post_meta( $post->ID, $meta_key_processed, 'yes' );
-						continue;
-					}
-					
-					// Prepend to content.
-					$this->logger->info( 'Prepending video url: ' . $video_url );
-					$post->post_content = $video_url . "\n\n" . $post->post_content;
+				// Content types.
+				switch ( $original_content_type ) {
+					case 'podcast':
+						$new_post_content = $this->convert_content_type_podcast( $post->ID, $post->post_content );
+						break;
+					case 'video':
+						$new_post_content = $this->convert_content_type_video( $post->ID, $post->post_content );
+						break;
+				}
 
-					// Hide the featured image to just use the youtube video instead.
-					update_post_meta( $post->ID, self::META_KEY_FEATURED_IMAGE_POSITION, 'hidden' );
+				// error in sub function, skip.
+				if( null === $new_post_content ) {
+					update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
+					continue;
+				}	
 
+				// blank content could be OK.
+				if( '' === $new_post_content ) {
+					$this->logger->notice( 'Post content is blank.' );
 				}
 
 				// Don't use wp_update_post since that will update modified dates. But we still need to make
 				// sure post_name is unique (since we're not using wp_update_post - which would done it for us).
-				$unique_post_name = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
+				$new_post_name_unique = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
 
-				if( $unique_post_name !== $post->post_name ) {
+				if( $new_post_name_unique !== $post->post_name ) {
 					$this->logger->notice( 'Post name was updated to be unique.' );
 				}
 
-				// Update to post type (with possible video at top of content) and unique post name.
+				// Update to post type (with possibly new content) and unique post name.
 				$wpdb->update(
 					$wpdb->posts,
 					[
 						'post_type' => 'post',
-						'post_content' => $post->post_content,
-						'post_name' => $unique_post_name,
+						'post_content' => $new_post_content,
+						'post_name' => $new_post_name_unique,
 					],
 					[
 						'ID' => $post->ID,
@@ -537,10 +540,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				);
 
 				// Set to processed.
-                update_post_meta( $post->ID, $meta_key_processed, 'yes' );
+                update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
 
-				// Set only post type.
-				update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, 'video' );
+				// Set old post type.
+				update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, $original_content_type );
 
 				$this->logger->info( '-- converted to post.' );
 
@@ -582,6 +585,53 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	private function batch_stop( $content_type, $entity_type ) {
 		return ( $this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ] >= $this->batch_max );
+	}
+
+	/************************************
+	  CONTENT CONVERSIONS
+	************************************/
+
+	private function convert_content_type_podcast( $post_id, $post_content ) {
+
+		$post_content = trim( $post_content );
+
+		// don't replace if there is already content.
+		if( ! empty( $post_content ) ) {
+			$this->logger->warning( 'Skip: post content not empty.' );
+			return null; 
+		}
+
+		// use the meta value for the post content.
+		return trim( get_post_meta( $post_id, 'podcast_description', true ) );
+	
+	}
+
+	private function convert_content_type_video( $post_id, $post_content ) {
+
+		$post_content = trim( $post_content );
+
+		// Check for video link:
+		$video_url = trim( get_post_meta( $post_id, 'op_video_embed', true ) );
+
+		if( ! empty( $video_url ) ) {
+
+			// Make sure it's a link.
+			if( ! preg_match( '#https?://#i', $video_url ) ) {
+				$this->logger->warning( 'Skip: Video url not link: ' . $video_url );
+				return null; 
+			}
+			
+			// Prepend to content.
+			$this->logger->info( 'Prepending video url: ' . $video_url );
+			$post_content = $video_url . "\n\n" . $post_content;
+
+			// Hide the featured image to just use the youtube video instead.
+			update_post_meta( $post_id, self::META_KEY_FEATURED_IMAGE_POSITION, 'hidden' );
+
+		}
+
+		return $post_content;
+	
 	}
 
 	/************************************
