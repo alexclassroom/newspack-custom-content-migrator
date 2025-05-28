@@ -110,14 +110,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public static function register_commands(): void {
 
 		WP_CLI::add_command(
-			'newspack-content-migrator america-mag-books',
-			self::get_command_closure( 'cmd_books' ),
-			[
-				'shortdesc' => 'Convert books and book reviews.',
-			]
-		);
-
-		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-co-authors',
 			self::get_command_closure( 'cmd_co_authors' ),
 			[
@@ -180,50 +172,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
 			]
 		);
-
-	}
-
-	/**
-	 * Convert books and book reviews.
-	 */
-	public function cmd_books( array $pos_args, array $assoc_args ): void {
-
-		$this->logger_set( __FUNCTION__ );
-		$this->logger->info( 'Running command: ' . __FUNCTION__ );
-
-		$this->validate_setup();
-
-		// Loop through all book reviews
-		(new Posts())->throttled_posts_loop( 
-			[ 
-				'post_type' => 'book_review'
-			], 
-			function( $post ) {
-
-				// make sure post has: <p>[view:book_in_review]</p>
-				// and postmeta has: book_node: a:3:{i:0;s:3:"252";i:1;s:3:"252";i:2;s:3:"252";}
-				// then build html using related 'book' post
-				$html = '<div class="np-migrated-view-book-in-review" style="display: flex;">
-							<div style="flex: 1">
-								<a href="http://www.amazon.com/dp/0374176426?tag=americ01-20" target="_blank">
-									<img src="/sites/default/files/styles/book_in_review_105_x_159/public/book_cover/2024/12/08/Fanon.jpeg.jpeg.jpg?itok=3G-TMA03" width="108" height="159" alt="" typeof="Image" class="image-style-book-in-review-105-x-159" />
-								</a>
-							</div>
-							<div style="flex: 1">
-								<a href="http://www.amazon.com/dp/0374176426?tag=americ01-20" target="_blank">The Rebel&#039;s Clinic</a>
-								<p>by Adam Shatz</p>
-								<p>Farrar, Straus and Giroux<br />464p $32</p>
-								<p>content</p>
-							</div>
-						</div>';
-				// insert html into post_content.
-
-
-
-			} // callback function
-		); // throttled posts
-
-		$this->logger->info( 'Done.' ); 
 
 	}
 
@@ -322,7 +270,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			// content types that have not been processed yet
             $posts = get_posts( [ 
-				'post_type' => [ 'podcast' , 'video' ],
+				'post_type' => [ 'book_review', 'podcast' , 'video' ],
                 'numberposts' => 10,
                 'meta_query' => [
 					[
@@ -344,6 +292,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 				// Content types.
 				switch ( $original_content_type ) {
+					case 'book_review':
+						$new_post_content = $this->convert_content_type_book_review( $post->ID, $post->post_content );
+						break;
 					case 'podcast':
 						$new_post_content = $this->convert_content_type_podcast( $post->ID, $post->post_content );
 						break;
@@ -590,6 +541,86 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/************************************
 	  CONTENT CONVERSIONS
 	************************************/
+
+	private function convert_content_type_book_review( $post_id, $post_content ) {
+
+		$post_content = trim( $post_content );
+
+		$placeholder = '[view:book_in_review]';
+
+		// make sure post has placeholder.
+		if( ! str_contains( $post_content, $placeholder ) ) {
+			$this->logger->warning( 'Skip: book in review placeholder not found.' );
+			return null; 
+		}
+
+		// get postmeta pointer to book post(s).
+		$book_node_array = get_post_meta( $post_id, 'book_node' ); // could have multiple values.
+		
+		// sanity: has value(s)
+		if( ! is_array( $book_node_array ) || empty( $book_node_array ) ) {
+			$this->logger->warning( 'Skip: book_node is empty.' );
+			return null; 
+		}
+
+		$html = '';
+
+		foreach( $book_node_array as $book_post_id ) {
+
+			$book_post = get_post( $book_post_id );
+
+			// related book must be found otherwise this means the import didn't happen properly.
+			if( ! is_object( $book_post ) || ! isset( $book_post->ID ) ) {
+				$this->logger->warning( 'Skip: related book post not found.' );
+				return null;
+			}
+
+			// image.
+			$img_src = get_the_post_thumbnail_url( $book_post->ID );
+			if( false === $img_src ) {
+				$this->logger->warning( 'Skip: related book thumbnail not exists.' );
+				return null;
+			}
+
+			// by author.
+			$by_author = get_post_meta( $book_post->ID, 'book_author', true );
+
+			// link.
+			$a_href = '';
+			$isbn = get_post_meta( $book_post->ID, 'isbn', true );
+			if( ! empty( $isbn ) ) {
+				$a_href = 'http://www.amazon.com/dp/' . $isbn . '?tag=americ01-20';
+			} else {
+				$a_href = 'http://www.amazon.com/s?index=books&field-title=' . urlencode( $book_post->post_title ) . '&field-author=' . urlencode( $by_author ). '&tag=americ01-20';
+			}
+			
+			ob_start();
+			?>
+			<div class="np-migrated-view-book-in-review">
+				<div>
+					<a href="<?=$a_href?>" target="_blank"><img src="<?=$img_src?>" /></a>
+				</div>
+				<div>
+					<a href="<?=$a_href?>" target="_blank"><?=$book_post->post_title?></a>
+					<p>by <?=$by_author?></p>
+					<p><?=$book_post->post_content?></p>
+				</div>
+			</div>
+			<?php
+			
+			$html .= ob_get_clean();
+
+		}
+
+		if( empty( $html ) ) {
+			$this->logger->warning( 'Skip: replacement html is blank.' );
+			return null;
+		}
+
+		// Replace in content.
+		return str_replace( $placeholder, $html, $post_content );
+	
+	}
 
 	private function convert_content_type_podcast( $post_id, $post_content ) {
 
