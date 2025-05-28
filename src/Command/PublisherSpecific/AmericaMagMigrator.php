@@ -307,6 +307,99 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Convert content types.
+	 */
+	public function cmd_content_types( array $pos_args, array $assoc_args ): void {
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup();
+
+		global $wpdb;
+
+        do {
+
+			// content types that have not been processed yet
+            $posts = get_posts( [ 
+				'post_type' => [ 'podcast' , 'video' ],
+                'numberposts' => 10,
+                'meta_query' => [
+					[
+						'key'     => self::META_KEY_PROCESSED_CONTENT_TYPE,
+						'compare' => 'NOT EXISTS',
+					],
+				]
+            ] );
+
+            // Process items.
+            foreach( $posts as $post ) {
+
+                $this->logger->info( '------------ processing id: ' . $post->ID );
+
+				$original_content_type = $post->post_type;
+				$this->logger->info( 'original content type: ' . $original_content_type );
+
+				$new_post_content = '';
+
+				// Content types.
+				switch ( $original_content_type ) {
+					case 'podcast':
+						$new_post_content = $this->convert_content_type_podcast( $post->ID, $post->post_content );
+						break;
+					case 'video':
+						$new_post_content = $this->convert_content_type_video( $post->ID, $post->post_content );
+						break;
+				}
+
+				// error in sub function, skip.
+				if( null === $new_post_content ) {
+					update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
+					continue;
+				}	
+
+				// blank content could be OK.
+				if( '' === $new_post_content ) {
+					$this->logger->notice( 'Post content is blank.' );
+				}
+
+				// Don't use wp_update_post since that will update modified dates. But we still need to make
+				// sure post_name is unique (since we're not using wp_update_post - which would done it for us).
+				$new_post_name_unique = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
+
+				if( $new_post_name_unique !== $post->post_name ) {
+					$this->logger->notice( 'Post name was updated to be unique.' );
+				}
+
+				// Update to post type (with possibly new content) and unique post name.
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_type' => 'post',
+						'post_content' => $new_post_content,
+						'post_name' => $new_post_name_unique,
+					],
+					[
+						'ID' => $post->ID,
+					]
+				);
+
+				// Set to processed.
+                update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
+
+				// Set old post type.
+				update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, $original_content_type );
+
+				$this->logger->info( '-- converted to post.' );
+
+            } // foreach post in query.
+            
+        } while( ! empty( $posts ) ); // while posts to process.
+
+		$this->logger->info( 'Done.' ); 
+	}
+
+	/**
 	 * Run the import.
 	 */
 	public function cmd_import( array $pos_args, array $assoc_args ): void {
@@ -457,99 +550,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			} // callback function
 		); // throttled posts
-
-		$this->logger->info( 'Done.' ); 
-	}
-
-	/**
-	 * Convert content types.
-	 */
-	public function cmd_content_types( array $pos_args, array $assoc_args ): void {
-
-		$this->logger_set( __FUNCTION__ );
-		$this->logger->info( 'Running command: ' . __FUNCTION__ );
-
-		$this->validate_setup();
-
-		global $wpdb;
-
-        do {
-
-			// content types that have not been processed yet
-            $posts = get_posts( [ 
-				'post_type' => [ 'podcast' , 'video' ],
-                'numberposts' => 10,
-                'meta_query' => [
-					[
-						'key'     => self::META_KEY_PROCESSED_CONTENT_TYPE,
-						'compare' => 'NOT EXISTS',
-					],
-				]
-            ] );
-
-            // Process items.
-            foreach( $posts as $post ) {
-
-                $this->logger->info( '------------ processing id: ' . $post->ID );
-
-				$original_content_type = $post->post_type;
-				$this->logger->info( 'original content type: ' . $original_content_type );
-
-				$new_post_content = '';
-
-				// Content types.
-				switch ( $original_content_type ) {
-					case 'podcast':
-						$new_post_content = $this->convert_content_type_podcast( $post->ID, $post->post_content );
-						break;
-					case 'video':
-						$new_post_content = $this->convert_content_type_video( $post->ID, $post->post_content );
-						break;
-				}
-
-				// error in sub function, skip.
-				if( null === $new_post_content ) {
-					update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
-					continue;
-				}	
-
-				// blank content could be OK.
-				if( '' === $new_post_content ) {
-					$this->logger->notice( 'Post content is blank.' );
-				}
-
-				// Don't use wp_update_post since that will update modified dates. But we still need to make
-				// sure post_name is unique (since we're not using wp_update_post - which would done it for us).
-				$new_post_name_unique = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
-
-				if( $new_post_name_unique !== $post->post_name ) {
-					$this->logger->notice( 'Post name was updated to be unique.' );
-				}
-
-				// Update to post type (with possibly new content) and unique post name.
-				$wpdb->update(
-					$wpdb->posts,
-					[
-						'post_type' => 'post',
-						'post_content' => $new_post_content,
-						'post_name' => $new_post_name_unique,
-					],
-					[
-						'ID' => $post->ID,
-					]
-				);
-
-				// Set to processed.
-                update_post_meta( $post->ID, self::META_KEY_PROCESSED_CONTENT_TYPE, 'yes' );
-
-				// Set old post type.
-				update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, $original_content_type );
-
-				$this->logger->info( '-- converted to post.' );
-
-            } // foreach post in query.
-            
-        } while( ! empty( $posts ) ); // while posts to process.
 
 		$this->logger->info( 'Done.' ); 
 	}
