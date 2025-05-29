@@ -579,7 +579,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		foreach( $book_node_meta as $book_post_id ) {
 
-			$this->logger->notice( 'Related book id: ' . $book_post_id );
+			$this->logger->info( 'Related book id: ' . $book_post_id );
 
 			$book_post = get_post( $book_post_id );
 
