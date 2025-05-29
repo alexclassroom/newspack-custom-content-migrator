@@ -576,7 +576,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			}
 
 			// image.
-			$img_src = get_the_post_thumbnail_url( $book_post->ID );
+			$img_src = get_the_post_thumbnail_url( $book_post->ID, 'medium' );
 			if( false === $img_src ) {
 				$this->logger->warning( 'Skip: related book thumbnail not exists.' );
 				return null;
@@ -596,6 +596,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			
 			ob_start();
 			?>
+			<!-- np-migrated-view-book-in-review -->
 			<div class="np-migrated-view-book-in-review">
 				<div>
 					<a href="<?=$a_href?>" target="_blank"><img src="<?=$img_src?>" /></a>
@@ -603,12 +604,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				<div>
 					<a href="<?=$a_href?>" target="_blank"><?=$book_post->post_title?></a>
 					<p>by <?=$by_author?></p>
-					<p><?=$book_post->post_content?></p>
+					<?=$book_post->post_content?>
 				</div>
 			</div>
+			<!-- end: np-migrated-view-book-in-review -->
 			<?php
 			
-			$html .= ob_get_clean();
+			$html .= trim( ob_get_clean() );
 
 		}
 
@@ -617,8 +619,16 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			return null;
 		}
 
-		// Replace in content.
-		return str_replace( $placeholder, $html, $post_content );
+		// try to replace with surrounding p tags first.
+		$replacement_count = 0;
+		$post_content = str_replace( '<p>' . $placeholder . '</p>', $html, $post_content, $replacement_count );
+
+		// otherwise without p tags.
+		if( 0 === $replacement_count ) {
+			$post_content = str_replace( $placeholder, $html, $post_content );
+		}
+
+		return $post_content;
 	
 	}
 
