@@ -591,6 +591,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			if( ! empty( $isbn ) ) {
 				$a_href = 'http://www.amazon.com/dp/' . $isbn . '?tag=americ01-20';
 			} else {
+				$this->logger->notice( 'Amazon url without ISBN.' );
 				$a_href = 'http://www.amazon.com/s?index=books&field-title=' . urlencode( $book_post->post_title ) . '&field-author=' . urlencode( $by_author ). '&tag=americ01-20';
 			}
 			
