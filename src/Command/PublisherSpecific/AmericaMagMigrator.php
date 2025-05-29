@@ -618,9 +618,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					<a href="<?=$a_href?>" target="_blank"><img src="<?=$img_src?>" /></a>
 				</div>
 				<div>
-					<a href="<?=$a_href?>" target="_blank"><?=$book_post->post_title?></a>
+					<a href="<?=$a_href?>" target="_blank"><?=wp_kses( $book_post->post_title, 'post' )?></a>
 					<p>by <?=$by_author?></p>
-					<?=$book_post->post_content?>
+					<?=wp_kses( $book_post->post_content, 'post' )?>
 				</div>
 			</div>
 			<!-- end: np-migrated-view-book-in-review -->
