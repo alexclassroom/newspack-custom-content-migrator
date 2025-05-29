@@ -453,7 +453,7 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 		$csv_log_file = $blog_site . '_fix_blog_comments_display_names.csv';
 
 		$csv_log_file_handle = fopen( $csv_log_file, 'w' );
-		fputcsv( $csv_log_file_handle, [ 'comment_id', 'user_id', 'current_display_name', 'network_display_name', 'old_display_name', 'same_old_name', 'same_network_name', 'same_network_as_old_name' ] );
+		fputcsv( $csv_log_file_handle, [ 'comment_id', 'user_id', 'current_display_name', 'network_display_name', 'old_display_name', 'same_old_name', 'same_network_name', 'same_network_as_old_name', 'was_updated', 'new_display_name' ] );
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$already_migrated_comments = $wpdb->get_results( $wpdb->prepare( "SELECT DISTINCT meta_key, meta_value, wp_commentmeta.comment_id FROM $wpdb->commentmeta INNER JOIN $wpdb->comments ON $wpdb->commentmeta.comment_id = $wpdb->comments.comment_ID WHERE meta_key = %s AND comment_approved != 'trash'", self::EMBARCADERO_IMPORTED_BLOG_COMMENT_META_KEY ), ARRAY_A );
@@ -464,6 +464,8 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 			if ( $index < $index_from ) {
 				continue;
 			}
+
+			$was_updated = false;
 
 			// if ( 764081 != $already_migrated_comment['comment_id'] ) {
 			// continue;
@@ -512,32 +514,54 @@ class EmbarcaderoPostLaunchMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-			$old_display_name = $old_display_name[0];
+			$old_display_name = trim( $old_display_name[0] );
 
-			if ( $old_display_name !== $current_display_name ) {
-				$this->logger->log( $log_file, 'Updating display name for user ID: ' . $migrated_comment->user_id . ' from "' . $current_display_name . '" to "' . $old_display_name . '"' );
+			$new_display_name = '';
+			if ( ! in_array( $current_display_name, [ $old_display_name, $network_display_name ] ) ) {
+				$new_display_name = $old_display_name;
+
+				if ( empty( $old_display_name ) || str_contains( $old_display_name, '@' ) ) {
+					$new_display_name = $network_display_name;
+
+					if ( empty( $new_display_name ) || str_contains( $new_display_name, '@' ) ) {
+						$this->logger->log( $log_file, 'New display name not found for comment: ' . $migrated_comment->comment_ID, Logger::WARNING );
+						continue;
+					}
+				}
+
+				$this->logger->log( $log_file, 'Updating display name for user ID: ' . $migrated_comment->user_id . ' from "' . $current_display_name . '" to "' . $new_display_name . '"' );
 
 				$wpdb->update(
 					$wpdb->users,
-					[ 'display_name' => $old_display_name ],
+					[ 'display_name' => $new_display_name ],
 					[ 'ID' => $migrated_comment->user_id ]
 				);
 
-				fputcsv(
-					$csv_log_file_handle,
-					[
-						$migrated_comment->comment_ID,
-						$migrated_comment->user_id,
-						$current_display_name,
-						$network_display_name,
-						$old_display_name,
-						$current_display_name === $old_display_name ? 'Yes' : 'No',
-						$current_display_name === $network_display_name ? 'Yes' : 'No',
-						$network_display_name === $old_display_name ? 'Yes' : 'No',
-					]
+				// Update all the comments with the new display name.
+				$wpdb->update(
+					$wpdb->comments,
+					[ 'comment_author' => $new_display_name ],
+					[ 'user_id' => $migrated_comment->user_id ]
 				);
+
+				$was_updated = true;
 			}
 
+			fputcsv(
+				$csv_log_file_handle,
+				[
+					$migrated_comment->comment_ID,
+					$migrated_comment->user_id,
+					$current_display_name,
+					$network_display_name,
+					$old_display_name,
+					$current_display_name === $old_display_name ? 'Yes' : 'No',
+					$current_display_name === $network_display_name ? 'Yes' : 'No',
+					$network_display_name === $old_display_name ? 'Yes' : 'No',
+					$was_updated ? 'Yes' : 'No',
+					$new_display_name,
+				]
+			);
 
 			$this->logger->log( $log_file, 'Comment with index ' . $index . ' / ' . count( $already_migrated_comments ) . ' checked.' );
 		}
