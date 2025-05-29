@@ -270,7 +270,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			// content types that have not been processed yet
             $posts = get_posts( [ 
-				'post_type' => [ 'book_review', 'podcast' , 'video' ],
+				'post_type' => [ 'book_review', 'podcast' , 'the_word', 'video' ],
                 'numberposts' => 10,
                 'meta_query' => [
 					[
@@ -297,6 +297,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						break;
 					case 'podcast':
 						$new_post_content = $this->convert_content_type_podcast( $post->ID, $post->post_content );
+						break;
+					case 'the_word':
+						$new_post_content = $post->post_content; // no changes.
 						break;
 					case 'video':
 						$new_post_content = $this->convert_content_type_video( $post->ID, $post->post_content );
