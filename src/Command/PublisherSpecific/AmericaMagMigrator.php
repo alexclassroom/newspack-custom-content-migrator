@@ -555,17 +555,31 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		// get postmeta pointer to book post(s).
-		$book_node_array = get_post_meta( $post_id, 'book_node' ); // could have multiple values.
+		$book_node_meta = get_post_meta( $post_id, 'book_node', true ); // could be an array.
 		
-		// sanity: has value(s)
-		if( ! is_array( $book_node_array ) || empty( $book_node_array ) ) {
+		// must have value.
+		if( empty( $book_node_meta ) ) {
 			$this->logger->warning( 'Skip: book_node is empty.' );
 			return null; 
 		}
 
+		// convert to array.
+		if( ! is_array( $book_node_meta ) ) {
+			$book_node_meta = [ $book_node_meta ];
+		}
+		else {
+			// it's an array, so make sure unique values only
+			$book_node_meta = array_unique( $book_node_meta );
+
+		}
+
+		$this->logger->info( 'book node(s): ' . json_encode( $book_node_meta ) );
+
 		$html = '';
 
-		foreach( $book_node_array as $book_post_id ) {
+		foreach( $book_node_meta as $book_post_id ) {
+
+			$this->logger->notice( 'Related book id: ' . $book_post_id );
 
 			$book_post = get_post( $book_post_id );
 
