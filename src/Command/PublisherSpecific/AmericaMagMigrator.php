@@ -578,8 +578,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			// image.
 			$img_src = get_the_post_thumbnail_url( $book_post->ID, 'medium' );
 			if( false === $img_src ) {
-				$this->logger->warning( 'Skip: related book thumbnail not exists.' );
-				return null;
+				$this->logger->notice( 'Related book thumbnail not exists. Todo: blank image.' );
+				// todo: replace this with migrated image:
+				$img_src = 'https://www.americamagazine.org/sites/default/files/styles/medium/public/default_images/Default.1500.png.jpg';
 			}
 
 			// by author.
