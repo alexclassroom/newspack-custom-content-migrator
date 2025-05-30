@@ -434,15 +434,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	/**
 	 * Run command Profiles to guest contributor.
-	 * 			
-	 * Note: profile post's post_name is imported from Drupal (it's not just the sanitized post_title).
-	 * Instead it will match to the old_url in fg redirects. We could try to use this as the 
-	 * "user_nicename" (url slug) so that redirect are easier, or we can re-sanitized the wordpress
-	 * way. Hmm...we're doing to have to do redirects anyway, and wp_fg_redirects has the old_urls
-	 * and the P2 Guest Contributors standization project recommends to have nice urls so that CAP
-	 * co-authors taxonomies match to the user better, so let's build from the pretty post_title instead of 
-	 * using the old post_name from drupal.
-	 * 
 	 */
 	public function cmd_profiles( array $pos_args, array $assoc_args ): void {
 
@@ -476,24 +467,25 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 				// -- New User.
 
-				// todo
-				WP_CLI::line( $post->post_title );
-				WP_CLI::line( $post->post_name );
-				// GuestContributorsHelper::create_by_display_name( $post->post_title, [], true );
-				// user_nicename (see doc block) // how does this compare to wp santized post_title??
-				// $userdata['description']   = $post->post_content;
-				// $userdata['meta_input'] = [];
-				// $userdata['meta_input'][ self::META_KEY_PROFILE_POST_ID ] = $post->ID;
-
 				// Insert user with force since there can be multiple authors with the same display name.
-				// $user_id = GuestContributorsHelper::create_by_display_name( $json_item->title, [ 'user_nicename' => str_replace( self::LIVE_AUTHOR_PATH, '', $json_item->url ) ], true );
-				// if ( is_wp_error( $user_id ) ) {
-				// 	$this->logger->error( sprintf( 'Failed to create Guest Contributor: %s', $user_id->get_error_message() ) );
-				// 	exit();
-				// }
-				return;
+				// Also the profile post's post_name is imported from Drupal so use it to cut down on redirects.
+				$user_id = GuestContributorsHelper::create_by_display_name( $post->post_title, [ 'user_nicename' => $post->post_name ], true );
+
+				if ( is_wp_error( $user_id ) ) {
+					$this->logger->error( sprintf( 'Failed to create Guest Contributor: %s', $user_id->get_error_message() ) );
+					exit();
+				}
 
 				$this->logger->info( 'Inserted wp user id: ' . $user_id );
+
+				// Description.
+				wp_update_user( [
+					'ID'          => $user_id,
+					'description' => wp_kses( $post->post_content, 'post' ),
+				] );
+
+				// reference back to profile post.
+				update_user_meta( $user_id, self::META_KEY_PROFILE_POST_ID, $post->ID );
 
 				// Simple Local Avatars.
 				$thumbnail_id = get_post_meta( $post->ID, '_thumbnail_id', true );
