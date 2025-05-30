@@ -189,7 +189,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// Loop through all posts.
 		(new Posts())->throttled_posts_loop( 
-			[], 
+			[
+				'post_type' => [ 'book_review', 'podcast' , 'post', 'the_word', 'video' ],
+			], 
 			function( $post ) use ( $coauthors_plus ) {
 				
 				$this->logger->info( '-- Post ID: ' . $post->ID );
@@ -200,19 +202,23 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				}
 
 				// Migrated author list points to profile post type.
-				$by_author = get_post_meta( $post->ID, 'by_author', true );
+				$by_author = get_post_meta( $post->ID, 'by_author', true ); // could be array.
+
 				if ( empty( $by_author ) ) {
 					$this->logger->warning( 'Skip: No by_author value.' );
 					return;
 				}
+
+				// Convert to array
 				if ( ! is_array( $by_author ) ) {
-					$this->logger->warning( 'Skip: by_author value is not array.' );
-					return;
+					$by_author = [ $by_author ];
+				}
+				else {
+					// - remove any duplicates, but keep order so "first" author is still "first" in byline when multiple ids.
+					$by_author = array_unique( $by_author );
 				}
 
-				// The migration seemed to insert the same profile post id multiple times.
-				// - keep order so "first" author is still "first" in byline.
-				$by_author = array_unique( $by_author );
+				$this->logger->info( 'by_author(s): ' . json_encode( $by_author ) );
 
 				// Match each profile post id to user meta id
 				$co_authors = [];
