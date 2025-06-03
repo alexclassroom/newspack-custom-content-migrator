@@ -646,7 +646,7 @@ class NNEMigrator implements RegisterCommandInterface {
 	 * @return string|null
 	 * @throws WP_CLI\ExitException If multiple articles are found with the same legacy ID.
 	 */
-	private function get_post_id_from_legacy_id( string $article_id, NNEImportMetaEnum $import_meta ): ?string {
+	public function get_post_id_from_legacy_id( string $article_id, NNEImportMetaEnum $import_meta ): ?string {
 		// phpcs:disable -- Query is already prepared and escaped.
 		$result = $this->wpdb->get_results(
 				$this->wpdb->prepare(
