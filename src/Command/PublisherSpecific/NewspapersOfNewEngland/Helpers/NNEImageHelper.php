@@ -29,6 +29,13 @@ class NNEImageHelper {
 	protected string $data_id;
 
 	/**
+	 * Editorial key of the image.
+	 *
+	 * @var string|null $editorial_key Editorial key of the image.
+	 */
+	protected ?string $editorial_key;
+
+	/**
 	 * Name of the file.
 	 *
 	 * @var string $file_name Name of the file.
@@ -84,10 +91,11 @@ class NNEImageHelper {
 	 * @param string $publisher_site_url URL of the publisher's site.
 	 * @param string $local_search_directory Local search directory for images.
 	 */
-	public function __construct( string $file_attachment, string $publisher_site_url, string $local_search_directory ) {
+	public function __construct( string $file_attachment, string $publisher_site_url, string $local_search_directory, ?string $editorial_key = null ) {
 		$this->original_value         = $file_attachment;
 		$this->site_url               = untrailingslashit( $publisher_site_url );
 		$this->local_search_directory = untrailingslashit( $local_search_directory );
+		$this->editorial_key = $editorial_key;
 
 		$this->initialize();
 	}
@@ -219,5 +227,14 @@ class NNEImageHelper {
 	 */
 	public function get_data_id(): ?string {
 		return $this->data_id;
+	}
+
+	/**
+	 * Returns the editorial key of the image, if available.
+	 *
+	 * @return string|null
+	 */
+	public function get_editorial_key(): ?string {
+		return $this->editorial_key;
 	}
 }
