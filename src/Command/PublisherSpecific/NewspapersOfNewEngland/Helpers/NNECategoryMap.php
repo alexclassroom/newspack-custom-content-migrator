@@ -1000,6 +1000,7 @@ class NNECategoryMap {
 			NNEPublisherEnum::AMHERST_BULLETIN => ( new self() )->amherst_bulletin_map,
 			NNEPublisherEnum::ATHOL_DAILY_NEWS => ( new self() )->athol_daily_news_map,
 			NNEPublisherEnum::CONCORD_MONITOR => ( new self() )->concord_monitor_map,
+			NNEPublisherEnum::DAILY_HAMPSHIRE => ( new self() )->daily_hampshire_gazette_map,
 			default => [],
 		};
 	}
