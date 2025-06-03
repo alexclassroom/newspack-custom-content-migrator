@@ -59,6 +59,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     const META_KEY_HERO_IMAGE_COUNT = '_np_import_bridgemi_hero_image_count';
     const META_KEY_HEROS_PROCESSED  = '_np_import_bridgemi_heros_processed';
     const META_KEY_PROCESSED        = '_np_import_bridgemi_processed';
+    const META_KEY_CLEANED          = '_np_import_bridgemi_cleaned';
 
     // Newspack constants.
 
@@ -78,6 +79,11 @@ class BridgeMIMigrator implements RegisterCommandInterface {
      */
     private $dry_run = false;
 
+    /**
+     * File CSV for author bio clean up.
+     */
+    private $file_csv_author_bios;
+    
     /**
 	 * Logger
 	 *
@@ -101,6 +107,15 @@ class BridgeMIMigrator implements RegisterCommandInterface {
      */
     public static function register_commands(): void {
     
+        WP_CLI::add_command(
+            'newspack-content-migrator bridgemi-clean-up',
+            self::get_command_closure( 'cmd_clean_up' ),
+            [
+                'shortdesc' => 'Clean up.',
+                'synopsis'  => [],
+            ]
+        );
+
         WP_CLI::add_command(
             'newspack-content-migrator bridgemi-heros',
             self::get_command_closure( 'cmd_heros' ),
@@ -171,6 +186,74 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
     }
     
+    /**
+     * Cleanup certain types.
+     *
+     * @param array $pos_args Command arguments.
+     * @param array $assoc_args Command associative arguments.
+     */
+    public function cmd_clean_up( array $pos_args, array $assoc_args ): void {
+
+        $this->validate_dependencies();
+
+        $this->validate_feed_type( $pos_args );
+            
+        // Logger.
+        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+        $this->logger_set( $logger_slug );
+
+        // Run command.
+        $this->logger->info( 'Running command: ' . $logger_slug );
+                
+        do {
+
+            // Has json item from import, but not cleaned up.
+            $meta_query = [
+                [
+                    'key'     => self::META_KEY_JSON_ITEM,
+                    'compare' => 'EXISTS',
+                ],
+                [
+                    'key'     => self::META_KEY_CLEANED,
+                    'compare' => 'NOT EXISTS',
+                ],
+            ];
+
+            $limit = 10;
+            
+            // Get items for processing.
+            switch( $pos_args[0] ) {
+                case 'authors':
+                    $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+                default:
+                    $this->logger->error( 'No clean up for this type.' );
+                    exit();
+            }
+
+            // Process items.
+            foreach( $db_items as $db_id ) {
+
+                $this->logger->info( '------------ processing id: ' . $db_id );
+
+                switch( $pos_args[0] ) {
+                    case 'authors':
+                        $json_item = $this->validate_get_from_db( 'user', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_author( $db_id, $json_item, $logger_slug );
+                        update_user_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
+                }
+
+                $this->logger->info( '-- done with item' );
+
+            } // foreach item.
+            
+        } while( ! empty( $db_items ) );
+
+        $this->logger->info( 'Done.' );
+    }
+
     /**
      * Convert hero image arrays to slideshows.
      *
@@ -566,6 +649,47 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         } while( ! empty( $db_items ) );
 
         $this->logger->info( 'Done.' );
+    }
+
+    /**
+     * Clean up one author using verified (checksum) json_item.
+     *
+     * @param int $user_id User ID.
+     * @param object $json_item JSON data.
+     */
+    private function clean_up_author( int $user_id, object $json_item, $logger_slug ): void {
+
+        $user_data = get_userdata( $user_id );
+
+        $json_item->biography = trim( $json_item->biography );
+        $json_item->byline = trim( $json_item->byline );
+
+        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) ) {
+    
+            $this->logger->info( 'Both bio and byline, adding to CSV.' );
+    
+            if( empty( $this->file_csv_author_bios ) ) {
+                $csv_file_name = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $logger_slug . '-bios-' . microtime( true ) . '.csv';
+                $this->file_csv_author_bios = fopen( $csv_file_name, 'w' );                
+                fputcsv( $this->file_csv_author_bios, [
+                    'Live',
+                    'Staging',
+                    'Bio'
+                ]);
+            }
+    
+            fputcsv( $this->file_csv_author_bios, [
+                'https://www.bridgemi.com' . $json_item->url,
+                'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                trim( get_user_meta( $user_id, 'description', true ) ),
+            ]);
+
+        }
+
+
+
+        // $user_data = get_userdata( $user_id );
+        // $this->set_redirect( $json_item->url, '/author/' . $user_data->user_nicename, 'author' );
     }
 
     /**
