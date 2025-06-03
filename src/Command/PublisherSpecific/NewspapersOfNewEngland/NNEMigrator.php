@@ -485,27 +485,42 @@ class NNEMigrator implements RegisterCommandInterface {
 
 		$file_2_image_helper = new NNEImageHelper( $article_object->{'File02'}, $this->host_url, $this->path_to_images );
 		if ( $file_2_image_helper->has_data_id() && ! array_key_exists( 'dId' . $file_2_image_helper->get_data_id(), $attachments ) ) {
-			$maybe_attachment_id = Attachments::import_external_file(
-				$file_2_image_helper->get_best_path(),
-				null, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-				null,
-				null,
-				null,
-				null,
-				[
-					'post_date' => $post_date->format( 'Y-m-d' ),
-				],
-				$file_2_image_helper->get_file_name()
-			);
+			ConsoleColor::title_output( 'Handling featured image...' );
+			$maybe_attachment_id = $this->get_attachment_id( $file_2_image_helper );
 
-			if ( is_wp_error( $maybe_attachment_id ) ) {
-				ConsoleColor::magenta( 'Error importing featured image' )
-							->white( 'Filename:' )
-							->bright_red( $article_object->{'File02'} )
-							->white( 'Error:' )
-							->bright_red( $maybe_attachment_id->get_error_message() )
+			if ( null === $maybe_attachment_id ) {
+				ConsoleColor::white( "\t-" )->white( 'Data ID:' )
+							->bright_yellow( $file_2_image_helper->get_data_id() )
+							->white( 'Exists Locally:' )
+							->bright_yellow( $file_2_image_helper->exists_in_media_library() ? 'Yes' : 'No' )
 							->output();
-			} else {
+
+				$maybe_attachment_id = Attachments::import_external_file(
+					$file_2_image_helper->get_best_path(),
+					null, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+					null,
+					null,
+					null,
+					null,
+					[
+						'post_date' => $post_date->format( 'Y-m-d' ),
+					],
+					$file_2_image_helper->get_file_name()
+				);
+
+				if ( is_wp_error( $maybe_attachment_id ) ) {
+					ConsoleColor::magenta( 'Error importing featured image' )
+								->white( 'Filename:' )
+								->bright_red( $article_object->{'File02'} )
+								->white( 'Error:' )
+								->bright_red( $maybe_attachment_id->get_error_message() )
+								->output();
+				} else {
+					add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value, $file_2_image_helper->get_data_id() );
+				}
+			}
+
+			if ( null !== $maybe_attachment_id ) {
 				$post_data['meta_input']['_thumbnail_id']                      = $maybe_attachment_id;
 				$post_data['meta_input']['newspack_featured_image_position']   = 'hidden';
 				$post_data['meta_input']['_newspack_featured_image_is_hidden'] = true;
@@ -785,6 +800,46 @@ class NNEMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Helps retrieve the post/attachment ID based off of meta data from the image.
+	 *
+	 * @param NNEImageHelper $image_helper Image helper object.
+	 *
+	 * @return int|null
+	 * @throws WP_CLI\ExitException If multiple articles are found with the same legacy ID.
+	 */
+	public function get_attachment_id( NNEImageHelper $image_helper ): ?int {
+		$attachment_id = null;
+
+		if ( $image_helper->has_data_id() ) {
+			$attachment_id = $this->get_post_id_from_legacy_id( $image_helper->get_data_id(), NNEImportMetaEnum::IMAGE_DATA_ID_KEY );
+
+			if ( null !== $attachment_id ) {
+				ConsoleColor::white( "\t-" )
+							->bright_blue_with_white_background( 'Found image via data ID: - ' )
+							->white( 'Data ID: ' )
+							->cyan( $image_helper->get_data_id() )
+							->white( 'Attachment ID: ' )
+							->bright_green_with_blue_background( $attachment_id )
+							->output();
+			}
+		} elseif ( null !== $image_helper->get_editorial_key() ) {
+			$attachment_id = $this->get_post_id_from_legacy_id( $image_helper->get_editorial_key(), NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY );
+
+			if ( null !== $attachment_id ) {
+				ConsoleColor::white( "\t-" )
+							->bright_white_with_blue_background( 'Found image via GN3 Editorial ID: - ' )
+							->white( 'Data ID: ' )
+							->bright_blue( $image_helper->get_data_id() )
+							->white( 'Attachment ID: ' )
+							->underlined_bright_blue( $attachment_id )
+							->output();
+			}
+		}
+
+		return $attachment_id;
+	}
+
+	/**
 	 * Handles images in the given DOM node list or node.
 	 *
 	 * @param DOMNodeList|DOMNode $images The DOM node list or node containing the images.
@@ -823,7 +878,8 @@ class NNEMigrator implements RegisterCommandInterface {
 		$image_helper = new NNEImageHelper(
 			$image_object->fileattachment,
 			$this->host_url,
-			$this->path_to_images
+			$this->path_to_images,
+			$image_object->GN3EditorialKey,
 		);
 
 		if ( null === $image_helper->get_best_path() ) {
@@ -835,31 +891,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			return null;
 		}
 
-		if ( $image_helper->has_data_id() ) {
-			$attachment_id = $this->get_post_id_from_legacy_id( $image_helper->get_data_id(), NNEImportMetaEnum::IMAGE_DATA_ID_KEY );
-
-			if ( null !== $attachment_id ) {
-				ConsoleColor::white( "\t-" )
-							->bright_blue_with_white_background( 'Found image via data ID: - ' )
-							->white( 'Data ID: ' )
-							->cyan( $image_helper->get_data_id() )
-							->white( 'Attachment ID: ' )
-							->bright_green_with_blue_background( $attachment_id )
-							->output();
-			}
-		} else {
-			$attachment_id = $this->get_post_id_from_legacy_id( $image_object->GN3EditorialKey, NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY );
-
-			if ( null !== $attachment_id ) {
-				ConsoleColor::white( "\t-" )
-							->bright_white_with_blue_background( 'Found image via GN3 Editorial ID: - ' )
-							->white( 'Data ID: ' )
-							->bright_blue( $image_helper->get_data_id() )
-							->white( 'Attachment ID: ' )
-							->underlined_bright_blue( $attachment_id )
-							->output();
-			}
-		}
+		$attachment_id = $this->get_attachment_id( $image_helper );
 
 		if ( null !== $attachment_id ) {
 			$attachment_data = $this->get_post_data( $attachment_id );
