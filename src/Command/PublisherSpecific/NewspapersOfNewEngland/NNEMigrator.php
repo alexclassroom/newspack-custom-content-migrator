@@ -775,7 +775,16 @@ class NNEMigrator implements RegisterCommandInterface {
 		$taxonomy_constraint = '';
 
 		if ( ! empty( $taxonomies ) ) {
-			$taxonomy_constraint = 'AND tt.taxonomy IN (' . implode( ',', array_map( 'esc_sql', $taxonomies ) ) . ')';
+			$taxonomy_constraint = 'AND tt.taxonomy IN (' . implode(
+					',',
+					array_map(
+						function ( $taxonomy ) {
+
+							return "'" . esc_sql( $taxonomy ) . "'";
+						},
+						$taxonomies
+					)
+				) . ')';
 		}
 
 		// phpcs:disable -- properly escaped and prepared.
@@ -790,9 +799,8 @@ class NNEMigrator implements RegisterCommandInterface {
 						FROM {$this->wpdb->term_relationships} tr 
 						    LEFT JOIN {$this->wpdb->term_taxonomy} tt ON tr.term_taxonomy_id = tt.term_taxonomy_id 
 						    LEFT JOIN {$this->wpdb->terms} t ON tt.term_id = t.term_id 
-						WHERE tr.object_id = %d 
-						ORDER BY tr.term_order ASC
-						  $taxonomy_constraint",
+						WHERE tr.object_id = %d $taxonomy_constraint
+						ORDER BY tr.term_order ASC",
 				$post_id
 			)
 		);
