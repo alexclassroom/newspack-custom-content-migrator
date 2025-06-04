@@ -557,6 +557,7 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		if ( null !== $post_id ) {
+			$post_data['meta_input']['_yoast_wpseo_primary_category'] = false;
 			$post_updated = $this->raw_update_post( $post_id, $post_data, delete_existing_terms: true );
 
 			$output = ConsoleColor::white( 'Update:' );
