@@ -1156,8 +1156,8 @@ class NNEMigrator implements RegisterCommandInterface {
 					$all_meta_data_updated[] = (bool) $this->wpdb->update(
 						$this->wpdb->postmeta,
 						[
-							'meta_value' => $meta_value,
 							// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_value
+							'meta_value' => $meta_value,
 						],
 						[
 							'post_id'  => $post_id,
