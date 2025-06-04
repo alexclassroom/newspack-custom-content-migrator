@@ -666,7 +666,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         $json_item->byline = trim( $json_item->byline );
 
         // Must have both values and not start wiht "guest author line"...
-        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge Magazine.' ) ) {
+        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge' ) ) {
     
             $this->logger->info( 'Both bio and byline, adding to CSV.' );
     
