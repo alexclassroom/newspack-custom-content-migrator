@@ -80,16 +80,18 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     private $dry_run = false;
 
     /**
-     * File CSV for author bio clean up.
-     */
-    private $file_csv_author_bios;
-    
-    /**
 	 * Logger
 	 *
 	 * @var MultiLog
 	 */
 	private $logger;
+
+    /**
+     * Loggers for CSVs.
+     *
+     * @var array
+     */
+    private $logger_csvs = [];
 
     /**
 	 * Constructor.
@@ -665,33 +667,31 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         $json_item->biography = trim( $json_item->biography );
         $json_item->byline = trim( $json_item->byline );
 
-        // Must have both values and not start wiht "guest author line"...
+        // Must have both values and not start with "guest author line"...
         if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge' ) ) {
     
             $this->logger->info( 'Both bio and byline, adding to CSV.' );
-    
-            if( empty( $this->file_csv_author_bios ) ) {
-                $csv_file_name = str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $logger_slug . '-bios-' . microtime( true ) . '.csv';
-                $this->file_csv_author_bios = fopen( $csv_file_name, 'w' );                
-                fputcsv( $this->file_csv_author_bios, [
-                    'Live',
-                    'Staging',
-                    'Bio'
-                ]);
-            }
-    
-            fputcsv( $this->file_csv_author_bios, [
-                'https://www.bridgemi.com' . $json_item->url,
-                'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
-                $description,
+
+            $this->logger_csv_out( $logger_slug . '-bios-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                'Bio' => $description,
             ]);
 
         }
 
+        // redirects (trimmed author urls).
+        if( str_replace( '/about/', '', $json_item->url ) !== $user_data->user_nicename ) {
+            
+            $this->logger->info( 'Author url changed, adding to CSV.' );
 
+            $this->logger_csv_out( $logger_slug . '-redirects-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+            ]);
+    
+        }
 
-        // $user_data = get_userdata( $user_id );
-        // $this->set_redirect( $json_item->url, '/author/' . $user_data->user_nicename, 'author' );
     }
 
     /**
@@ -1762,6 +1762,22 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 		);
 	}
     
+    /**
+     * Logger for csvs
+     */
+    private function logger_csv_out( $logger_slug_csv, $data ) {
+    
+        // Create and set header row.
+        if( ! isset( $this->logger_csvs[ $logger_slug_csv ] ) ) {
+            $this->logger_csvs[ $logger_slug_csv ] = fopen( str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $logger_slug_csv . microtime( true ) . '.csv', 'w' );
+            fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_keys( $data ) );
+        }
+
+        // data values.
+        fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_values( $data ) );
+
+    }
+
     /**
      * Validate (and write to log) if an existing item (post, term, or user) exists and then compare the checksum.
      * 
