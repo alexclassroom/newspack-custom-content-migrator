@@ -533,6 +533,8 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		if ( 'false' === strtolower( $article_object->HidePhotos ) && $image_elements->count() > 0 ) {
+			$images_block = [];
+
 			if ( 1 === $image_elements->count() ) {
 				if ( ! empty( $attachments ) ) {
 					$first_attachment = array_shift( $attachments );
@@ -549,7 +551,9 @@ class NNEMigrator implements RegisterCommandInterface {
 				$images_block = $this->block_generator->get_gallery( $attachment_ids );
 			}
 
-			$post_data['post_content'] = serialize_block( $images_block ) . PHP_EOL . $post_data['post_content'];
+			if ( ! empty( $images_block ) ) {
+				$post_data['post_content'] = serialize_block( $images_block ) . PHP_EOL . $post_data['post_content'];
+			}
 		}
 
 		if ( null !== $post_id ) {
