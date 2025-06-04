@@ -720,7 +720,7 @@ class NNECategoryMap {
 			],
 		],
 		[
-			'name'       => 'Life/Home Garden',
+			'name'       => 'Life/Home-Garden',
 			'categories' => [
 				[
 					'name'     => 'Home & Garden',
@@ -731,7 +731,7 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'Life/Readers Choice',
+			'name'       => 'Life/Readers-Choice',
 			'categories' => [
 				[
 					'name'     => 'Best Of',
@@ -764,7 +764,7 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'News/Nation World',
+			'name'       => 'News/Nation-World',
 			'categories' => [
 				[
 					'name'     => 'News',
@@ -775,7 +775,7 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'News/State Region',
+			'name'       => 'News/State-Region',
 			'categories' => [
 				[
 					'name'     => 'News',
@@ -830,7 +830,7 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'Sports/High School',
+			'name'       => 'Sports/High-School',
 			'categories' => [
 				[
 					'name'     => 'High School & Youth',
@@ -863,7 +863,7 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'UMass Sports Blog',
+			'name'       => 'UMass-Sports-Blog',
 			'categories' => [
 				[
 					'name'     => 'UMass',
