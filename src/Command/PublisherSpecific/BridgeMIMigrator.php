@@ -660,11 +660,13 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     private function clean_up_author( int $user_id, object $json_item, $logger_slug ): void {
 
         $user_data = get_userdata( $user_id );
+        $description = trim( get_user_meta( $user_id, 'description', true ) );
 
         $json_item->biography = trim( $json_item->biography );
         $json_item->byline = trim( $json_item->byline );
 
-        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) ) {
+        // Must have both values and not start wiht "guest author line"...
+        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge Magazine.' ) ) {
     
             $this->logger->info( 'Both bio and byline, adding to CSV.' );
     
@@ -681,7 +683,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
             fputcsv( $this->file_csv_author_bios, [
                 'https://www.bridgemi.com' . $json_item->url,
                 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
-                trim( get_user_meta( $user_id, 'description', true ) ),
+                $description,
             ]);
 
         }
