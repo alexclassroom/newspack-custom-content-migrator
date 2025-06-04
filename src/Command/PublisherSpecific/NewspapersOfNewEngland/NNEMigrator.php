@@ -593,7 +593,9 @@ class NNEMigrator implements RegisterCommandInterface {
 		if ( empty( $post_categories ) ) {
 			$uncategorized = wp_create_category( 'Uncategorized' );
 
-			wp_set_post_categories( $post_id, [ intval( $uncategorized['term_id'] ) ] );
+			if ( is_numeric( $uncategorized ) ) {
+				wp_set_post_categories( $post_id, [ intval( $uncategorized ) ] );
+			}
 		} else {
 			$post_categories = array_filter( $post_categories, fn( $term ) => 'uncategorized' !== $term->slug );
 
