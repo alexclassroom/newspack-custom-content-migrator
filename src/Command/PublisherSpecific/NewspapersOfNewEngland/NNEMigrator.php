@@ -1103,12 +1103,12 @@ class NNEMigrator implements RegisterCommandInterface {
 
 		$maybe_tax_updated        = null;
 		$new_category_and_tag_ids = array_merge( $new_tax_data['category'] ?? [], $new_tax_data['post_tag'] ?? [] );
-		if ( false !== $maybe_post_updated && ! empty( $new_category_and_tag_ids ) ) {
+		if ( ( false !== $maybe_post_updated && ! empty( $new_category_and_tag_ids ) ) || $delete_existing_terms ) {
 			$db_category_and_tag_ids = array_merge( $db_tax_data['category'] ?? [], $db_tax_data['post_tag'] ?? [] );
 			$delete_term_ids         = array_diff( $db_category_and_tag_ids, $new_category_and_tag_ids );
 			$set_term_ids            = array_diff( $new_category_and_tag_ids, $db_category_and_tag_ids );
 
-			if ( ! empty( $delete_term_ids ) || $delete_existing_terms ) {
+			if ( ! empty( $delete_term_ids ) ) {
 				$placeholders_for_term_ids = implode( ',', array_fill( 0, count( $delete_term_ids ), '%d' ) );
 
 				// phpcs:disable -- properly escaped and prepared.
