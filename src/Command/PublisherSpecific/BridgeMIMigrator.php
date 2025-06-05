@@ -225,6 +225,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
             
             // Get items for processing.
             switch( $pos_args[0] ) {
+                case 'articles':
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+                    break;
                 case 'authors':
                     $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
@@ -239,6 +242,12 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $this->logger->info( '------------ processing id: ' . $db_id );
 
                 switch( $pos_args[0] ) {
+                    case 'articles':
+                        $json_item = $this->validate_get_from_db( 'post', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_post( $db_id, $json_item, $logger_slug );
+                        update_post_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
                     case 'authors':
                         $json_item = $this->validate_get_from_db( 'user', $db_id );
                         $this->logger->info( 'old url: ' . $json_item->url );
@@ -654,10 +663,27 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     }
 
     /**
-     * Clean up one author using verified (checksum) json_item.
+     * Clean up one post using verified (checksum) json_item.
      *
-     * @param int $user_id User ID.
-     * @param object $json_item JSON data.
+     */
+    private function clean_up_post( int $post_id, object $json_item, $logger_slug ): void {
+
+        // fuzzy match on int or string for 0 post_author.
+        if( 0 == get_post_field( 'post_author', $post_id, 'db' ) ) {
+            
+            $this->logger->info( 'Post without author, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-no-author-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+            ]);
+            
+        }
+
+    }
+
+    /**
+     * Clean up one author using verified (checksum) json_item.
      */
     private function clean_up_author( int $user_id, object $json_item, $logger_slug ): void {
 
