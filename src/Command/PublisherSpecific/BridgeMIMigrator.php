@@ -669,15 +669,41 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     private function clean_up_post( int $post_id, object $json_item, $logger_slug ): void {
 
         // fuzzy match on int or string for 0 post_author.
-        if( 0 == get_post_field( 'post_author', $post_id, 'db' ) ) {
+        if( 0 == get_post_field( 'post_author', $post_id, 'raw' ) ) {
             
             $this->logger->info( 'Post without author, adding to CSV.' );
 
             $this->logger_csv_out( $logger_slug . '-no-author-', [
                 'Live' => 'https://www.bridgemi.com' . $json_item->url,
                 'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                'JSON Author' => json_encode( $json_item->author ),
             ]);
             
+        }
+
+        // Content in posts.
+        $post_content = get_post_field( 'post_content', $post_id, 'raw' );
+
+        if( str_contains( $post_content, 'http://bridgemi.com/wp-content/themes/bridge_jcbd/js/bridgehighcharts.js' ) ) {
+
+            $this->logger->info( 'Post with highchartsjs , adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-highcharts-js-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+            ]);
+
+        }
+
+        if( str_contains( $post_content, 'http://bridgemi.com/wp-content/uploads/2016/06/sorttable.js' ) ) {
+
+            $this->logger->info( 'Post with sortable js , adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-sortable-js-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+            ]);
+
         }
 
     }
