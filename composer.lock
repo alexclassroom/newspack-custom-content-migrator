@@ -55,12 +55,12 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "f0bf8bf607540b5161313263cf937345600cff08"
+                "reference": "e651e3ee62a18f623d5f0ac22b6ef9f7f8ab3f4f"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/f0bf8bf607540b5161313263cf937345600cff08",
-                "reference": "f0bf8bf607540b5161313263cf937345600cff08",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/e651e3ee62a18f623d5f0ac22b6ef9f7f8ab3f4f",
+                "reference": "e651e3ee62a18f623d5f0ac22b6ef9f7f8ab3f4f",
                 "shasum": ""
             },
             "require": {
@@ -114,7 +114,7 @@
                 "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2025-05-22T20:38:09+00:00"
+            "time": "2025-06-09T10:22:11+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -5343,15 +5343,15 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-content-converter": 20,
-        "simplehtmldom/simplehtmldom": 5,
+        "automattic/newspack-migration-tools": 20,
+        "automattic/newspack-post-image-downloader": 20,
         "automattic/newspack-scraper-migrator": 20,
-        "automattic/newspack-migration-tools": 20
+        "simplehtmldom/simplehtmldom": 5
     },
     "prefer-stable": false,
     "prefer-lowest": false,
-    "platform": [],
-    "platform-dev": [],
-    "plugin-api-version": "2.2.0"
+    "platform": {},
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
 }
