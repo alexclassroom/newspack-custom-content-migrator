@@ -231,9 +231,12 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 case 'authors':
                     $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
-                default:
-                    $this->logger->error( 'No clean up for this type.' );
-                    exit();
+                case 'tags':
+                    $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'post_tag', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+                    break;
+                case 'topics':
+                    $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'category', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+                    break;
             }
 
             // Process items.
@@ -253,6 +256,13 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                         $this->logger->info( 'old url: ' . $json_item->url );
                         $this->clean_up_author( $db_id, $json_item, $logger_slug );
                         update_user_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
+                    case 'tags':
+                    case 'topics':
+                        $json_item = $this->validate_get_from_db( 'term', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_term( $db_id, $json_item, $logger_slug, $pos_args[0] );
+                        update_term_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
                         break;
                 }
 
@@ -756,6 +766,34 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
             ]);
     
+        }
+
+    }
+
+    /**
+     * Clean up one term using verified (checksum) json_item.
+     */
+    private function clean_up_term( int $term_id, object $json_item, $logger_slug, $type ): void {
+
+        if( 'tags' === $type ) $type = 'post_tag';
+        else if( 'topics' === $type ) $type = 'category';
+
+        $json_item->description = trim( $json_item->description );
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->description ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Terms with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com' . wp_make_link_relative( get_term_link( $term_id, $type ) ),
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
         }
 
     }
