@@ -245,7 +245,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                     case 'articles':
                         $json_item = $this->validate_get_from_db( 'post', $db_id );
                         $this->logger->info( 'old url: ' . $json_item->url );
-                        $this->clean_up_post( $db_id, $json_item, $logger_slug );
+                        $this->clean_up_article( $db_id, $json_item, $logger_slug );
                         update_post_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
                         break;
                     case 'authors':
@@ -663,10 +663,14 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     }
 
     /**
-     * Clean up one post using verified (checksum) json_item.
+     * Clean up one article (post) using verified (checksum) json_item.
      *
      */
-    private function clean_up_post( int $post_id, object $json_item, $logger_slug ): void {
+    private function clean_up_article( int $post_id, object $json_item, $logger_slug ): void {
+
+        // Post info.
+        $post_content = get_post_field( 'post_content', $post_id, 'raw' );
+        $post_date    = get_post_field( 'post_date', $post_id, 'raw' );
 
         // fuzzy match on int or string for 0 post_author.
         if( 0 == get_post_field( 'post_author', $post_id, 'raw' ) ) {
@@ -676,34 +680,27 @@ class BridgeMIMigrator implements RegisterCommandInterface {
             $this->logger_csv_out( $logger_slug . '-no-author-', [
                 'Live' => 'https://www.bridgemi.com' . $json_item->url,
                 'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                'Date' => $post_date,
                 'JSON Author' => json_encode( $json_item->author ),
             ]);
             
         }
 
-        // Content in posts.
-        $post_content = get_post_field( 'post_content', $post_id, 'raw' );
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $post_content ) ) {
+            
+            foreach( $un_fetched as $link ) {
 
-        if( str_contains( $post_content, 'http://bridgemi.com/wp-content/themes/bridge_jcbd/js/bridgehighcharts.js' ) ) {
+                $this->logger->info( 'Post with un fetched asset, adding to CSV.' );
 
-            $this->logger->info( 'Post with highchartsjs , adding to CSV.' );
-
-            $this->logger_csv_out( $logger_slug . '-highcharts-js-', [
-                'Live' => 'https://www.bridgemi.com' . $json_item->url,
-                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
-            ]);
-
-        }
-
-        if( str_contains( $post_content, 'http://bridgemi.com/wp-content/uploads/2016/06/sorttable.js' ) ) {
-
-            $this->logger->info( 'Post with sortable js , adding to CSV.' );
-
-            $this->logger_csv_out( $logger_slug . '-sortable-js-', [
-                'Live' => 'https://www.bridgemi.com' . $json_item->url,
-                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
-            ]);
-
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                    'Date' => $post_date,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
         }
 
     }
@@ -744,6 +741,77 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     
         }
 
+    }
+
+    private function clean_up_content_un_fetched( $post_content ) {
+
+        $un_fetched = [];
+
+        $html_doc = new HtmlDocument( $post_content );
+    
+        // Assets in img src.
+        $images = $html_doc->find( 'img' );
+        foreach ( $images as $img ) {
+            $src = $img?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in script src.
+        $scripts = $html_doc->find( 'script' );
+        foreach ( $scripts as $script ) {
+            $src = $script?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in a href.
+        $links = $html_doc->find( 'a' );
+        foreach ( $links as $link ) {
+            $href = $link?->getAttribute( 'href' );            
+            if ( ! $href ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $href ) ) {
+                $un_fetched[] = $href;
+            }
+        }
+
+        return $un_fetched;
+
+    }
+
+    private function clean_up_content_un_fetched_assets_single( $url_from_cralwer ) {
+        
+        // Everything already expects relative paths so convert to relative.
+        $relative_path = trim( $url_from_cralwer );
+        $relative_path = preg_replace( '#^//(www\.)?bridgemi\.com#i', '', $relative_path ); // no scheme
+        $relative_path = preg_replace( '#^https?://(www\.)?bridgemi\.com#i', '', $relative_path ); // with scheme
+
+        // Must be relative at this point or return;
+        if( str_starts_with( $relative_path, '//' ) || ! str_starts_with( $relative_path, '/' ) ) return false;
+
+        // Must be link to an asset ext.
+        $parsed_url_path = parse_url( $relative_path, PHP_URL_PATH );
+        if( ! is_string( $parsed_url_path ) || empty( $parsed_url_path ) ) {
+            return false;
+        }
+        $parsed_url_ext = pathinfo( $parsed_url_path, PATHINFO_EXTENSION );
+        if( ! is_string( $parsed_url_ext ) || empty( $parsed_url_ext ) ) {
+            return false;
+        }
+        
+        $this->logger->info( 'Un fetched: ' . $url_from_cralwer );
+
+        return true;
     }
 
     /**
