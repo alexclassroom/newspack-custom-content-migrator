@@ -717,6 +717,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         $json_item->byline = trim( $json_item->byline );
 
         // Must have both values and not start with "guest author line"...
+        // Could be a case where the same info is displayed twice on top of eachother.
         if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge' ) ) {
     
             $this->logger->info( 'Both bio and byline, adding to CSV.' );
@@ -729,6 +730,22 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
         }
 
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->biography . $json_item->byline ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Bios with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+        
         // redirects (trimmed author urls).
         if( str_replace( '/about/', '', $json_item->url ) !== $user_data->user_nicename ) {
             
