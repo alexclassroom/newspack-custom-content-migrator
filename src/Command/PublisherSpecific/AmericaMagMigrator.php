@@ -185,18 +185,29 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$this->validate_setup();
 
-		global $coauthors_plus;
+		global $coauthors_plus, $wpdb;
 
 		// Loop through all posts.
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type' => [ 'book_review', 'podcast' , 'post', 'the_word', 'video' ],
 			], 
-			function( $post ) use ( $coauthors_plus ) {
+			function( $post ) use ( $coauthors_plus, $wpdb ) {
 				
 				$this->logger->info( '-- Post ID: ' . $post->ID );
 
-				if ( $coauthors_plus->has_author_terms( $post->ID ) ) {
+				// Check if authors already set.
+				// Do not use $coauthors_plus->has_author_terms( $post->ID ).  It causes memory overload issues.
+				// Do direct SQL instead.
+				$authors_already_set = $wpdb->get_var( $wpdb->prepare( "
+					SELECT 1
+					FROM wp_term_relationships tr
+					JOIN wp_term_taxonomy tt on tt.term_taxonomy_id = tr.term_taxonomy_id AND tt.taxonomy = 'author'
+					WHERE tr.object_id = %d
+					LIMIT 1",
+					$post->ID
+				));
+				if ( $authors_already_set ) {
 					$this->logger->notice( 'Authors already set.' );
 					return;
 				}
