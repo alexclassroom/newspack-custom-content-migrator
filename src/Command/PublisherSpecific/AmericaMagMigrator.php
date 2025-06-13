@@ -114,6 +114,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_co_authors' ),
 			[
 				'shortdesc' => 'Set co-authors per post.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch-num',
+						'description' => 'Batch number to start with. One-based array. (Default 1).',
+						'optional'    => true,
+					],
+				],
 			]
 		);
 
@@ -184,6 +192,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
 		$this->validate_setup();
+
+		// Adjust the batch start number.
+		$batch_num = ( isset( $assoc_args['batch-num'] ) && preg_match( '/^\d+$/', $assoc_args['batch-num'] ) ) ? (int) $assoc_args['batch-num'] : 1;
+		$this->logger->info( '--batch-num=' . $batch_num );
 
 		global $coauthors_plus, $wpdb;
 
@@ -265,7 +277,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					return;
 				}
 
-			} // callback function
+			}, // callback function
+			3,
+			1000,
+			$batch_num
 		); // throttled posts
 
 		$this->logger->info( 'Done.' ); 
