@@ -32,10 +32,11 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     
     // Live site constants.
     
-    const FEED_TYPES = [ 'articles', 'authors', 'tags', 'topics' ];
+    const FEED_TYPES = [ 'articles', 'authors', 'redirects', 'tags', 'topics' ];
     
     const FEED_URL_ARTICLES  = 'https://www.bridgemi.com/article-export.json';
     const FEED_URL_AUTHORS   = 'https://www.bridgemi.com/authors-export.json';
+    const FEED_URL_REDIRECTS = 'https://www.bridgemi.com/redirects-export.json';
     const FEED_URL_TAGS      = 'https://www.bridgemi.com/tags-export.json';
     const FEED_URL_TOPICS    = 'https://www.bridgemi.com/topics-export.json';
 
@@ -237,6 +238,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 case 'topics':
                     $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'category', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
                     break;
+                default:
+                    $this->logger->error( 'No clean-up needed for: ' . $pos_args[0] );
+                    exit();
             }
 
             // Process items.
@@ -551,6 +555,10 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $feed_url = self::FEED_URL_AUTHORS;
                 $item_callback = [ $this, 'import_json_author' ];
                 break;
+            case 'redirects':
+                $feed_url = self::FEED_URL_REDIRECTS;
+                $item_callback = [ $this, 'import_json_redirect' ];
+                break;
             case 'tags':
                 $feed_url = self::FEED_URL_TAGS;
                 $item_callback = [ $this, 'import_json_tag' ];
@@ -559,6 +567,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $feed_url = self::FEED_URL_TOPICS;
                 $item_callback = [ $this, 'import_json_topic' ];
                 break;
+            default:
+                $this->logger->error( 'No import needed for: ' . $pos_args[0] );
+                exit();
         }
         
         // Import pages.
@@ -629,6 +640,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 case 'topics':
                     $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'category', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
                     break;
+                default:
+                    $this->logger->error( 'No processing needed for: ' . $pos_args[0] );
+                    exit();
             }
 
             // Process items.
@@ -1118,6 +1132,36 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
         // Log success.
         $this->logger->info( sprintf( 'Imported user ID: %d', $user_id ) );
+
+    }
+
+    /**
+     * Import one redirect item.
+     *
+     * @param object $json_item JSON data.
+     * @param string $checksum Checksum for comparison with future imports.
+     */
+    public function import_json_redirect( object $json_item, string $checksum ): void {
+        
+        // Define expected properties and additional validation rules        
+        $expected_properties = [
+            'from'        => [ 'type' => 'string', 'required' => true, ],
+            'to'          => [ 'type' => 'string', 'required' => true, ],
+            'status_code' => [ 'type' => 'string' ],
+            'created'     => [ 'type' => 'string' ],
+        ];
+
+        // Error out if json_item is not valid.
+        $this->validate_json_item( $json_item, $expected_properties );
+
+        // Dry run, return.
+        if ( $this->dry_run ) {
+            $this->logger->notice( 'Skip: Dry run not supported for redirects import.' );
+            return;
+        }
+        
+        // Set the redirect using the built-in method
+        $this->set_redirect( $json_item->from, $json_item->to, 'redirect' );
 
     }
 
