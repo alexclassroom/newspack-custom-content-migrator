@@ -10,25 +10,131 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
+use wpdb;
 
 class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+
+	/**
+	 * Field mappings for different content types.
+	 */
+	private const FIELD_MAPPINGS = [
+		'main_content' => [
+			'text_content'            => 'field_blockText_itemContent',
+			'image_content'           => 'field_blockImage_itemContent',
+			'image_position'          => 'field_blockImage_itemPosition',
+			'image_width'             => 'field_blockImage_itemWidth',
+			'external_image_heading'  => 'field_blockExternalImage_itemHeading',
+			'external_image_content'  => 'field_blockExternalImage_itemContent',
+			'external_image_position' => 'field_blockExternalImage_itemPosition',
+			'external_image_width'    => 'field_blockExternalImage_itemWidth',
+			'external_image_url'      => 'field_blockExternalImage_itemURL',
+			'raw_html_content'        => 'field_blockRawHTML_itemContent',
+			'video_embed'             => 'field_blockVideo_itemVideoEmbed',
+			'video_width'             => 'field_blockVideo_itemWidth',
+			'video_position'          => 'field_blockVideo_itemPosition',
+			'video_content'           => 'field_blockVideo_itemContent',
+			'heading_type'            => 'field_blockHeading_itemType',
+			'heading_content'         => 'field_blockHeading_itemHeading',
+			'poll_position'           => 'field_blockPoll_itemPosition',
+			'separator_visible'       => 'field_blockSeparator_itemIsVisible',
+			'quote_content'           => 'field_blockQuote_itemContent',
+			'quote_heading'           => 'field_blockQuote_itemHeading',
+			'graphic_position'        => 'field_blockGraphic_itemPosition',
+			'graphic_width'           => 'field_blockGraphic_itemWidth',
+			'graphic_custom_width'    => 'field_blockGraphic_itemCustomWidth',
+		],
+		'lede'         => [
+			'text_content'            => 'field_blockText_itemContent',
+			'image_content'           => 'field_blockImage_itemContent',
+			'image_position'          => 'field_blockImage_itemPosition',
+			'image_width'             => 'field_blockImage_itemWidth',
+			'external_image_heading'  => 'field_blockExternalImage_itemHeading',
+			'external_image_content'  => 'field_blockExternalImage_itemContent',
+			'external_image_position' => 'field_blockExternalImage_itemPosition',
+			'external_image_width'    => 'field_blockExternalImage_itemWidth',
+			'external_image_url'      => 'field_blockExternalImage_itemURL',
+			'raw_html_content'        => 'field_blockRawHTML_itemContent',
+			'video_embed'             => 'field_blockVideo_itemVideoEmbed',
+			'video_width'             => 'field_blockVideo_itemWidth',
+			'video_position'          => 'field_blockVideo_itemPosition',
+			'video_content'           => 'field_blockVideo_itemContent',
+			'heading_type'            => 'field_blockHeading_itemType_epxdfidq',
+			'heading_content'         => 'field_blockHeading_itemHeading_rabumset',
+			'poll_position'           => 'field_blockPoll_itemPosition',
+			'separator_visible'       => 'field_blockSeparator_itemIsVisible',
+			'quote_content'           => 'field_blockQuote_itemContent',
+			'quote_heading'           => 'field_blockQuote_itemHeading',
+			'graphic_position'        => 'field_blockGraphic_itemPosition',
+			'graphic_width'           => 'field_blockGraphic_itemWidth',
+			'graphic_custom_width'    => 'field_blockGraphic_itemCustomWidth',
+		],
+	];
+
+	/**
+	 * Site ID for New Haven Independent.
+	 */
+	private const SITE_ID_NEW_HAVEN_INDEPENDENT = 1;
+
 	/**
 	 * Constructor.
 	 */
-	private function __construct() {
+	public function __construct() {
 	}
 
 	/**
 	 * {@inheritDoc}
 	 */
 	public static function register_commands(): void {
-
 		WP_CLI::add_command(
-			'newspack-content-migrator newhavenindependent',
-			self::get_command_closure( 'cmd_' ),
+			'newspack-content-migrator newhavenindependent research-single-post-import',
+			self::get_command_closure( 'cmd_research_single_post_import' ),
+			[
+				'synopsis' => [
+					[
+						'type'     => 'assoc',
+						'name'     => 'json-expanded-entries',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'json-expanded-categories-news-sections',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'prod-db-name',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'prod-db-user',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'prod-db-pass',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'prod-db-host',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'prod-db-port',
+						'optional' => false,
+					],
+
+				],
+			]
+		);
+		WP_CLI::add_command(
+			'newspack-content-migrator newhavenindependent research',
+			self::get_command_closure( 'cmd_research' ),
 			[
 				'synopsis' => [
 					[
@@ -63,12 +169,414 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Main command function.
-	 *
 	 * @param array $pos_args The positional arguments.
 	 * @param array $assoc_args The associative arguments.
 	 */
-	public function cmd_( array $pos_args, array $assoc_args ): void {
+	public function cmd_research_single_post_import( array $pos_args, array $assoc_args ): void {
+		$entries_json_file    = $assoc_args['json-expanded-entries'];
+		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
+		$prod_db_name = $assoc_args['prod-db-name'];
+		$prod_db_user = $assoc_args['prod-db-user'];
+		$prod_db_pass = $assoc_args['prod-db-pass'];
+		$prod_db_host = $assoc_args['prod-db-host'];
+		$prod_db_port = $assoc_args['prod-db-port'];
+		
+		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
+
+		$asset_id = 11903556; // Delauro1
+		$asset_id = 9555531;
+		$asset_id = 10476150;
+		// $asset_image_filename = $this->get_asset_image_filename( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_filename );
+		// $asset_image_title = $this->get_asset_image_title( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_title );
+		// $asset_image_url = $this->get_asset_image_url( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_url );
+		// $asset_image_uploader = $this->get_asset_image_uploader( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_uploader );
+		// $asset_image_uploader = $this->get_asset_image_photo_credit( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_uploader );
+		// $asset_image_description = $this->get_asset_image_description( $asset_id, $prod_db );
+		// WP_CLI::print_value( $asset_image_description );
+		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+		var_dump( $asset_data );
+exit;
+
+		$entries = json_decode( file_get_contents( $entries_json_file ), true );
+		if ( ! $entries ) {
+			WP_CLI::error( 'Failed to decode entries JSON file.' );
+		}
+		$categories_news_sections = json_decode( file_get_contents( $categories_expanded_newsjson_file ), true );
+		if ( ! $categories_news_sections ) {
+			WP_CLI::error( 'Failed to decode categories JSON file.' );
+		}
+
+		foreach ( $entries as $entry ) {
+			$post_data = [
+				"newspack_migration_meta" => [
+					"legacy_id" => null,
+					"legacy_uid" => null,
+				],
+				"title" => null,
+				"content" => null,
+				"excerpt" => null,
+				"url" => null,
+				"status" => null,
+				"date_created" => null,
+				"date_modified" => null,
+				"featured_image" => [
+					"newspack_migration_meta" => [
+						"legacy_id" => null,
+					],
+					"url" => null,
+					"alt" => null,
+					"title" => null,
+					"caption" => null,
+					"description" => null,
+					"credit" => null,
+					"credit_url" => null,
+					"credit_organization" => null,
+				],
+				"author" => [
+					"newspack_migration_meta" => [
+						"legacy_id" => null,
+					],
+					"email" => null,
+					"avatar_image_url" => null,
+					"display_name" => null,
+					"first_name" => null,
+					"last_name" => null,
+					"bio" => null,
+				],
+				"bylines" => [
+					null,
+				],
+				"categories" => [
+					null,
+				],
+				"tags" => [
+					null,
+				],
+				"comment_status" => null,
+				"comments" => [
+					null,
+				],
+				"attachments" => [
+					null,
+				],
+			];
+			
+			// Meta.
+			$post_data['newspack_migration_meta'] = [
+				"legacy_id" => $entry['id'],
+				"legacy_uid" => $entry['uid'],
+			];
+			
+			// Dates.
+			// ISO 8601 timestamps.
+			$date_created = new \DateTime($entry['postDate']);
+			$post_data['date_created'] = $date_created->format('Y-m-d H:i:s');
+			$date_modified = new \DateTime($entry['dateUpdated']);
+			$post_data['date_modified'] = $date_modified->format('Y-m-d H:i:s');
+			
+			// Title.
+			$post_data['title'] = $entry['title'];
+
+			// URL.
+			$post_data['url'] = $entry['url'];
+
+			// Categories.
+			foreach ( $entry['fieldSections'] as $fieldSection ) {
+				// TODO
+				/**
+				 * TODO
+				 *  	title
+				 * 		parent
+				 * 		URL
+				 * 		legacy_id meta
+				 */
+			}
+			$post_data['categories'];
+			
+			// Tags.
+			foreach ( $entry['fieldTags'] as $fieldTag ) {
+				// TODO
+				$tag_name = $this->get_tag_by_id( $fieldTag['tagId'], $prod_db );
+			}
+			$post_data['tags'];
+
+
+			/**
+			 * 	"featured_image" => [
+			 * 		"newspack_migration_meta" => [
+			 * 			"legacy_id" => null,
+			 * 		],
+			 * 		"url" => null,
+			 * 		"alt" => null,
+			 * 		"title" => null,
+			 * 		"caption" => null,
+			 * 		"description" => null,
+			 * 		"credit" => null,
+			 * 		"credit_url" => null,
+			 * 		"credit_organization" => null,
+			 */
+
+			 // Featured image (assetId) is first blockImage in matrixLede subarray.
+			$asset_id = $this->get_itemAsset_from_matrixLede( $entry, $prod_db );
+			$asset_image_title = $this->get_asset_image_title( $asset_id, $prod_db );
+			$asset_image_url = $this->get_asset_image_url( $asset_id, $prod_db );
+			$asset_image_uploader = $this->get_asset_image_uploader( $asset_id, $prod_db );
+			$asset_image_credit = $this->get_asset_image_photo_credit( $asset_id, $prod_db );
+			$asset_image_description = $this->get_asset_image_description( $asset_id, $prod_db );
+
+
+
+			$d=1;
+
+			// $this->import_entry( $post_data );
+		}
+
+		/**
+		 * Redirections:
+		 * 		entries
+		 * 		categories
+		 */
+	}
+
+	/**
+	 * Featured image is found in entry['matrixLede'], in the first blockImage type, and fields itemAsset array.
+	 * 
+	 * 	"matrixLede": {
+	 * 		"11903606": {
+	 * 			"type": "blockImage",
+	 * 			"enabled": true,
+	 * 			"collapsed": false,
+	 * 			"fields": {
+	 * 				"itemHelp": null,
+	 * 				"itemAsset": [
+	 * 					11903556
+	 * 				]
+	 * 			}
+	 * 		}
+	 * 	}
+	 * 
+	 * @param array $entry
+	 * @param \wpdb $prod_db
+	 */
+	public function get_itemAsset_from_matrixLede( array $entry, wpdb $prod_db ): ?int {
+		if ( ! isset( $entry['matrixLede'] ) ) {
+			return null;
+		}
+		foreach ( $entry['matrixLede'] as $block ) {
+			if ( 'blockImage' === $block['type'] ) {
+				
+				// TODO handle multiple itemAssets.
+
+				// Return first itemAsset.
+				return $block['fields']['itemAsset'][0];
+			}
+		}
+		return null;
+	}
+
+	public function get_asset_image_url( int $asset_id, wpdb $prod_db ): ?string {
+		// Query the asset info from the prod db.
+		$query = $prod_db->prepare(
+			'SELECT filename, dateCreated, folderId FROM assets WHERE id = %d LIMIT 1',
+			$asset_id
+		);
+		$asset = $prod_db->get_row( $query );
+
+		if ( ! $asset || empty( $asset->filename ) || empty( $asset->dateCreated ) || empty( $asset->folderId ) ) {
+			return null;
+		}
+
+		// Get the folder name (slug) from volumefolders.
+		$folder_query = $prod_db->prepare(
+			'SELECT name FROM volumefolders WHERE id = %d LIMIT 1',
+			$asset->folderId
+		);
+		$folder_name = $prod_db->get_var( $folder_query );
+
+		if ( empty( $folder_name ) ) {
+			return null;
+		}
+
+		// Parse dateCreated to get year and month.
+		$date = new \DateTime( $asset->dateCreated );
+		$year = $date->format( 'Y' );
+		$month = $date->format( 'm' );
+
+		// Build the URL as per the discovered pattern.
+		$url = sprintf(
+			'https://d2f1dfnoetc03v.cloudfront.net/Images/siteNHI/%s/%s/%s/%s',
+			$year,
+			$month,
+			$folder_name,
+			$asset->filename
+		);
+
+		return $url;
+	}
+	/**
+	 * 
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return array Array with asset image data with following keys. {
+	 * 	int 'id'               Asset ID.
+	 * 	string 'date_created'  Timestamp.
+	 * 	string 'url'           Public URL.
+	 * 	string 'filename'      File name.
+	 * 	string 'title'         Title field.
+	 * 	string 'description'   Description field.
+	 * 	string 'credit'        Credit field.
+	 * 	string 'uploader'      Uploader full name
+	 * }
+	 */
+	public function get_asset_image_data( int $asset_id, wpdb $prod_db ): array {
+		// Fetch all asset data in one go.
+		$query = $prod_db->prepare(
+			'SELECT a.id, a.dateCreated, a.filename, a.folderId, c.title, c.field_fieldBlurb, c.field_fieldCredit, u.fullName
+			FROM assets a
+			LEFT JOIN content c ON c.elementId = a.id AND c.siteId = %d
+			LEFT JOIN users u ON u.id = a.uploaderId
+			WHERE a.id = %d
+			LIMIT 1',
+			self::SITE_ID_NEW_HAVEN_INDEPENDENT,
+			$asset_id
+		);
+		$asset = $prod_db->get_row( $query );
+		if ( ! $asset ) {
+			return [];
+		}
+
+		// Get the folder name (slug) from volumefolders.
+		$folder_name = null;
+		if ( ! empty( $asset->folderId ) ) {
+			$folder_query = $prod_db->prepare(
+				'SELECT name FROM volumefolders WHERE id = %d LIMIT 1',
+				$asset->folderId
+			);
+			$folder_name = $prod_db->get_var( $folder_query );
+		}
+
+		// Parse dateCreated to get year and month.
+		$date_created = $asset->dateCreated;
+		$year = null;
+		$month = null;
+		if ( ! empty( $date_created ) ) {
+			$date = new \DateTime( $date_created );
+			$year = $date->format( 'Y' );
+			$month = $date->format( 'm' );
+		}
+
+		// Build the URL as per the discovered pattern.
+		$url = null;
+		if ( $year && $month && $folder_name && ! empty( $asset->filename ) ) {
+			$url = sprintf(
+				'https://d2f1dfnoetc03v.cloudfront.net/Images/siteNHI/%s/%s/%s/%s',
+				$year,
+				$month,
+				$folder_name,
+				$asset->filename
+			);
+		}
+
+		return [
+			'id'          => $asset->id,
+			'date_created'=> $date_created,
+			'url'         => $url,
+			'filename'    => $asset->filename,
+			'title'       => $asset->title,
+			'description' => $asset->field_fieldBlurb,
+			'credit'      => $asset->field_fieldCredit,
+			'uploader'    => $asset->fullName,
+		];
+	}
+
+	public function get_asset_image_filename( int $asset_id, wpdb $prod_db ): ?string {
+		// Fetch the image filename from the assets table.
+		$query = $prod_db->prepare(
+			'SELECT filename FROM assets WHERE id = %d LIMIT 1',
+			$asset_id
+		);
+		$filename = $prod_db->get_var( $query );
+		return $filename ?: null;
+	}
+
+	public function get_asset_image_title( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the image title from the content table.
+		$query = $prod_db->prepare(
+			'SELECT title FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$title = $prod_db->get_var( $query );
+		return $title ?: null;
+	}
+	
+	public function get_asset_image_description( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the image description from the content table.
+		$query = $prod_db->prepare(
+			'SELECT field_fieldBlurb FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$description = $prod_db->get_var( $query );
+		return $description ?: null;
+	}
+
+	public function get_asset_image_photo_credit( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the photo credit from the content table.
+		$query = $prod_db->prepare(
+			'SELECT field_fieldCredit FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$credit = $prod_db->get_var( $query );
+		return $credit ?: null;
+	}
+	
+	public function get_asset_image_uploader( int $asset_id, wpdb $prod_db ): ?string {
+
+		// Fetch the uploader's full name.
+		$image_uploader_full_name = null;
+		$uploader_query = $prod_db->prepare(
+			'SELECT fullName FROM users WHERE id = (SELECT uploaderId FROM assets WHERE id = %d LIMIT 1) LIMIT 1',
+			$asset_id
+		);
+		$image_uploader_full_name = $prod_db->get_var( $uploader_query );
+
+		return $image_uploader_full_name;
+	}
+
+	/**
+	 * Get tag by ID.
+	 * 
+	 * @param int $tag_id The tag ID.
+	 * @param \wpdb $prod_db The production database connection.
+	 * @return string|null The tag name if found, null otherwise.
+	 */
+	public function get_tag_by_id( int $tag_id, wpdb $prod_db ): ?string {
+		$query = $prod_db->prepare(
+			'SELECT title FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$tag_id,
+			self::SITE_ID_NEW_HAVEN_INDEPENDENT
+		);
+		
+		$result = $prod_db->get_var( $query );
+		return $result ?: null;
+	}
+
+	/**
+	 * @param array $pos_args The positional arguments.
+	 * @param array $assoc_args The associative arguments.
+	 */
+	public function cmd_research( array $pos_args, array $assoc_args ): void {
 		$prod_db_name = $assoc_args['prod-db-name'];
 		$prod_db_user = $assoc_args['prod-db-user'];
 		$prod_db_pass = $assoc_args['prod-db-pass'];
@@ -313,62 +821,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		return $results;
 	}
-
-	/**
-	 * Field mappings for different content types.
-	 */
-	private const FIELD_MAPPINGS = [
-		'main_content' => [
-			'text_content'            => 'field_blockText_itemContent',
-			'image_content'           => 'field_blockImage_itemContent',
-			'image_position'          => 'field_blockImage_itemPosition',
-			'image_width'             => 'field_blockImage_itemWidth',
-			'external_image_heading'  => 'field_blockExternalImage_itemHeading',
-			'external_image_content'  => 'field_blockExternalImage_itemContent',
-			'external_image_position' => 'field_blockExternalImage_itemPosition',
-			'external_image_width'    => 'field_blockExternalImage_itemWidth',
-			'external_image_url'      => 'field_blockExternalImage_itemURL',
-			'raw_html_content'        => 'field_blockRawHTML_itemContent',
-			'video_embed'             => 'field_blockVideo_itemVideoEmbed',
-			'video_width'             => 'field_blockVideo_itemWidth',
-			'video_position'          => 'field_blockVideo_itemPosition',
-			'video_content'           => 'field_blockVideo_itemContent',
-			'heading_type'            => 'field_blockHeading_itemType',
-			'heading_content'         => 'field_blockHeading_itemHeading',
-			'poll_position'           => 'field_blockPoll_itemPosition',
-			'separator_visible'       => 'field_blockSeparator_itemIsVisible',
-			'quote_content'           => 'field_blockQuote_itemContent',
-			'quote_heading'           => 'field_blockQuote_itemHeading',
-			'graphic_position'        => 'field_blockGraphic_itemPosition',
-			'graphic_width'           => 'field_blockGraphic_itemWidth',
-			'graphic_custom_width'    => 'field_blockGraphic_itemCustomWidth',
-		],
-		'lede'         => [
-			'text_content'            => 'field_blockText_itemContent',
-			'image_content'           => 'field_blockImage_itemContent',
-			'image_position'          => 'field_blockImage_itemPosition',
-			'image_width'             => 'field_blockImage_itemWidth',
-			'external_image_heading'  => 'field_blockExternalImage_itemHeading',
-			'external_image_content'  => 'field_blockExternalImage_itemContent',
-			'external_image_position' => 'field_blockExternalImage_itemPosition',
-			'external_image_width'    => 'field_blockExternalImage_itemWidth',
-			'external_image_url'      => 'field_blockExternalImage_itemURL',
-			'raw_html_content'        => 'field_blockRawHTML_itemContent',
-			'video_embed'             => 'field_blockVideo_itemVideoEmbed',
-			'video_width'             => 'field_blockVideo_itemWidth',
-			'video_position'          => 'field_blockVideo_itemPosition',
-			'video_content'           => 'field_blockVideo_itemContent',
-			'heading_type'            => 'field_blockHeading_itemType_epxdfidq',
-			'heading_content'         => 'field_blockHeading_itemHeading_rabumset',
-			'poll_position'           => 'field_blockPoll_itemPosition',
-			'separator_visible'       => 'field_blockSeparator_itemIsVisible',
-			'quote_content'           => 'field_blockQuote_itemContent',
-			'quote_heading'           => 'field_blockQuote_itemHeading',
-			'graphic_position'        => 'field_blockGraphic_itemPosition',
-			'graphic_width'           => 'field_blockGraphic_itemWidth',
-			'graphic_custom_width'    => 'field_blockGraphic_itemCustomWidth',
-		],
-	];
 
 	/**
 	 * Get the SQL query for retrieving content blocks.
