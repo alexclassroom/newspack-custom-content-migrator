@@ -183,21 +183,65 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		
 		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
-		$asset_id = 11903556; // Delauro1
-		$asset_id = 9555531;
-		$asset_id = 10476150;
-		// $asset_image_filename = $this->get_asset_image_filename( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_filename );
-		// $asset_image_title = $this->get_asset_image_title( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_title );
-		// $asset_image_url = $this->get_asset_image_url( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_url );
-		// $asset_image_uploader = $this->get_asset_image_uploader( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_uploader );
-		// $asset_image_uploader = $this->get_asset_image_photo_credit( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_uploader );
-		// $asset_image_description = $this->get_asset_image_description( $asset_id, $prod_db );
-		// WP_CLI::print_value( $asset_image_description );
+		
+		WP_CLI::print_value( '--- LEDE FEATURED IMAGE  -----------------------------' );
+		/**
+		 * Featured image data is located in two places in Craft CMS:
+		 *  - asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
+		 *    => this info is retrieved by `get_asset_image_data`:
+		 * 		asset "id"               	=> postmeta "newspack_migration_asset_id"
+		 * 		asset "url"           		=> postmeta "newspack_migration_asset_url"
+		 * 		                    		=> Attachment "slug"
+		 * 		asset "date_created"  		=> Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+		 * 		asset "filename"      		=> Attachment "newspack_migration_asset_filename"
+		 * 		asset "Title" 				=> Attachment "Title"
+		 * 		asset "Credit" 				=> Attachment "Credit"
+		 * 		asset "Description" 		=> Attachment "Description"
+		 * 		asset "Uploader" 			=> postmetameta "newspack_migration_asset_uploader"
+		 * 		asset "width" 				=> postmeta "newspack_migration_asset_width"
+		 * 		asset "height" 				=> postmeta "newspack_migration_asset_height"
+		 *  - lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
+		 *    => this info is retrieved by `_________`:
+		 * 		lede "Photo Caption" 		=> Attachment "Caption"
+		 */
+		
+		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
+		$entry = $entry_data[0];
+		
+		$author_id = $entry_data['authorId'];
+		$author_data = $this->get_author_data( $author_id, $prod_db );
+		WP_CLI::print_value( 'author_data: ' . json_encode( $author_data ) );
+exit;
+		
+		$asset_data = $this->get_matrixLede_itemAsset_data( $entry );
+		$asset_id = $asset_data['id'];
+		$asset_item_content = $asset_data['itemContent'];
+		
+		// $asset_id = 11903556; // Delauro1 https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI
+		// $asset_id = 9555531; // https://www.newhavenindependent.org/admin/assets/edit/9555531-JR-Whirl-Pak_2022-01-03-012346_dxav?site=siteNHI
+		// $asset_id = 10476150; // https://www.newhavenindependent.org/admin/assets/edit/10476150-Orange-tikka?site=siteNHI
+
+		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+		WP_CLI::print_value( '---> from asset data' );
+		WP_CLI::print_value( 'asset_id: ' . $asset_data['id'] );
+		WP_CLI::print_value( 'asset_date_created: ' . $asset_data['date_created'] );
+		WP_CLI::print_value( 'asset_url: ' . $asset_data['url'] );
+		WP_CLI::print_value( 'asset_filename: ' . $asset_data['filename'] );
+		WP_CLI::print_value( 'asset_title: ' . $asset_data['title'] );
+		WP_CLI::print_value( 'asset_description: ' . $asset_data['description'] );
+		WP_CLI::print_value( 'asset_credit: ' . $asset_data['credit'] );
+		WP_CLI::print_value( 'asset_uploader: ' . $asset_data['uploader'] );
+		WP_CLI::print_value( 'asset_width: ' . $asset_data['width'] );
+		WP_CLI::print_value( 'asset_height: ' . $asset_data['height'] );
+		WP_CLI::print_value( '---> from matrixLede_itemAsset_data' );
+		WP_CLI::print_value( 'asset_item_content: ' . $asset_item_content );
+		
+exit;
+		WP_CLI::print_value( '--- TEST IMAGE DATA -----------------------------' );
+		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+		var_dump( $asset_data );
+		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+		var_dump( $asset_data );
 		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
 		var_dump( $asset_data );
 exit;
@@ -305,31 +349,40 @@ exit;
 			}
 			$post_data['tags'];
 
-
 			/**
-			 * 	"featured_image" => [
-			 * 		"newspack_migration_meta" => [
-			 * 			"legacy_id" => null,
-			 * 		],
-			 * 		"url" => null,
-			 * 		"alt" => null,
-			 * 		"title" => null,
-			 * 		"caption" => null,
-			 * 		"description" => null,
-			 * 		"credit" => null,
-			 * 		"credit_url" => null,
-			 * 		"credit_organization" => null,
+			 * Featured image data is located in two places in Craft CMS:
+			 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
+			 *    => this info is retrieved by `get_asset_image_data`:
+			 * 		asset "id"               	=> postmeta "newspack_migration_asset_id"
+			 * 		asset "url"           		=> postmeta "newspack_migration_asset_url"
+			 * 		                    		=> Attachment "slug"
+			 * 		asset "date_created"  		=> Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+			 * 		asset "filename"      		=> Attachment "newspack_migration_asset_filename"
+			 * 		asset "Title" 				=> Attachment "Title"
+			 * 		asset "Credit" 				=> Attachment "Credit"
+			 * 		asset "Description" 		=> Attachment "Description"
+			 * 		asset "Uploader" 			=> postmetameta "newspack_migration_asset_uploader"
+			 * 		asset "width" 				=> postmeta "newspack_migration_asset_width"
+			 * 		asset "height" 				=> postmeta "newspack_migration_asset_height"
+			 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
+			 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
+			 * 		lede "Photo Caption" 		=> Attachment "Caption"
 			 */
-
-			 // Featured image (assetId) is first blockImage in matrixLede subarray.
-			$asset_id = $this->get_itemAsset_from_matrixLede( $entry, $prod_db );
-			$asset_image_title = $this->get_asset_image_title( $asset_id, $prod_db );
-			$asset_image_url = $this->get_asset_image_url( $asset_id, $prod_db );
-			$asset_image_uploader = $this->get_asset_image_uploader( $asset_id, $prod_db );
-			$asset_image_credit = $this->get_asset_image_photo_credit( $asset_id, $prod_db );
-			$asset_image_description = $this->get_asset_image_description( $asset_id, $prod_db );
-
-
+			$asset_data = $this->get_matrixLede_itemAsset_data( $entry );
+			$asset_id = $asset_data['id'];
+			$asset_item_content = $asset_data['itemContent'];
+			$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+			$asset_date_created = $asset_data['date_created'];
+			$asset_url = $asset_data['url'];
+			$asset_filename = $asset_data['filename'];
+			$asset_title = $asset_data['title'];
+			$asset_description = $asset_data['description'];
+			$asset_credit = $asset_data['credit'];
+			$asset_uploader = $asset_data['uploader'];
+			$asset_width = $asset_data['width'];
+			$asset_height = $asset_data['height'];
+			$asset_item_content = $asset_data['itemContent'];
+	
 
 			$d=1;
 
@@ -345,7 +398,7 @@ exit;
 
 	/**
 	 * Featured image is found in entry['matrixLede'], in the first blockImage type, and fields itemAsset array.
-	 * 
+	 * e.g.
 	 * 	"matrixLede": {
 	 * 		"11903606": {
 	 * 			"type": "blockImage",
@@ -355,15 +408,20 @@ exit;
 	 * 				"itemHelp": null,
 	 * 				"itemAsset": [
 	 * 					11903556
-	 * 				]
+	 * 				],
+	 * 				"itemContent": "Photo Caption"
 	 * 			}
 	 * 		}
 	 * 	}
 	 * 
 	 * @param array $entry
-	 * @param \wpdb $prod_db
+	 * 
+	 * @return ?array Array with some matrixLede > blockImage data. {
+	 * 	int 'id'          This corresponds to the asset ID.
+	 * 	int 'itemContent' This corresponds to the "Photo Caption" field.
+	 * }
 	 */
-	public function get_itemAsset_from_matrixLede( array $entry, wpdb $prod_db ): ?int {
+	public function get_matrixLede_itemAsset_data( array $entry ): ?array {
 		if ( ! isset( $entry['matrixLede'] ) ) {
 			return null;
 		}
@@ -371,14 +429,30 @@ exit;
 			if ( 'blockImage' === $block['type'] ) {
 				
 				// TODO handle multiple itemAssets.
+				$asset_id = $block['fields']['itemAsset'][0];
+				$item_content = ( isset( $block['fields']['itemContent'] ) && ! empty( $block['fields']['itemContent'] ) )
+					? $block['fields']['itemContent']
+					: null;
 
 				// Return first itemAsset.
-				return $block['fields']['itemAsset'][0];
+				return [
+					'id'          => $asset_id,
+					'itemContent' => $item_content,
+				];
 			}
 		}
+
 		return null;
 	}
 
+	/**
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return string|null
+	 */
 	public function get_asset_image_url( int $asset_id, wpdb $prod_db ): ?string {
 		// Query the asset info from the prod db.
 		$query = $prod_db->prepare(
@@ -418,6 +492,10 @@ exit;
 
 		return $url;
 	}
+
+	public function get_author_data( int $asset_id, wpdb $prod_db ): array {
+	}
+
 	/**
 	 * 
 	 * 
@@ -425,6 +503,8 @@ exit;
 	 * @param \wpdb $prod_db
 	 * @return array Array with asset image data with following keys. {
 	 * 	int 'id'               Asset ID.
+	 * 	int 'width'            Asset width.
+	 * 	int 'height'           Asset height.
 	 * 	string 'date_created'  Timestamp.
 	 * 	string 'url'           Public URL.
 	 * 	string 'filename'      File name.
@@ -437,7 +517,7 @@ exit;
 	public function get_asset_image_data( int $asset_id, wpdb $prod_db ): array {
 		// Fetch all asset data in one go.
 		$query = $prod_db->prepare(
-			'SELECT a.id, a.dateCreated, a.filename, a.folderId, c.title, c.field_fieldBlurb, c.field_fieldCredit, u.fullName
+			'SELECT a.id, a.dateCreated, a.filename, a.folderId, a.width, a.height, c.title, c.field_fieldBlurb, c.field_fieldCredit, u.fullName
 			FROM assets a
 			LEFT JOIN content c ON c.elementId = a.id AND c.siteId = %d
 			LEFT JOIN users u ON u.id = a.uploaderId
@@ -485,6 +565,8 @@ exit;
 
 		return [
 			'id'          => $asset->id,
+			'width'       => $asset->width,
+			'height'      => $asset->height,
 			'date_created'=> $date_created,
 			'url'         => $url,
 			'filename'    => $asset->filename,
@@ -505,6 +587,14 @@ exit;
 		return $filename ?: null;
 	}
 
+	/**
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return string|null
+	 */
 	public function get_asset_image_title( int $asset_id, wpdb $prod_db ): ?string {
 		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
 		// Fetch the image title from the content table.
@@ -517,6 +607,14 @@ exit;
 		return $title ?: null;
 	}
 	
+	/**
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return string|null
+	 */
 	public function get_asset_image_description( int $asset_id, wpdb $prod_db ): ?string {
 		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
 		// Fetch the image description from the content table.
@@ -529,6 +627,14 @@ exit;
 		return $description ?: null;
 	}
 
+	/**
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return string|null
+	 */
 	public function get_asset_image_photo_credit( int $asset_id, wpdb $prod_db ): ?string {
 		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
 		// Fetch the photo credit from the content table.
@@ -541,6 +647,14 @@ exit;
 		return $credit ?: null;
 	}
 	
+	/**
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int $asset_id
+	 * @param \wpdb $prod_db
+	 * @return string|null
+	 */
 	public function get_asset_image_uploader( int $asset_id, wpdb $prod_db ): ?string {
 
 		// Fetch the uploader's full name.
