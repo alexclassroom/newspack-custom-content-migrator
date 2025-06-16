@@ -584,6 +584,11 @@ class NNECategoryMap {
 		],
 	];
 
+	/**
+	 * Map of internal category names to new category names and tags.
+	 *
+	 * @var array[] $daily_hampshire_gazette_map Map of legacy category names to new category names and tags.
+	 */
 	protected array $daily_hampshire_gazette_map = [
 		[
 			'name'       => 'Arts',
