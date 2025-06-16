@@ -934,22 +934,6 @@ class NNEMigrator implements RegisterCommandInterface {
 				$post_title   = $image_object->DocumentName;
 				$post_content = $image_object->filecaption;
 
-				if ( $image_helper->exists_in_media_library() ) {
-					$exif_data = wp_read_image_metadata( $image_helper->get_full_local_file_path() );
-
-					if ( $exif_data ) {
-						$trimmed_title = trim( $exif_data['title'] );
-						if ( ! empty( $trimmed_title ) && ! is_numeric( sanitize_title( $exif_data['title'] ) ) ) {
-							$post_title = $trimmed_title;
-						}
-
-						$trimmed_content = trim( $exif_data['caption'] );
-						if ( ! empty( $trimmed_content ) ) {
-							$post_content = $trimmed_content;
-						}
-					}
-				}
-
 				$import_data = [
 					'post_title'   => $post_title,
 					'post_content' => $post_content,
@@ -1001,7 +985,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			$image_helper->get_best_path(),
 			$image_object->DocumentName, // phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
 			$image_object->filecaption,
-			null,
+			$image_object->filecaption,
 			$image_object->filecaption,
 			0,
 			$attachment_meta,
