@@ -548,7 +548,7 @@ class NNEMigrator implements RegisterCommandInterface {
 					}
 				}
 
-				$images_block = $this->block_generator->get_gallery( $attachment_ids );
+				$images_block = $this->block_generator->get_jetpack_slideshow( $attachment_ids );
 			}
 
 			if ( ! empty( $images_block ) ) {
