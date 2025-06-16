@@ -100,6 +100,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'     => 'assoc',
+						'name'     => 'json-expanded-users',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
 						'name'     => 'json-expanded-categories-news-sections',
 						'optional' => false,
 					],
@@ -174,6 +179,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_research_single_post_import( array $pos_args, array $assoc_args ): void {
 		$entries_json_file    = $assoc_args['json-expanded-entries'];
+		$users_json_file    = $assoc_args['json-expanded-users'];
 		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
 		$prod_db_name = $assoc_args['prod-db-name'];
 		$prod_db_user = $assoc_args['prod-db-user'];
@@ -205,12 +211,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 * 		lede "Photo Caption" 		=> Attachment "Caption"
 		 */
 		
+		$users_data = json_decode( file_get_contents( $users_json_file ), true );
 		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
 		$entry = $entry_data[0];
 		
-		$author_id = $entry_data['authorId'];
-		$author_data = $this->get_author_data( $author_id, $prod_db );
-		WP_CLI::print_value( 'author_data: ' . json_encode( $author_data ) );
+		$author_id = $entry['authorId'] ?? null;
+		$author_id = 58453; // e.g. "Brian Slattery" has avatar image and bio.
+		$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
+		var_dump( $author_data );
+exit;
+		$photo_id = $author_data['avatar_photo_id'] ?? null;
+		$photo_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
+		WP_CLI::print_value( sprintf( 'photo_id: %s photo_url: %s', $photo_id, $photo_url ) );
 exit;
 		
 		$asset_data = $this->get_matrixLede_itemAsset_data( $entry );
@@ -383,6 +395,9 @@ exit;
 			$asset_height = $asset_data['height'];
 			$asset_item_content = $asset_data['itemContent'];
 	
+			// Author data, including avatar image URL.
+			$author_id = $entry['authorId'] ?? null;
+			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
 
 			$d=1;
 
@@ -493,7 +508,112 @@ exit;
 		return $url;
 	}
 
-	public function get_author_data( int $asset_id, wpdb $prod_db ): array {
+	/**
+	 * 
+	 * 
+	 * @param int $user_id
+	 * @param \wpdb $prod_db
+	 * @return ?array Array with author data with following keys. {
+	 * 	int 'id'                   Author ID.
+	 * 	?string 'uid'              Author UID.
+	 * 	?string 'email'            Author email.
+	 * 	?string 'username'         Username.
+	 * 	?string 'display_name'     Display name.
+	 * 	?string 'first_name'       First name.
+	 * 	?string 'last_name'        Last name.
+	 * 	?string 'bio'              Bio.
+	 * 	?string 'avatar_photo_id'  Avatar image asset ID.
+	 * 	?string 'avatar_image_url' Avatar image URL.
+	 * }
+	 */
+	public function get_user_data( int $user_id, array $users_data, wpdb $prod_db ): array {
+		// Search for author in users_data.
+		$author_data = null;
+		foreach ( $users_data as $user ) {
+			if ( $user_id === $user['id'] ) {
+				$photo_id = $user['photoId'] ?? null;
+				$avatar_image_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
+
+				return [
+					'id'               => $user['id'],
+					'uid'              => $user['uid'],
+					'email'            => $user['email'] ?? null,
+					'username'         => $user['username'] ?? null,
+					'display_name'     => $user['fullName'] ?? null,
+					'first_name'       => $user['firstName'] ?? null,
+					'last_name'        => $user['lastName'] ?? null,
+					'bio'              => $user['userBio'] ?? null,
+					'avatar_photo_id'  => $user['photoId'] ?? null,
+					'avatar_image_url' => $avatar_image_url,
+				];
+			}
+		}
+		return null;
+	}
+
+	public function get_author_photo_url_by_id( int $asset_id, wpdb $prod_db ): ?string {
+		// Get asset row.
+		$query = $prod_db->prepare(
+			'SELECT id, filename, folderId, volumeId FROM assets WHERE id = %d LIMIT 1',
+			$asset_id
+		);
+		$asset = $prod_db->get_row( $query );
+		if ( ! $asset ) {
+			return null;
+		}
+		$folder_id = $asset->folderId;
+		$filename = $asset->filename;
+		$volume_id = $asset->volumeId;
+
+		// Walk up the volumefolders tree to build the path, but stop before the root (parentId == null).
+		$segments = [];
+		$current_folder_id = $folder_id;
+		while ( $current_folder_id ) {
+			$folder_query = $prod_db->prepare(
+				'SELECT id, parentId, name FROM volumefolders WHERE id = %d LIMIT 1',
+				$current_folder_id
+			);
+			$folder = $prod_db->get_row( $folder_query );
+			if ( ! $folder ) {
+				break;
+			}
+			// Stop before including the root folder (parentId == null)
+			if ( is_null( $folder->parentId ) ) {
+				break;
+			}
+			array_unshift( $segments, $folder->name );
+			$current_folder_id = $folder->parentId;
+		}
+
+		// Get the root volume name for the prefix.
+		$volume_query = $prod_db->prepare(
+			'SELECT name FROM volumes WHERE id = %d LIMIT 1',
+			$volume_id
+		);
+		$volume_name = $prod_db->get_var( $volume_query );
+		// Map volume name to key prefix if needed.
+		$prefix = null;
+		if ( $volume_name === 'User-Uploaded Content' ) {
+			$prefix = 'UserContent';
+		} elseif ( $volume_name === 'Images' ) {
+			$prefix = 'siteNHI';
+		} else {
+			$prefix = $volume_name;
+		}
+
+		// Build the key.
+		$key = $prefix;
+		if ( ! empty( $segments ) ) {
+			$key .= '/' . implode( '/', $segments );
+		}
+		$key .= '/' . $filename;
+
+		$url = sprintf(
+			'https://d2f1dfnoetc03v.cloudfront.net/%s',
+			$key
+		);
+
+		return $url;
 	}
 
 	/**
