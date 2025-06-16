@@ -881,6 +881,364 @@ class NNECategoryMap {
 	];
 
 	/**
+	 * Map of internal category names to new category names and tags.
+	 *
+	 * @var array[] $greenfield_recorder_map Map of legacy category names to new category names and tags.
+	 */
+	protected array $greenfield_recorder_map = [
+		[
+			'name'       => 'Arts',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Faith & Religion',
+						],
+						[
+							'name' => 'Food',
+						],
+						[
+							'name' => 'Home & Garden',
+						],
+						[
+							'name' => 'Outdoors',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Business',
+						],
+						[
+							'name' => 'Community Briefs',
+						],
+						[
+							'name' => 'Police-Fire-Courts',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion',
+			'categories' => [
+				[
+					'name'     => 'Opinion',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Columns',
+						],
+						[
+							'name' => 'Editorials',
+						],
+						[
+							'name' => 'Letters',
+						],
+						[
+							'name' => 'Columns',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'High School & Youth',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Books',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Books',
+			],
+		],
+		[
+			'name'       => 'Life',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Life/Faith',
+			'categories' => [
+				[
+					'name'     => 'Faith & Religion',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Life/Food',
+			'categories' => [
+				[
+					'name'     => 'Food',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Life/Home-Garden',
+			'categories' => [
+				[
+					'name'     => 'Home & Garden',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Life/Milestones',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Life/Outdoors',
+			'categories' => [
+				[
+					'name'     => 'Outdoors',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Business',
+			'categories' => [
+				[
+					'name'     => 'Business',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Community-Bulletin',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Local',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Police-Courts',
+			'categories' => [
+				[
+					'name'     => 'Police-Fire-Courts',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/State',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/World',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Cartoons',
+			'categories' => [
+				[
+					'name'     => 'Opinion',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Columns',
+			'categories' => [
+				[
+					'name'     => 'Columns',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Columns',
+			'categories' => [
+				[
+					'name'     => 'Columns',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Editorials',
+			'categories' => [
+				[
+					'name'     => 'Editorials',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Letters',
+			'categories' => [
+				[
+					'name'     => 'Letters',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Richies-Top-40',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/College',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/Columns',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/Community',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/High-School',
+			'categories' => [
+				[
+					'name'     => 'High School & Youth',
+					'parent'   => 'Sports',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/Professional',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+	];
+
+	/**
 	 * Helper fucnction to add categories and tags to a post based on the mapping provided by the publisher.
 	 *
 	 * @param string|NNEPublisherEnum $publisher The publisher from which to retrieve the category map.
@@ -1006,6 +1364,7 @@ class NNECategoryMap {
 			NNEPublisherEnum::ATHOL_DAILY_NEWS => ( new self() )->athol_daily_news_map,
 			NNEPublisherEnum::CONCORD_MONITOR => ( new self() )->concord_monitor_map,
 			NNEPublisherEnum::DAILY_HAMPSHIRE => ( new self() )->daily_hampshire_gazette_map,
+			NNEPublisherEnum::GREENFIELD_RECORDER => ( new self() )->greenfield_recorder_map,
 			default => [],
 		};
 	}
