@@ -22,6 +22,15 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	public const NHI_TIMEZONE = 'America/New_York';
 
 	/**
+	 * All possible comment status values in the prod db.
+	 */
+	public const COMMENT_STATUSES = [
+		'approved',
+		'trashed',
+		'spam',
+	];
+
+	/**
 	 * Field mappings for different content types.
 	 */
 	private const FIELD_MAPPINGS = [
@@ -198,10 +207,12 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$entry = $entry_data[0];
 
 		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
-		$comments = $this->get_entry_comments( $entry['id'], $prod_db );
-		$entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
+		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
+		// $entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
+		// $comments = $this->get_entry_comments( $entry_id, $prod_db );
+		$entry_id = 8282206; // this example has flagged comment
 		$comments = $this->get_entry_comments( $entry_id, $prod_db );
-		// var_dump( $comments );
+		var_dump( $comments );
 		foreach ( $comments as $comment ) {
 			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
 				// $comment_date_converted = $this->convert_server_time_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
@@ -441,6 +452,7 @@ exit;
 			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
 
 			// Comments.
+			self::COMMENT_STATUSES;
 			$comments = $this->get_entry_comments( $entry['id'], $prod_db );
 
 			$d=1;
@@ -948,8 +960,17 @@ exit;
 	 *   - comment_date: string The value of comments_comments.commentDate, which is the timestamp shown on the frontend (in UTC, convert to local time for display). Other date fields exist in the DB.
 	 *   - status: string
 	 *   - user_id: int|null
+	 *   - flagged: bool Whether the comment is flagged.
 	 */
 	public function get_entry_comments( int $entry_id, wpdb $prod_db ): array {
+		// Fetch all flagged comment IDs for this entry in one query.
+		$flagged_query = $prod_db->prepare(
+			'SELECT commentId FROM comments_flags WHERE commentId IN (SELECT id FROM comments_comments WHERE ownerId = %d)',
+			$entry_id
+		);
+		$flagged_ids = $prod_db->get_col( $flagged_query );
+		$flagged_set = array_flip( $flagged_ids ); // For fast lookup.
+
 		$query = $prod_db->prepare(
 			'SELECT id, name, comment, commentDate, status, userId FROM comments_comments WHERE ownerId = %d ORDER BY commentDate ASC',
 			$entry_id
@@ -972,7 +993,6 @@ exit;
 				// For anonymous comments, use the name field if present.
 				$author_name = $row->name ? $row->name : null;
 			}
-			
 			// Convert the comment date to the NHI timezone.
 			$comment_date = $row->commentDate ? date('Y-m-d H:i:s', strtotime($row->commentDate)) : null;
 			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_server_time_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
@@ -985,6 +1005,7 @@ exit;
 				'comment_date'    => $comment_date_converted,
 				'status'          => $row->status,
 				'user_id'         => $row->userId ? (int) $row->userId : null,
+				'flagged'         => isset($flagged_set[$row->id]),
 			];
 		}
 		return $comments;
