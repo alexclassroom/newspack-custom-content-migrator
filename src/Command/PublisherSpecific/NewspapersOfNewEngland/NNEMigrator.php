@@ -597,10 +597,29 @@ class NNEMigrator implements RegisterCommandInterface {
 				wp_set_post_categories( $post_id, [ intval( $uncategorized ) ] );
 			}
 		} else {
-			$post_categories = array_filter( $post_categories, fn( $term ) => 'uncategorized' !== $term->slug );
+			$uncategorized_category = null;
+
+			foreach ( $post_categories as $index => $post_category ) {
+				if ( 'uncategorized' === $post_category->slug ) {
+					$uncategorized_category = $post_category;
+					unset( $post_categories[ $index ] );
+					break;
+				}
+			}
 
 			if ( ! empty( $post_categories ) ) {
+				$post_categories = array_values( $post_categories ); // Reset keys to start from 0.
 				update_post_meta( $post_id, '_yoast_wpseo_primary_category', $post_categories[0]->term_id );
+
+				if ( ! empty( $uncategorized_category ) ) {
+					$this->wpdb->delete(
+						$this->wpdb->term_relationships,
+						[
+							'object_id'        => $post_id,
+							'term_taxonomy_id' => $uncategorized_category->term_taxonomy_id,
+						]
+					);
+				}
 			}
 		}
 
