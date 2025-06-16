@@ -31,6 +31,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	];
 
 	/**
+	 * CDN asset hostname.
+	 */
+	public const CDN_ASSET_HOSTNAME = 'd2f1dfnoetc03v.cloudfront.net';
+
+	/**
 	 * Field mappings for different content types.
 	 */
 	private const FIELD_MAPPINGS = [
@@ -92,18 +97,12 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	private const SITE_ID_NEW_HAVEN_INDEPENDENT = 1;
 
 	/**
-	 * Constructor.
-	 */
-	public function __construct() {
-	}
-
-	/**
 	 * {@inheritDoc}
 	 */
 	public static function register_commands(): void {
 		WP_CLI::add_command(
-			'newspack-content-migrator newhavenindependent research-single-post-import',
-			self::get_command_closure( 'cmd_research_single_post_import' ),
+			'newspack-content-migrator newhavenindependent test',
+			self::get_command_closure( 'cmd_test' ),
 			[
 				'synopsis' => [
 					[
@@ -151,10 +150,25 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			]
 		);
 		WP_CLI::add_command(
-			'newspack-content-migrator newhavenindependent research',
-			self::get_command_closure( 'cmd_research' ),
+			'newspack-content-migrator newhavenindependent import',
+			self::get_command_closure( 'cmd_import' ),
 			[
 				'synopsis' => [
+					[
+						'type'     => 'assoc',
+						'name'     => 'json-expanded-entries',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'json-expanded-users',
+						'optional' => false,
+					],
+					[
+						'type'     => 'assoc',
+						'name'     => 'json-expanded-categories-news-sections',
+						'optional' => false,
+					],
 					[
 						'type'     => 'assoc',
 						'name'     => 'prod-db-name',
@@ -187,24 +201,49 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Get the production database connection.
+	 *
+	 * @param string $prod_db_name The production database name.
+	 * @param string $prod_db_user The production database user.
+	 * @param string $prod_db_pass The production database password.
+	 * @param string $prod_db_host The production database host.
+	 * @param string $prod_db_port The production database port.
+	 * @return \wpdb|null The production database connection or null if the connection fails.
+	 */
+	private function get_prod_db( string $prod_db_name, string $prod_db_user, string $prod_db_pass, string $prod_db_host, string $prod_db_port ) {
+		$new_db = new \wpdb( $prod_db_user, $prod_db_pass, $prod_db_name, $prod_db_host, $prod_db_port );
+		// Verify the connection was successful.
+		if ( ! empty( $new_db->last_error ) ) {
+			return null;
+		}
+
+		return $new_db;
+	}
+
+	/**
+	 * Test command.
+	 * 
+	 * This is a test command to help with the migration.
+	 * 
 	 * @param array $pos_args The positional arguments.
 	 * @param array $assoc_args The associative arguments.
 	 */
-	public function cmd_research_single_post_import( array $pos_args, array $assoc_args ): void {
-		$entries_json_file    = $assoc_args['json-expanded-entries'];
-		$users_json_file    = $assoc_args['json-expanded-users'];
+	public function cmd_test( array $pos_args, array $assoc_args ): void {
+		$entries_json_file                 = $assoc_args['json-expanded-entries'];
+		$users_json_file                   = $assoc_args['json-expanded-users'];
 		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
-		$prod_db_name = $assoc_args['prod-db-name'];
-		$prod_db_user = $assoc_args['prod-db-user'];
-		$prod_db_pass = $assoc_args['prod-db-pass'];
-		$prod_db_host = $assoc_args['prod-db-host'];
-		$prod_db_port = $assoc_args['prod-db-port'];
+		$prod_db_name                      = $assoc_args['prod-db-name'];
+		$prod_db_user                      = $assoc_args['prod-db-user'];
+		$prod_db_pass                      = $assoc_args['prod-db-pass'];
+		$prod_db_host                      = $assoc_args['prod-db-host'];
+		$prod_db_port                      = $assoc_args['prod-db-port'];
 		
 		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
+		// phpcs:disable -- temporary dev code.
 		$users_data = json_decode( file_get_contents( $users_json_file ), true );
 		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		$entry = $entry_data[0];
+		$entry      = $entry_data[0];
 
 		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
 		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
@@ -221,14 +260,31 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
 			}
 		}
-exit;
+		exit;
 
-exit;
+		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
+		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
+		// $entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
+		// $comments = $this->get_entry_comments( $entry_id, $prod_db );
+		$entry_id = 8282206; // this example has flagged comment
+		$comments = $this->get_entry_comments( $entry_id, $prod_db );
+		var_dump( $comments );
+		foreach ( $comments as $comment ) {
+			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
+				// $comment_date_converted = $this->convert_server_time_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
+				// var_dump( $comment_date_converted );
+				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
+				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
+			}
+		}
+		exit;
+
+		exit;
 		WP_CLI::print_value( '--- BYLINES  -----------------------------' );
-		$entry_id = 145569; // multiple bylines
-		$test_entry_json = "/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities/entries_p251.json";
-		$test_data = json_decode( file_get_contents( $test_entry_json ), true );
-		$entry_data = null;
+		$entry_id        = 145569; // multiple bylines
+		$test_entry_json = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities/entries_p251.json';
+		$test_data       = json_decode( file_get_contents( $test_entry_json ), true );
+		$entry_data      = null;
 		foreach ( $test_data as $entry ) {
 			if ( $entry['id'] === $entry_id ) {
 				$entry_data = $entry;
@@ -237,43 +293,43 @@ exit;
 		}
 		$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
 		var_dump( $bylines );
-exit;
+		exit;
 
 		WP_CLI::print_value( '--- LEDE FEATURED IMAGE  -----------------------------' );
 		/**
 		 * Featured image data is located in two places in Craft CMS:
 		 *  - asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
 		 *    => this info is retrieved by `get_asset_image_data`:
-		 * 		asset "id"               	=> postmeta "newspack_migration_asset_id"
-		 * 		asset "url"           		=> postmeta "newspack_migration_asset_url"
-		 * 		                    		=> Attachment "slug"
-		 * 		asset "date_created"  		=> Attachment date_created
-		 * 		asset "filename"      		=> Attachment "newspack_migration_asset_filename"
-		 * 		asset "Title" 				=> Attachment "Title"
-		 * 		asset "Credit" 				=> Attachment "Credit"
-		 * 		asset "Description" 		=> Attachment "Description"
-		 * 		asset "Uploader" 			=> postmetameta "newspack_migration_asset_uploader"
-		 * 		asset "width" 				=> postmeta "newspack_migration_asset_width"
-		 * 		asset "height" 				=> postmeta "newspack_migration_asset_height"
+		 *      asset "id"                  => postmeta "newspack_migration_asset_id"
+		 *      asset "url"                 => postmeta "newspack_migration_asset_url"
+		 *                                  => Attachment "slug"
+		 *      asset "date_created"        => Attachment date_created
+		 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
+		 *      asset "Title"               => Attachment "Title"
+		 *      asset "Credit"              => Attachment "Credit"
+		 *      asset "Description"         => Attachment "Description"
+		 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
+		 *      asset "width"               => postmeta "newspack_migration_asset_width"
+		 *      asset "height"              => postmeta "newspack_migration_asset_height"
 		 *  - lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
 		 *    => this info is retrieved by `_________`:
-		 * 		lede "Photo Caption" 		=> Attachment "Caption"
+		 *      lede "Photo Caption"        => Attachment "Caption"
 		 */
 
-		$author_id = $entry['authorId'] ?? null;
-		$author_id = 58453; // e.g. "Brian Slattery" has avatar image and bio.
+		$author_id   = $entry['authorId'] ?? null;
+		$author_id   = 58453; // e.g. "Brian Slattery" has avatar image and bio.
 		$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
 		var_dump( $author_data );
-exit;
-		$photo_id = $author_data['avatar_photo_id'] ?? null;
+		exit;
+		$photo_id  = $author_data['avatar_photo_id'] ?? null;
 		$photo_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
 		WP_CLI::print_value( sprintf( 'photo_id: %s photo_url: %s', $photo_id, $photo_url ) );
-exit;
-		
-		$asset_data = $this->get_matrixLede_itemAsset_data( $entry );
-		$asset_id = $asset_data['id'];
+		exit;
+
+		$asset_data         = $this->get_matrixLede_itemAsset_data( $entry );
+		$asset_id           = $asset_data['id'];
 		$asset_item_content = $asset_data['itemContent'];
-		
+
 		// $asset_id = 11903556; // Delauro1 https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI
 		// $asset_id = 9555531; // https://www.newhavenindependent.org/admin/assets/edit/9555531-JR-Whirl-Pak_2022-01-03-012346_dxav?site=siteNHI
 		// $asset_id = 10476150; // https://www.newhavenindependent.org/admin/assets/edit/10476150-Orange-tikka?site=siteNHI
@@ -292,8 +348,8 @@ exit;
 		WP_CLI::print_value( 'asset_height: ' . $asset_data['height'] );
 		WP_CLI::print_value( '---> from matrixLede_itemAsset_data' );
 		WP_CLI::print_value( 'asset_item_content: ' . $asset_item_content );
-		
-exit;
+
+		exit;
 		WP_CLI::print_value( '--- TEST IMAGE DATA -----------------------------' );
 		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
 		var_dump( $asset_data );
@@ -301,195 +357,218 @@ exit;
 		var_dump( $asset_data );
 		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
 		var_dump( $asset_data );
-exit;
+		exit;
 
-		$entries = json_decode( file_get_contents( $entries_json_file ), true );
-		if ( ! $entries ) {
-			WP_CLI::error( 'Failed to decode entries JSON file.' );
-		}
-		$categories_news_sections = json_decode( file_get_contents( $categories_expanded_newsjson_file ), true );
-		if ( ! $categories_news_sections ) {
-			WP_CLI::error( 'Failed to decode categories JSON file.' );
-		}
+		// phpcs:enable
+	}
 
-		foreach ( $entries as $entry ) {
+	/**
+	 * Import command.
+	 * 
+	 * This is the main command that imports the data.
+	 * 
+	 * @param array $pos_args The positional arguments.
+	 * @param array $assoc_args The associative arguments.
+	 */
+	public function cmd_import( array $pos_args, array $assoc_args ): void {
+		$entries_json_file                 = $assoc_args['json-expanded-entries'];
+		$users_json_file                   = $assoc_args['json-expanded-users'];
+		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
+		$prod_db_name                      = $assoc_args['prod-db-name'];
+		$prod_db_user                      = $assoc_args['prod-db-user'];
+		$prod_db_pass                      = $assoc_args['prod-db-pass'];
+		$prod_db_host                      = $assoc_args['prod-db-host'];
+		$prod_db_port                      = $assoc_args['prod-db-port'];
+		
+		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
+
+		$users_data = json_decode( file_get_contents( $users_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+		$entry_data = json_decode( file_get_contents( $entries_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+
+
+		/**
+		 * Import entries.
+		 */
+		foreach ( $entry_data as $entry ) {
+			
+			/**
+			 * Post.
+			 */
+			$postmetas = [
+				'newspack_migration_legacy_id'  => null,
+				'newspack_migration_legacy_uid' => null,
+				'newspack_migration_legacy_url' => null,
+			];
 			$post_data = [
-				"newspack_migration_meta" => [
-					"legacy_id" => null,
-					"legacy_uid" => null,
-				],
-				"title" => null,
-				"content" => null,
-				"excerpt" => null,
-				"url" => null,
-				"status" => null,
-				"date_created" => null,
-				"date_modified" => null,
-				"featured_image" => [
-					"newspack_migration_meta" => [
-						"legacy_id" => null,
-					],
-					"url" => null,
-					"alt" => null,
-					"title" => null,
-					"caption" => null,
-					"description" => null,
-					"credit" => null,
-					"credit_url" => null,
-					"credit_organization" => null,
-				],
-				"author" => [
-					"newspack_migration_meta" => [
-						"legacy_id" => null,
-					],
-					"email" => null,
-					"avatar_image_url" => null,
-					"display_name" => null,
-					"first_name" => null,
-					"last_name" => null,
-					"bio" => null,
-				],
-				"bylines" => [
-					null,
-				],
-				"categories" => [
-					null,
-				],
-				"tags" => [
-					null,
-				],
-				"comment_status" => null,
-				"comments" => [
-					null,
-				],
-				"attachments" => [
-					null,
-				],
+				'title'          => null,
+				'content'        => null,
+				'excerpt'        => null,
+				'url'            => null,
+				'status'         => null,
+				'date_created'   => null,
+				'date_modified'  => null,
+				'comment_status' => null,
 			];
-			
-			// Meta.
-			$post_data['newspack_migration_meta'] = [
-				"legacy_id" => $entry['id'],
-				"legacy_uid" => $entry['uid'],
-			];
-			
-			// Dates.
-			// ISO 8601 timestamps, converted to NHI timezone.
-			$date_created = new \DateTime($entry['postDate']);
-			$date_created_timestamp = $date_created->format('Y-m-d H:i:s');
-			$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
-			$post_data['date_created'] = $date_created_converted;
-			$date_modified = new \DateTime($entry['dateUpdated']);
-			$date_modified_timestamp = $date_modified->format('Y-m-d H:i:s');
-			$date_modified_converted = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
+			// --- Get post data. ---
+			$postmetas['newspack_migration_legacy_id']  = $entry['id'];
+			$postmetas['newspack_migration_legacy_uid'] = $entry['uid'];
+			$postmetas['newspack_migration_legacy_url'] = $entry['url'];
+			// Title, slug.
+			$post_data['title'] = $entry['title'];
+			$post_data['url']   = $entry['url'];
+			// Dates -- ISO 8601 timestamps in UTC, converted to NHI timezone.
+			$date_created               = new \DateTime( $entry['postDate'] );
+			$date_created_timestamp     = $date_created->format( 'Y-m-d H:i:s' );
+			$date_created_converted     = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
+			$post_data['date_created']  = $date_created_converted;
+			$date_modified              = new \DateTime( $entry['dateUpdated'] );
+			$date_modified_timestamp    = $date_modified->format( 'Y-m-d H:i:s' );
+			$date_modified_converted    = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
 			$post_data['date_modified'] = $date_modified_converted;
 			
-			// Title.
-			$post_data['title'] = $entry['title'];
-
-			// URL.
-			$post_data['url'] = $entry['url'];
-
-			// Categories.
-			foreach ( $entry['fieldSections'] as $fieldSection ) {
-				// TODO
-				/**
-				 * TODO
-				 *  	title
-				 * 		parent
-				 * 		URL
-				 * 		legacy_id meta
-				 */
-			}
-			$post_data['categories'];
-			
-			// Tags.
-			foreach ( $entry['fieldTags'] as $fieldTag ) {
-				// TODO
-				$tag_name = $this->get_tag_by_id( $fieldTag['tagId'], $prod_db );
-			}
-			$post_data['tags'];
 
 			/**
+			 * Categories.
+			 */
+			foreach ( $entry['fieldSections'] as $fieldSection ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				// TODO create category using new Taxonomy/Category helper.
+				$post_data['categories'];
+			}
+			
+
+			/**
+			 * Tags.
+			 */
+			foreach ( $entry['fieldTags'] as $fieldTag_data ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				$tag_name            = $this->get_tag_by_id( $fieldTag_data['tagId'], $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				$post_data['tags'][] = $tag_name;
+			}
+
+
+			/**
+			 * Featured image.
+			 * 
 			 * Featured image data is located in two places in Craft CMS:
 			 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
 			 *    => this info is retrieved by `get_asset_image_data`:
-			 * 		asset "id"               	=> postmeta "newspack_migration_asset_id"
-			 * 		asset "url"           		=> postmeta "newspack_migration_asset_url"
-			 * 		                    		=> Attachment "slug"
-			 * 		asset "date_created"  		=> Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
-			 * 		asset "filename"      		=> Attachment "newspack_migration_asset_filename"
-			 * 		asset "Title" 				=> Attachment "Title"
-			 * 		asset "Credit" 				=> Attachment "Credit"
-			 * 		asset "Description" 		=> Attachment "Description"
-			 * 		asset "Uploader" 			=> postmetameta "newspack_migration_asset_uploader"
-			 * 		asset "width" 				=> postmeta "newspack_migration_asset_width"
-			 * 		asset "height" 				=> postmeta "newspack_migration_asset_height"
+			 *      asset "id"                  => postmeta "newspack_migration_asset_id"
+			 *      asset "url"                 => postmeta "newspack_migration_asset_url"
+			 *                                  => Attachment "slug"
+			 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+			 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
+			 *      asset "Title"               => Attachment "Title"
+			 *      asset "Credit"              => Attachment "Credit"
+			 *      asset "Description"         => Attachment "Description"
+			 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
+			 *      asset "width"               => postmeta "newspack_migration_asset_width"
+			 *      asset "height"              => postmeta "newspack_migration_asset_height"
 			 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
 			 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
-			 * 		lede "Photo Caption" 		=> Attachment "Caption"
+			 *      lede "Photo Caption"        => Attachment "Caption"
 			 */
-			$asset_data = $this->get_matrixLede_itemAsset_data( $entry );
-			$asset_id = $asset_data['id'];
+			// Featured image import data.
+			$featured_image       = [
+				'url'                 => null,
+				'alt'                 => null,
+				'title'               => null,
+				'caption'             => null,
+				'description'         => null,
+				'credit'              => null,
+				'credit_url'          => null,
+				'credit_organization' => null,
+			];
+			$featured_image_metas = [
+				'newspack_migration_legacy_id' => null,
+			];
+			// Get featured image data.
+			$asset_data         = $this->get_matrixLede_itemAsset_data( $entry );
+			$asset_id           = $asset_data['id'];
 			$asset_item_content = $asset_data['itemContent'];
-			$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
+			$asset_data         = $this->get_asset_image_data( $asset_id, $prod_db );
 			$asset_date_created = $asset_data['date_created'];
-			$asset_url = $asset_data['url'];
-			$asset_filename = $asset_data['filename'];
-			$asset_title = $asset_data['title'];
-			$asset_description = $asset_data['description'];
-			$asset_credit = $asset_data['credit'];
-			$asset_uploader = $asset_data['uploader'];
-			$asset_width = $asset_data['width'];
-			$asset_height = $asset_data['height'];
+			$asset_url          = $asset_data['url'];
+			$asset_filename     = $asset_data['filename'];
+			$asset_title        = $asset_data['title'];
+			$asset_description  = $asset_data['description'];
+			$asset_credit       = $asset_data['credit'];
+			$asset_uploader     = $asset_data['uploader'];
+			$asset_width        = $asset_data['width'];
+			$asset_height       = $asset_data['height'];
 			$asset_item_content = $asset_data['itemContent'];
+			// Featured image meta.
+			$featured_image_metas['newspack_migration_legacy_id'] = $asset_id;
 	
-			// If bylines exist they override author data.
+
+			/**
+			 * Bylines.
+			 * If bylines exist, they override author data.
+			 */
 			$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
 
-			// Author data, including avatar image URL.
-			$author_id = $entry['authorId'] ?? null;
-			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
 
-			// Comments.
+			/**
+			 * Author.
+			 */
+			$author_data  = [
+				'email'            => null,
+				'avatar_image_url' => null,
+				'display_name'     => null,
+				'first_name'       => null,
+				'last_name'        => null,
+				'bio'              => null,
+			];
+			$author_metas = [
+				'newspack_migration_legacy_id'  => null,
+				'newspack_migration_legacy_uid' => null,
+				'newspack_migration_legacy_avatar_photo_id' => null,
+			];
+			// Get author data.
+			$author_id   = $entry['authorId'] ?? null;
+			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
+			// Author meta.
+			$author_metas['newspack_migration_legacy_id']              = $author_id;
+			$author_metas['newspack_migration_legacy_uid']             = $author_data['uid'];
+			$author_metas['newspack_migration_legacy_avatar_photo_id'] = $author_data['avatar_photo_id'];
+
+
+			/**
+			 * Comments.
+			 */
 			self::COMMENT_STATUSES;
 			$comments = $this->get_entry_comments( $entry['id'], $prod_db );
 
-			$d=1;
-
-			// $this->import_entry( $post_data );
 		}
 
 		/**
 		 * Redirections:
-		 * 		entries
-		 * 		categories
+		 *      entries
+		 *      categories
 		 */
 	}
 
 	/**
 	 * Featured image is found in entry['matrixLede'], in the first blockImage type, and fields itemAsset array.
 	 * e.g.
-	 * 	"matrixLede": {
-	 * 		"11903606": {
-	 * 			"type": "blockImage",
-	 * 			"enabled": true,
-	 * 			"collapsed": false,
-	 * 			"fields": {
-	 * 				"itemHelp": null,
-	 * 				"itemAsset": [
-	 * 					11903556
-	 * 				],
-	 * 				"itemContent": "Photo Caption"
-	 * 			}
-	 * 		}
-	 * 	}
+	 *  "matrixLede": {
+	 *      "11903606": {
+	 *          "type": "blockImage",
+	 *          "enabled": true,
+	 *          "collapsed": false,
+	 *          "fields": {
+	 *              "itemHelp": null,
+	 *              "itemAsset": [
+	 *                  11903556
+	 *              ],
+	 *              "itemContent": "Photo Caption"
+	 *          }
+	 *      }
+	 *  }
 	 * 
-	 * @param array $entry
+	 * @param array $entry The entry data.
 	 * 
 	 * @return ?array Array with some matrixLede > blockImage data. {
-	 * 	int 'id'          This corresponds to the asset ID.
-	 * 	int 'itemContent' This corresponds to the "Photo Caption" field.
+	 *  int 'id'          This corresponds to the asset ID.
+	 *  int 'itemContent' This corresponds to the "Photo Caption" field.
 	 * }
 	 */
 	public function get_matrixLede_itemAsset_data( array $entry ): ?array {
@@ -500,7 +579,7 @@ exit;
 			if ( 'blockImage' === $block['type'] ) {
 				
 				// TODO handle multiple itemAssets.
-				$asset_id = $block['fields']['itemAsset'][0];
+				$asset_id     = $block['fields']['itemAsset'][0];
 				$item_content = ( isset( $block['fields']['itemContent'] ) && ! empty( $block['fields']['itemContent'] ) )
 					? $block['fields']['itemContent']
 					: null;
@@ -517,70 +596,22 @@ exit;
 	}
 
 	/**
-	 * @deprecated Use `get_asset_image_data` instead.
-	 * @see get_asset_image_data
+	 * Get user data.
 	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
-	 * @return string|null
-	 */
-	public function get_asset_image_url( int $asset_id, wpdb $prod_db ): ?string {
-		// Query the asset info from the prod db.
-		$query = $prod_db->prepare(
-			'SELECT filename, dateCreated, folderId FROM assets WHERE id = %d LIMIT 1',
-			$asset_id
-		);
-		$asset = $prod_db->get_row( $query );
-
-		if ( ! $asset || empty( $asset->filename ) || empty( $asset->dateCreated ) || empty( $asset->folderId ) ) {
-			return null;
-		}
-
-		// Get the folder name (slug) from volumefolders.
-		$folder_query = $prod_db->prepare(
-			'SELECT name FROM volumefolders WHERE id = %d LIMIT 1',
-			$asset->folderId
-		);
-		$folder_name = $prod_db->get_var( $folder_query );
-
-		if ( empty( $folder_name ) ) {
-			return null;
-		}
-
-		// Parse dateCreated to get year and month.
-		$date = new \DateTime( $asset->dateCreated );
-		$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
-		$year = $date_converted->format( 'Y' );
-		$month = $date_converted->format( 'm' );
-
-		// Build the URL as per the discovered pattern.
-		$url = sprintf(
-			'https://d2f1dfnoetc03v.cloudfront.net/Images/siteNHI/%s/%s/%s/%s',
-			$year,
-			$month,
-			$folder_name,
-			$asset->filename
-		);
-
-		return $url;
-	}
-
-	/**
-	 * 
-	 * 
-	 * @param int $user_id
-	 * @param \wpdb $prod_db
+	 * @param int   $user_id    The user ID.
+	 * @param array $users_data The users data.
+	 * @param \wpdb $prod_db    The production database connection.
 	 * @return ?array Array with author data with following keys. {
-	 * 	int 'id'                   Author ID.
-	 * 	?string 'uid'              Author UID.
-	 * 	?string 'email'            Author email.
-	 * 	?string 'username'         Username.
-	 * 	?string 'display_name'     Display name.
-	 * 	?string 'first_name'       First name.
-	 * 	?string 'last_name'        Last name.
-	 * 	?string 'bio'              Bio.
-	 * 	?string 'avatar_photo_id'  Avatar image asset ID.
-	 * 	?string 'avatar_image_url' Avatar image URL.
+	 *  int 'id'                   Author ID.
+	 *  ?string 'uid'              Author UID.
+	 *  ?string 'email'            Author email.
+	 *  ?string 'username'         Username.
+	 *  ?string 'display_name'     Display name.
+	 *  ?string 'first_name'       First name.
+	 *  ?string 'last_name'        Last name.
+	 *  ?string 'bio'              Bio.
+	 *  ?string 'avatar_photo_id'  Avatar image asset ID.
+	 *  ?string 'avatar_image_url' Avatar image URL.
 	 * }
 	 */
 	public function get_user_data( int $user_id, array $users_data, wpdb $prod_db ): array {
@@ -588,7 +619,7 @@ exit;
 		$author_data = null;
 		foreach ( $users_data as $user ) {
 			if ( $user_id === $user['id'] ) {
-				$photo_id = $user['photoId'] ?? null;
+				$photo_id         = $user['photoId'] ?? null;
 				$avatar_image_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
 
 				return [
@@ -608,6 +639,13 @@ exit;
 		return null;
 	}
 
+	/**
+	 * Get author photo URL by asset ID.
+	 * 
+	 * @param int   $asset_id The asset ID.
+	 * @param \wpdb $prod_db The production database connection.
+	 * @return string|null The author photo URL if found, null otherwise.
+	 */
 	public function get_author_photo_url_by_id( int $asset_id, wpdb $prod_db ): ?string {
 		// Get asset row.
 		$query = $prod_db->prepare(
@@ -618,28 +656,28 @@ exit;
 		if ( ! $asset ) {
 			return null;
 		}
-		$folder_id = $asset->folderId;
-		$filename = $asset->filename;
-		$volume_id = $asset->volumeId;
+		$folder_id = $asset->folderId; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+		$filename  = $asset->filename;
+		$volume_id = $asset->volumeId; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 
 		// Walk up the volumefolders tree to build the path, but stop before the root (parentId == null).
-		$segments = [];
+		$segments          = [];
 		$current_folder_id = $folder_id;
 		while ( $current_folder_id ) {
 			$folder_query = $prod_db->prepare(
 				'SELECT id, parentId, name FROM volumefolders WHERE id = %d LIMIT 1',
 				$current_folder_id
 			);
-			$folder = $prod_db->get_row( $folder_query );
+			$folder       = $prod_db->get_row( $folder_query );
 			if ( ! $folder ) {
 				break;
 			}
-			// Stop before including the root folder (parentId == null)
-			if ( is_null( $folder->parentId ) ) {
+			// Stop before including the root folder (parentId == null).
+			if ( is_null( $folder->parentId ) ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 				break;
 			}
 			array_unshift( $segments, $folder->name );
-			$current_folder_id = $folder->parentId;
+			$current_folder_id = $folder->parentId; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 		}
 
 		// Get the root volume name for the prefix.
@@ -647,12 +685,12 @@ exit;
 			'SELECT name FROM volumes WHERE id = %d LIMIT 1',
 			$volume_id
 		);
-		$volume_name = $prod_db->get_var( $volume_query );
+		$volume_name  = $prod_db->get_var( $volume_query );
 		// Map volume name to key prefix if needed.
 		$prefix = null;
-		if ( $volume_name === 'User-Uploaded Content' ) {
+		if ( 'User-Uploaded Content' === $volume_name ) {
 			$prefix = 'UserContent';
-		} elseif ( $volume_name === 'Images' ) {
+		} elseif ( 'Images' === $volume_name ) {
 			$prefix = 'siteNHI';
 		} else {
 			$prefix = $volume_name;
@@ -666,7 +704,8 @@ exit;
 		$key .= '/' . $filename;
 
 		$url = sprintf(
-			'https://d2f1dfnoetc03v.cloudfront.net/%s',
+			'https://%s/%s',
+			self::CDN_ASSET_HOSTNAME,
 			$key
 		);
 
@@ -674,21 +713,21 @@ exit;
 	}
 
 	/**
+	 * Get asset image data.
 	 * 
-	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
+	 * @param int   $asset_id The asset ID.
+	 * @param \wpdb $prod_db  The production database connection.
 	 * @return array Array with asset image data with following keys. {
-	 * 	int 'id'               Asset ID.
-	 * 	int 'width'            Asset width.
-	 * 	int 'height'           Asset height.
-	 * 	string 'date_created'  Timestamp.
-	 * 	string 'url'           Public URL.
-	 * 	string 'filename'      File name.
-	 * 	string 'title'         Title field.
-	 * 	string 'description'   Description field.
-	 * 	string 'credit'        Credit field.
-	 * 	string 'uploader'      Uploader full name
+	 *  int 'id'               Asset ID.
+	 *  int 'width'            Asset width.
+	 *  int 'height'           Asset height.
+	 *  string 'date_created'  Timestamp.
+	 *  string 'url'           Public URL.
+	 *  string 'filename'      File name.
+	 *  string 'title'         Title field.
+	 *  string 'description'   Description field.
+	 *  string 'credit'        Credit field.
+	 *  string 'uploader'      Uploader full name
 	 * }
 	 */
 	public function get_asset_image_data( int $asset_id, wpdb $prod_db ): array {
@@ -710,22 +749,22 @@ exit;
 
 		// Get the folder name (slug) from volumefolders.
 		$folder_name = null;
-		if ( ! empty( $asset->folderId ) ) {
+		if ( ! empty( $asset->folderId ) ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 			$folder_query = $prod_db->prepare(
 				'SELECT name FROM volumefolders WHERE id = %d LIMIT 1',
-				$asset->folderId
+				$asset->folderId // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 			);
-			$folder_name = $prod_db->get_var( $folder_query );
+			$folder_name  = $prod_db->get_var( $folder_query );
 		}
 
 		// Parse dateCreated to get year and month.
-		$date_created = $asset->dateCreated;
+		$date_created           = $asset->dateCreated; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 		$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created, self::NHI_TIMEZONE );
-		$year = null;
-		$month = null;
+		$year                   = null;
+		$month                  = null;
 		if ( ! empty( $date_created_converted ) ) {
-			$date = new \DateTime( $date_created_converted );
-			$year = $date->format( 'Y' );
+			$date  = new \DateTime( $date_created_converted );
+			$year  = $date->format( 'Y' );
 			$month = $date->format( 'm' );
 		}
 
@@ -733,7 +772,8 @@ exit;
 		$url = null;
 		if ( $year && $month && $folder_name && ! empty( $asset->filename ) ) {
 			$url = sprintf(
-				'https://d2f1dfnoetc03v.cloudfront.net/Images/siteNHI/%s/%s/%s/%s',
+				'https://%s/Images/siteNHI/%s/%s/%s/%s',
+				self::CDN_ASSET_HOSTNAME,
 				$year,
 				$month,
 				$folder_name,
@@ -742,114 +782,23 @@ exit;
 		}
 
 		return [
-			'id'          => $asset->id,
-			'width'       => $asset->width,
-			'height'      => $asset->height,
-			'date_created'=> $date_created_converted,
-			'url'         => $url,
-			'filename'    => $asset->filename,
-			'title'       => $asset->title,
-			'description' => $asset->field_fieldBlurb,
-			'credit'      => $asset->field_fieldCredit,
-			'uploader'    => $asset->fullName,
+			'id'           => $asset->id,
+			'width'        => $asset->width,
+			'height'       => $asset->height,
+			'date_created' => $date_created_converted,
+			'url'          => $url,
+			'filename'     => $asset->filename,
+			'title'        => $asset->title,
+			'description'  => $asset->field_fieldBlurb, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			'credit'       => $asset->field_fieldCredit, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			'uploader'     => $asset->fullName, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 		];
-	}
-
-	public function get_asset_image_filename( int $asset_id, wpdb $prod_db ): ?string {
-		// Fetch the image filename from the assets table.
-		$query = $prod_db->prepare(
-			'SELECT filename FROM assets WHERE id = %d LIMIT 1',
-			$asset_id
-		);
-		$filename = $prod_db->get_var( $query );
-		return $filename ?: null;
-	}
-
-	/**
-	 * @deprecated Use `get_asset_image_data` instead.
-	 * @see get_asset_image_data
-	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
-	 * @return string|null
-	 */
-	public function get_asset_image_title( int $asset_id, wpdb $prod_db ): ?string {
-		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
-		// Fetch the image title from the content table.
-		$query = $prod_db->prepare(
-			'SELECT title FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
-			$asset_id,
-			$site_id
-		);
-		$title = $prod_db->get_var( $query );
-		return $title ?: null;
-	}
-	
-	/**
-	 * @deprecated Use `get_asset_image_data` instead.
-	 * @see get_asset_image_data
-	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
-	 * @return string|null
-	 */
-	public function get_asset_image_description( int $asset_id, wpdb $prod_db ): ?string {
-		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
-		// Fetch the image description from the content table.
-		$query = $prod_db->prepare(
-			'SELECT field_fieldBlurb FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
-			$asset_id,
-			$site_id
-		);
-		$description = $prod_db->get_var( $query );
-		return $description ?: null;
-	}
-
-	/**
-	 * @deprecated Use `get_asset_image_data` instead.
-	 * @see get_asset_image_data
-	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
-	 * @return string|null
-	 */
-	public function get_asset_image_photo_credit( int $asset_id, wpdb $prod_db ): ?string {
-		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
-		// Fetch the photo credit from the content table.
-		$query = $prod_db->prepare(
-			'SELECT field_fieldCredit FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
-			$asset_id,
-			$site_id
-		);
-		$credit = $prod_db->get_var( $query );
-		return $credit ?: null;
-	}
-	
-	/**
-	 * @deprecated Use `get_asset_image_data` instead.
-	 * @see get_asset_image_data
-	 * 
-	 * @param int $asset_id
-	 * @param \wpdb $prod_db
-	 * @return string|null
-	 */
-	public function get_asset_image_uploader( int $asset_id, wpdb $prod_db ): ?string {
-
-		// Fetch the uploader's full name.
-		$image_uploader_full_name = null;
-		$uploader_query = $prod_db->prepare(
-			'SELECT fullName FROM users WHERE id = (SELECT uploaderId FROM assets WHERE id = %d LIMIT 1) LIMIT 1',
-			$asset_id
-		);
-		$image_uploader_full_name = $prod_db->get_var( $uploader_query );
-
-		return $image_uploader_full_name;
 	}
 
 	/**
 	 * Get tag by ID.
 	 * 
-	 * @param int $tag_id The tag ID.
+	 * @param int   $tag_id The tag ID.
 	 * @param \wpdb $prod_db The production database connection.
 	 * @return string|null The tag name if found, null otherwise.
 	 */
@@ -861,53 +810,53 @@ exit;
 		);
 		
 		$result = $prod_db->get_var( $query );
-		return $result ?: null;
+		return $result ?: null; // phpcs:ignore -- Universal.Operators.DisallowShortTernary.Found.
 	}
 
 	/**
 	 * Get all bylines for an entry.
 	 * 
-     * @example
+	 * @example
 	 *  "matrixAuthorsByline": {
-     *      "9790742": {
-     *          "type": "blockAuthor",
+	 *      "9790742": {
+	 *          "type": "blockAuthor",
 	 *          ...
 	 *          "fields": {
 	 *              "authorLink": "{\"linkedId\":255,\"linkedSiteId\":1,\"linkedTitle\":null,\"linkedUrl\":null,\"payload\":\"{\\\"customText\\\":\\\"255\\\"}\",\"type\":\"user\"}"
-     *          }
-     *      },
+	 *          }
+	 *      },
 	 *      "9790743": {
 	 *          "type": "blockAuthor",
 	 *          ...
 	 *          "fields": {
 	 *              "authorLink": "{\"linkedUrl\":\"Arthur Author\",\"linkedId\":null,\"linkedSiteId\":null,\"linkedTitle\":null,\"payload\":\"{\\\"customText\\\":\\\"Arthur Author\\\"}\",\"type\":\"custom\"}"
-     *          }
+	 *          }
 	 *      },
 	 *      "9790744": {
 	 *          "type": "blockAuthor",
 	 *          ...
-     *          "fields": {
-     *              "authorLink": "{\"linkedId\":254,\"linkedSiteId\":1,\"linkedTitle\":null,\"linkedUrl\":null,\"payload\":\"{\\\"customText\\\":\\\"254\\\"}\",\"type\":\"user\"}"
-     *          }
-     *      }
-     *  }
+	 *          "fields": {
+	 *              "authorLink": "{\"linkedId\":254,\"linkedSiteId\":1,\"linkedTitle\":null,\"linkedUrl\":null,\"payload\":\"{\\\"customText\\\":\\\"254\\\"}\",\"type\":\"user\"}"
+	 *          }
+	 *      }
+	 *  }
 	 * 
-	 * 	Two types of bylines:
-	 * 	- "type":"user" -- byline is in "linkedId", then $this->get_user_data( $linkedId, $users_data, $prod_db )
-	 * 	- "type":"custom" -- byline is in "customText"
+	 *  Two types of bylines:
+	 *  - "type":"user" -- byline is in "linkedId", then $this->get_user_data( $linkedId, $users_data, $prod_db )
+	 *  - "type":"custom" -- byline is in "customText"
 	 *
-	 * @param int $entry_id The entry ID.
+	 * @param int   $entry_id The entry ID.
 	 * @param array $entry_data The entry data.
 	 * @param array $users_data The users data.
-	 * @param wpdb $prod_db The production database connection.
+	 * @param wpdb  $prod_db The production database connection.
 	 * 
 	 * @return array Array of author names and their IDs. {
-	 * 	?int   'user_id' If this byline came from an existing user, this is the user ID. Otherwise, null.
-	 * 	string 'name'    Existing user display name or custom text byline.
+	 *  ?int   'user_id' If this byline came from an existing user, this is the user ID. Otherwise, null.
+	 *  string 'name'    Existing user display name or custom text byline.
 	 * }
 	 */
 	public function get_entry_bylines( int $entry_id, $entry_data, array $users_data, wpdb $prod_db ): array {
-		$bylines = [];
+		$bylines     = [];
 		$byline_data = $entry_data['matrixAuthorsByline'] ?? null;
 		if ( ! $byline_data ) {
 			return $bylines;
@@ -928,12 +877,12 @@ exit;
 
 			$type = $fields['type'] ?? null;
 			if ( 'user' === $type ) {
-				$user_id = $fields['linkedId'] ?? null;
+				$user_id     = $fields['linkedId'] ?? null;
 				$byline_name = $this->get_user_data( $user_id, $users_data, $prod_db )['display_name'] ?? null;
 			} elseif ( 'custom' === $type ) {
 				$payload_json = $fields['payload'] ?? null;
-				$payload = json_decode( $payload_json, true );
-				$byline_name = $payload['customText'] ?? null;
+				$payload      = json_decode( $payload_json, true );
+				$byline_name  = $payload['customText'] ?? null;
 			}
 
 			if ( $byline_name ) {
@@ -950,8 +899,8 @@ exit;
 	/**
 	 * Get all comments for an entry.
 	 *
-	 * @param int $entry_id
-	 * @param wpdb $prod_db
+	 * @param int  $entry_id The entry ID.
+	 * @param wpdb $prod_db  The production database connection.
 	 * @return array[] Array of comments, each with keys:
 	 *   - comment_id: int
 	 *   - author_name: string|null User display name or custom text byline.
@@ -968,297 +917,47 @@ exit;
 			'SELECT commentId FROM comments_flags WHERE commentId IN (SELECT id FROM comments_comments WHERE ownerId = %d)',
 			$entry_id
 		);
-		$flagged_ids = $prod_db->get_col( $flagged_query );
-		$flagged_set = array_flip( $flagged_ids ); // For fast lookup.
+		$flagged_ids   = $prod_db->get_col( $flagged_query );
+		$flagged_set   = array_flip( $flagged_ids ); // For fast lookup.
 
-		$query = $prod_db->prepare(
+		$query    = $prod_db->prepare(
 			'SELECT id, name, comment, commentDate, status, userId FROM comments_comments WHERE ownerId = %d ORDER BY commentDate ASC',
 			$entry_id
 		);
-		$results = $prod_db->get_results( $query );
+		$results  = $prod_db->get_results( $query );
 		$comments = [];
 		foreach ( $results as $row ) {
-			$author_name = null;
-			$author_user_id = $row->userId ? (int) $row->userId : null;
-			if ( $row->userId ) {
+			$author_name    = null;
+			$author_user_id = $row->userId ? (int) $row->userId : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			if ( $row->userId ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 				$user_query = $prod_db->prepare(
 					'SELECT fullName, username FROM users WHERE id = %d LIMIT 1',
-					$row->userId
+					$row->userId // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 				);
-				$user = $prod_db->get_row( $user_query );
+				$user       = $prod_db->get_row( $user_query );
 				if ( $user ) {
-					$author_name = $user->fullName ? $user->fullName : $user->username;
+					$author_name = $user->fullName ? $user->fullName : $user->username; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 				}
 			} else {
 				// For anonymous comments, use the name field if present.
 				$author_name = $row->name ? $row->name : null;
 			}
 			// Convert the comment date to the NHI timezone.
-			$comment_date = $row->commentDate ? date('Y-m-d H:i:s', strtotime($row->commentDate)) : null;
+			$comment_date           = $row->commentDate ? date( 'Y-m-d H:i:s', strtotime( $row->commentDate ) ) : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_server_time_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
 
 			$comments[] = [
-				'comment_id'      => (int) $row->id,
-				'author_name'     => $author_name,
-				'author_user_id'  => $author_user_id,
-				'comment'         => $row->comment,
-				'comment_date'    => $comment_date_converted,
-				'status'          => $row->status,
-				'user_id'         => $row->userId ? (int) $row->userId : null,
-				'flagged'         => isset($flagged_set[$row->id]),
+				'comment_id'     => (int) $row->id,
+				'author_name'    => $author_name,
+				'author_user_id' => $author_user_id,
+				'comment'        => $row->comment,
+				'comment_date'   => $comment_date_converted,
+				'status'         => $row->status,
+				'user_id'        => $row->userId ? (int) $row->userId : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				'flagged'        => isset( $flagged_set[ $row->id ] ),
 			];
 		}
 		return $comments;
-	}
-
-	/**
-	 * @param array $pos_args The positional arguments.
-	 * @param array $assoc_args The associative arguments.
-	 */
-	public function cmd_research( array $pos_args, array $assoc_args ): void {
-		$prod_db_name = $assoc_args['prod-db-name'];
-		$prod_db_user = $assoc_args['prod-db-user'];
-		$prod_db_pass = $assoc_args['prod-db-pass'];
-		$prod_db_host = $assoc_args['prod-db-host'];
-		$prod_db_port = $assoc_args['prod-db-port'];
-		
-		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
-		
-		// Total.
-		$article_ids    = $this->get_article_ids( $prod_db );
-		$count_articles = count( $article_ids );
-
-		// should be approx. 41,430.
-		$entries_main_news_ids = $this->get_entries_main_news_ids( $prod_db );
-		// should be approx. 19,230.
-		$entries_extra_extra_ids = $this->get_entries_extra_extra_ids( $prod_db );
-		// should be approx. 1,593.
-		$entries_obituaries_ids = $this->get_entries_obituaries_ids( $prod_db );
-		// should be approx. 2,085.
-		$entries_legal_notice_ids = $this->get_entries_legal_notice_ids( $prod_db );
-		// should be approx. 2,754.
-		$entries_brandford_eagle_ids = $this->get_entries_brandford_eagle_ids( $prod_db );
-
-		// Case study example.
-		$article_title_like   = 'DeLauro Brings Back Ethan%s Law To Congress';
-		$article_id           = $this->get_article_id( $article_title_like, $prod_db );
-		$article_main_content = $this->get_article_main_content( $article_id, $prod_db );
-		$article_lede         = $this->get_article_lede( $article_id, $prod_db );
-		
-		WP_CLI::print_value( 'count: ' . $count_articles );
-		WP_CLI::print_value( $article_id );
-		WP_CLI::print_value( $article_main_content );
-		WP_CLI::print_value( $article_lede );
-	}
-
-	/**
-	 * Get the production database connection.
-	 *
-	 * @param string $prod_db_name The production database name.
-	 * @param string $prod_db_user The production database user.
-	 * @param string $prod_db_pass The production database password.
-	 * @param string $prod_db_host The production database host.
-	 * @param string $prod_db_port The production database port.
-	 * @return \wpdb|null The production database connection or null if the connection fails.
-	 */
-	private function get_prod_db( string $prod_db_name, string $prod_db_user, string $prod_db_pass, string $prod_db_host, string $prod_db_port ) {
-		$new_db = new \wpdb( $prod_db_user, $prod_db_pass, $prod_db_name, $prod_db_host, $prod_db_port );
-		// Verify the connection was successful.
-		if ( ! empty( $new_db->last_error ) ) {
-			return null;
-		}
-
-		return $new_db;
-	}
-
-	/**
-	 * Get all article IDs from the New Haven Independent site.
-	 * 
-	 * Entry types included:
-	 * - Regular Article
-	 * - Static Pages
-	 * - Top Story
-	 * - Obituaries
-	 * - Extra Extra
-	 * - Legal Notices
-	 * - Archival Article (Imported from EE)
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_article_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sites s ON e.temp_siteID = s.id 
-			JOIN entrytypes et ON e.typeId = et.id 
-			WHERE s.name = 'New Haven Independent' 
-			AND et.name IN (
-				'Regular Article',
-				'Static Pages',
-				'Top Story',
-				'Obituaries',
-				'Extra Extra',
-				'Legal Notices',
-				'Archival Article (Imported from EE)'
-			)
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
-	}
-
-	/**
-	 * Get article ID by title.
-	 *
-	 * @param string $article_title The title of the article to find.
-	 * @param \wpdb  $prod_db The production database connection.
-	 * @return int|null The article ID if found, null otherwise.
-	 */
-	private function get_article_id( string $article_title, $prod_db ): ?int {
-		$query = $prod_db->prepare(
-			'SELECT e.id 
-			FROM entries e 
-			JOIN content c ON e.id = c.elementId 
-			WHERE c.title LIKE %s 
-			ORDER BY e.dateCreated ASC 
-			LIMIT 1',
-			$article_title
-		);
-		
-		$result = $prod_db->get_var( $query );
-		return $result ? (int) $result : null;
-	}
-
-	/**
-	 * Get all Extra Extra article IDs from the New Haven Independent site.
-	 * 
-	 * This includes all entries of type "Extra Extra" (typeId = 9) that are not deleted.
-	 * The expected count is approximately 19,230 entries.
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_entries_extra_extra_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sites s ON e.temp_siteID = s.id 
-			JOIN entrytypes et ON e.typeId = et.id 
-			WHERE s.name = 'New Haven Independent' 
-			AND et.name = 'Extra Extra'
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
-	}
-
-	/**
-	 * Get all Main News article IDs from the New Haven Independent site.
-	 * 
-	 * This includes all entries in the Main News section (sectionId = 1) that are not deleted.
-	 * The expected count is approximately 41,430 entries.
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_entries_main_news_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sites s ON e.temp_siteID = s.id 
-			JOIN sections sec ON e.sectionId = sec.id 
-			WHERE s.name = 'New Haven Independent' 
-			AND sec.name = 'Main News'
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
-	}
-
-	/**
-	 * Get all Obituaries article IDs from the New Haven Independent site.
-	 * 
-	 * This includes all entries of type "Obituaries" (typeId = 6) that are not deleted.
-	 * The expected count is approximately 1,593 entries.
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_entries_obituaries_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sites s ON e.temp_siteID = s.id 
-			JOIN entrytypes et ON e.typeId = et.id 
-			WHERE s.name = 'New Haven Independent' 
-			AND et.name = 'Obituaries'
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
-	}
-
-	/**
-	 * Get all Legal Notices article IDs from the New Haven Independent site.
-	 * 
-	 * This includes all entries of type "Legal Notices" (typeId = 11) that are not deleted.
-	 * The expected count is approximately 2,085 entries.
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_entries_legal_notice_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sites s ON e.temp_siteID = s.id 
-			JOIN entrytypes et ON e.typeId = et.id 
-			WHERE s.name = 'New Haven Independent' 
-			AND et.name = 'Legal Notices'
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
-	}
-
-	/**
-	 * Get all Branford Eagle article IDs from the New Haven Independent site.
-	 * 
-	 * This includes all entries in the Branford Eagle section (sectionId = 10) that are not deleted.
-	 * The expected count is approximately 2,085 entries.
-	 *
-	 * @param \wpdb $prod_db The production database connection.
-	 * @return array Array of article IDs.
-	 */
-	private function get_entries_brandford_eagle_ids( $prod_db ) {
-		$query = $prod_db->prepare(
-			"SELECT e.id 
-			FROM entries e 
-			JOIN sections sec ON e.sectionId = sec.id 
-			WHERE sec.name = 'Branford Eagle'
-			AND (e.deletedWithEntryType IS NULL OR e.deletedWithEntryType = '0')
-			ORDER BY e.id ASC"
-		);
-
-		$results = $prod_db->get_col( $query );
-
-		return $results;
 	}
 
 	/**
@@ -1268,7 +967,7 @@ exit;
 	 * @param int    $image_asset_field_id The field ID for image assets.
 	 * @return string The SQL query.
 	 */
-	private function get_content_blocks_query( string $content_type, int $image_asset_field_id ): string {
+	public function get_content_blocks_query( string $content_type, int $image_asset_field_id ): string {
 		$mappings   = self::FIELD_MAPPINGS[ $content_type ];
 		$table_name = 'main_content' === $content_type ? 'matrixcontent_matrixmaincontent' : 'matrixcontent_matrixlede';
 		
@@ -1325,7 +1024,7 @@ exit;
 	 * @param \wpdb  $prod_db The production database connection.
 	 * @return array The processed block data.
 	 */
-	private function process_content_block( object $block, $prod_db ): array {
+	public function process_content_block( object $block, $prod_db ): array {
 		$content_block = [
 			'id'   => $block->block_id,
 			'type' => $block->block_type,
@@ -1356,7 +1055,8 @@ exit;
 						
 						// Construct the public URL using the CDN pattern.
 						$content_block['public_url'] = sprintf(
-							'https://d2f1dfnoetc03v.cloudfront.net/Images/siteNHI/%s',
+							'https://%s/Images/siteNHI/%s',
+							self::CDN_ASSET_HOSTNAME,
 							$asset->filename
 						);
 						
@@ -1370,10 +1070,10 @@ exit;
 						}
 						
 						// Get year and month from dateCreated.
-						$date  = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+						$date  = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 						$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
-						$year  = $date_converted->format( 'Y' );
-						$month = $date_converted->format( 'm' );
+						$year           = $date_converted->format( 'Y' );
+						$month          = $date_converted->format( 'm' );
 						
 						// Construct the full path for the key.
 						$key_path = sprintf( 'Images/siteNHI/%s/%s/Staff/%s', $year, $month, $asset->filename );
@@ -1476,7 +1176,7 @@ exit;
 	 * @param int    $image_asset_field_id The field ID for image assets.
 	 * @return array The content blocks.
 	 */
-	private function get_content_blocks( int $article_id, $prod_db, string $content_type, int $image_asset_field_id ): array {
+	public function get_content_blocks( int $article_id, $prod_db, string $content_type, int $image_asset_field_id ): array {
 		$query = $prod_db->prepare(
 			$this->get_content_blocks_query( $content_type, $image_asset_field_id ),
 			$image_asset_field_id,
@@ -1500,7 +1200,7 @@ exit;
 	 * @param \wpdb $prod_db The production database connection.
 	 * @return array The main content.
 	 */
-	private function get_article_main_content( int $article_id, $prod_db ): array {
+	public function get_article_main_content( int $article_id, $prod_db ): array {
 		$query = $prod_db->prepare(
 			'SELECT 
 				mb.id as block_id,
@@ -1566,7 +1266,7 @@ exit;
 	 * @param \wpdb $prod_db The production database connection.
 	 * @return array The lede content.
 	 */
-	private function get_article_lede( int $article_id, $prod_db ): array {
+	public function get_article_lede( int $article_id, $prod_db ): array {
 		$query = $prod_db->prepare(
 			'SELECT 
 				mb.id as block_id,
@@ -1628,8 +1328,8 @@ exit;
 	/**
 	 * Convert server timestamp in UTC to the NHI (Connecticut) timezone, returning MySQL format.
 	 *
-	 * @param string $timestamp UTC timestamp (e.g. from DB)
-	 * @param string $timezone  Target timezone (e.g. self::NHI_TIMEZONE)
+	 * @param string $timestamp UTC timestamp (e.g. from DB).
+	 * @param string $timezone  Target timezone (e.g. self::NHI_TIMEZONE).
 	 * @return string Converted timestamp in 'Y-m-d H:i:s' format
 	 */
 	public function convert_server_time_to_nhi_time( string $timestamp, string $timezone ): string {
@@ -1638,9 +1338,150 @@ exit;
 		}
 
 		// Server time is UTC.
-		$dt = new \DateTime( $timestamp, new \DateTimeZone('UTC') );
+		$dt = new \DateTime( $timestamp, new \DateTimeZone( 'UTC' ) );
 		$dt->setTimezone( new \DateTimeZone( $timezone ) );
 
-		return $dt->format('Y-m-d H:i:s');
+		return $dt->format( 'Y-m-d H:i:s' );
+	}
+
+	/**
+	 * Database mapping helper function.
+	 * 
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int   $asset_id Asset ID.
+	 * @param \wpdb $prod_db Production database connection.
+	 * @return string|null Image URL.
+	 */
+	public function get_asset_image_url( int $asset_id, wpdb $prod_db ): ?string {
+		// Query the asset info from the prod db.
+		$query = $prod_db->prepare(
+			'SELECT filename, dateCreated, folderId FROM assets WHERE id = %d LIMIT 1',
+			$asset_id
+		);
+		$asset = $prod_db->get_row( $query );
+
+		if ( ! $asset || empty( $asset->filename ) || empty( $asset->dateCreated ) || empty( $asset->folderId ) ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			return null;
+		}
+
+		// Get the folder name (slug) from volumefolders.
+		$folder_query = $prod_db->prepare(
+			'SELECT name FROM volumefolders WHERE id = %d LIMIT 1',
+			$asset->folderId // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+		);
+		$folder_name  = $prod_db->get_var( $folder_query );
+
+		if ( empty( $folder_name ) ) {
+			return null;
+		}
+
+		// Parse dateCreated to get year and month.
+		$date           = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+		$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
+		$year           = $date_converted->format( 'Y' );
+		$month          = $date_converted->format( 'm' );
+
+		// Build the URL as per the discovered pattern.
+		$url = sprintf(
+			'https://%s/Images/siteNHI/%s/%s/%s/%s',
+			self::CDN_ASSET_HOSTNAME,
+			$year,
+			$month,
+			$folder_name,
+			$asset->filename
+		);
+
+		return $url;
+	}
+
+	/**
+	 * Database mapping helper function.
+	 * 
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int   $asset_id Asset ID.
+	 * @param \wpdb $prod_db Production database connection.
+	 * @return string|null Image title.
+	 */
+	public function get_asset_image_title( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the image title from the content table.
+		$query = $prod_db->prepare(
+			'SELECT title FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$title = $prod_db->get_var( $query );
+		return $title ?: null; // phpcs:ignore -- Universal.Operators.DisallowShortTernary.Found.
+	}
+	
+	/**
+	 * Database mapping helper function.
+	 * 
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int   $asset_id Asset ID.
+	 * @param \wpdb $prod_db Production database connection.
+	 * @return string|null Image description.
+	 */
+	public function get_asset_image_description( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the image description from the content table.
+		$query       = $prod_db->prepare(
+			'SELECT field_fieldBlurb FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$description = $prod_db->get_var( $query );
+		return $description ?: null; // phpcs:ignore -- Universal.Operators.DisallowShortTernary.Found.
+	}
+
+	/**
+	 * Database mapping helper function.
+	 * 
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int   $asset_id Asset ID.
+	 * @param \wpdb $prod_db Production database connection.
+	 * @return string|null Photo credit.
+	 */
+	public function get_asset_image_photo_credit( int $asset_id, wpdb $prod_db ): ?string {
+		$site_id = self::SITE_ID_NEW_HAVEN_INDEPENDENT;
+		// Fetch the photo credit from the content table.
+		$query  = $prod_db->prepare(
+			'SELECT field_fieldCredit FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+			$asset_id,
+			$site_id
+		);
+		$credit = $prod_db->get_var( $query );
+		return $credit ?: null; // phpcs:ignore -- Universal.Operators.DisallowShortTernary.Found.
+	}
+	
+	/**
+	 * Database mapping helper function.
+	 * 
+	 * @deprecated Use `get_asset_image_data` instead.
+	 * @see get_asset_image_data
+	 * 
+	 * @param int   $asset_id Asset ID.
+	 * @param \wpdb $prod_db Production database connection.
+	 * @return string|null Uploader's full name.
+	 */
+	public function get_asset_image_uploader( int $asset_id, wpdb $prod_db ): ?string {
+
+		// Fetch the uploader's full name.
+		$image_uploader_full_name = null;
+		$uploader_query           = $prod_db->prepare(
+			'SELECT fullName FROM users WHERE id = (SELECT uploaderId FROM assets WHERE id = %d LIMIT 1) LIMIT 1',
+			$asset_id
+		);
+		$image_uploader_full_name = $prod_db->get_var( $uploader_query );
+
+		return $image_uploader_full_name;
 	}
 }
