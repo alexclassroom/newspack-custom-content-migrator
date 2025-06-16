@@ -16,6 +16,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+	/**
+	 * Connecticut timezone for NHI (Eastern Time, handles DST automatically).
+	 */
+	public const NHI_TIMEZONE = 'America/New_York';
 
 	/**
 	 * Field mappings for different content types.
@@ -189,7 +193,41 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		
 		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
-		
+		$users_data = json_decode( file_get_contents( $users_json_file ), true );
+		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
+		$entry = $entry_data[0];
+
+		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
+		$comments = $this->get_entry_comments( $entry['id'], $prod_db );
+		$entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
+		$comments = $this->get_entry_comments( $entry_id, $prod_db );
+		// var_dump( $comments );
+		foreach ( $comments as $comment ) {
+			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
+				// $comment_date_converted = $this->convert_server_time_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
+				// var_dump( $comment_date_converted );
+				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
+				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
+			}
+		}
+exit;
+
+exit;
+		WP_CLI::print_value( '--- BYLINES  -----------------------------' );
+		$entry_id = 145569; // multiple bylines
+		$test_entry_json = "/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities/entries_p251.json";
+		$test_data = json_decode( file_get_contents( $test_entry_json ), true );
+		$entry_data = null;
+		foreach ( $test_data as $entry ) {
+			if ( $entry['id'] === $entry_id ) {
+				$entry_data = $entry;
+				break;
+			}
+		}
+		$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
+		var_dump( $bylines );
+exit;
+
 		WP_CLI::print_value( '--- LEDE FEATURED IMAGE  -----------------------------' );
 		/**
 		 * Featured image data is located in two places in Craft CMS:
@@ -198,7 +236,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 * 		asset "id"               	=> postmeta "newspack_migration_asset_id"
 		 * 		asset "url"           		=> postmeta "newspack_migration_asset_url"
 		 * 		                    		=> Attachment "slug"
-		 * 		asset "date_created"  		=> Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+		 * 		asset "date_created"  		=> Attachment date_created
 		 * 		asset "filename"      		=> Attachment "newspack_migration_asset_filename"
 		 * 		asset "Title" 				=> Attachment "Title"
 		 * 		asset "Credit" 				=> Attachment "Credit"
@@ -210,11 +248,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 *    => this info is retrieved by `_________`:
 		 * 		lede "Photo Caption" 		=> Attachment "Caption"
 		 */
-		
-		$users_data = json_decode( file_get_contents( $users_json_file ), true );
-		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		$entry = $entry_data[0];
-		
+
 		$author_id = $entry['authorId'] ?? null;
 		$author_id = 58453; // e.g. "Brian Slattery" has avatar image and bio.
 		$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
@@ -329,11 +363,15 @@ exit;
 			];
 			
 			// Dates.
-			// ISO 8601 timestamps.
+			// ISO 8601 timestamps, converted to NHI timezone.
 			$date_created = new \DateTime($entry['postDate']);
-			$post_data['date_created'] = $date_created->format('Y-m-d H:i:s');
+			$date_created_timestamp = $date_created->format('Y-m-d H:i:s');
+			$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
+			$post_data['date_created'] = $date_created_converted;
 			$date_modified = new \DateTime($entry['dateUpdated']);
-			$post_data['date_modified'] = $date_modified->format('Y-m-d H:i:s');
+			$date_modified_timestamp = $date_modified->format('Y-m-d H:i:s');
+			$date_modified_converted = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
+			$post_data['date_modified'] = $date_modified_converted;
 			
 			// Title.
 			$post_data['title'] = $entry['title'];
@@ -395,9 +433,15 @@ exit;
 			$asset_height = $asset_data['height'];
 			$asset_item_content = $asset_data['itemContent'];
 	
+			// If bylines exist they override author data.
+			$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
+
 			// Author data, including avatar image URL.
 			$author_id = $entry['authorId'] ?? null;
 			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
+
+			// Comments.
+			$comments = $this->get_entry_comments( $entry['id'], $prod_db );
 
 			$d=1;
 
@@ -493,8 +537,9 @@ exit;
 
 		// Parse dateCreated to get year and month.
 		$date = new \DateTime( $asset->dateCreated );
-		$year = $date->format( 'Y' );
-		$month = $date->format( 'm' );
+		$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
+		$year = $date_converted->format( 'Y' );
+		$month = $date_converted->format( 'm' );
 
 		// Build the URL as per the discovered pattern.
 		$url = sprintf(
@@ -663,10 +708,11 @@ exit;
 
 		// Parse dateCreated to get year and month.
 		$date_created = $asset->dateCreated;
+		$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created, self::NHI_TIMEZONE );
 		$year = null;
 		$month = null;
-		if ( ! empty( $date_created ) ) {
-			$date = new \DateTime( $date_created );
+		if ( ! empty( $date_created_converted ) ) {
+			$date = new \DateTime( $date_created_converted );
 			$year = $date->format( 'Y' );
 			$month = $date->format( 'm' );
 		}
@@ -687,7 +733,7 @@ exit;
 			'id'          => $asset->id,
 			'width'       => $asset->width,
 			'height'      => $asset->height,
-			'date_created'=> $date_created,
+			'date_created'=> $date_created_converted,
 			'url'         => $url,
 			'filename'    => $asset->filename,
 			'title'       => $asset->title,
@@ -804,6 +850,144 @@ exit;
 		
 		$result = $prod_db->get_var( $query );
 		return $result ?: null;
+	}
+
+	/**
+	 * Get all bylines for an entry.
+	 * 
+     * @example
+	 *  "matrixAuthorsByline": {
+     *      "9790742": {
+     *          "type": "blockAuthor",
+	 *          ...
+	 *          "fields": {
+	 *              "authorLink": "{\"linkedId\":255,\"linkedSiteId\":1,\"linkedTitle\":null,\"linkedUrl\":null,\"payload\":\"{\\\"customText\\\":\\\"255\\\"}\",\"type\":\"user\"}"
+     *          }
+     *      },
+	 *      "9790743": {
+	 *          "type": "blockAuthor",
+	 *          ...
+	 *          "fields": {
+	 *              "authorLink": "{\"linkedUrl\":\"Arthur Author\",\"linkedId\":null,\"linkedSiteId\":null,\"linkedTitle\":null,\"payload\":\"{\\\"customText\\\":\\\"Arthur Author\\\"}\",\"type\":\"custom\"}"
+     *          }
+	 *      },
+	 *      "9790744": {
+	 *          "type": "blockAuthor",
+	 *          ...
+     *          "fields": {
+     *              "authorLink": "{\"linkedId\":254,\"linkedSiteId\":1,\"linkedTitle\":null,\"linkedUrl\":null,\"payload\":\"{\\\"customText\\\":\\\"254\\\"}\",\"type\":\"user\"}"
+     *          }
+     *      }
+     *  }
+	 * 
+	 * 	Two types of bylines:
+	 * 	- "type":"user" -- byline is in "linkedId", then $this->get_user_data( $linkedId, $users_data, $prod_db )
+	 * 	- "type":"custom" -- byline is in "customText"
+	 *
+	 * @param int $entry_id The entry ID.
+	 * @param array $entry_data The entry data.
+	 * @param array $users_data The users data.
+	 * @param wpdb $prod_db The production database connection.
+	 * 
+	 * @return array Array of author names and their IDs. {
+	 * 	?int   'user_id' If this byline came from an existing user, this is the user ID. Otherwise, null.
+	 * 	string 'name'    Existing user display name or custom text byline.
+	 * }
+	 */
+	public function get_entry_bylines( int $entry_id, $entry_data, array $users_data, wpdb $prod_db ): array {
+		$bylines = [];
+		$byline_data = $entry_data['matrixAuthorsByline'] ?? null;
+		if ( ! $byline_data ) {
+			return $bylines;
+		}
+		foreach ( $byline_data as $byline_id => $byline_item ) {
+			if ( 'blockAuthor' !== $byline_item['type'] ) {
+				continue;
+			}
+			
+			$fields_json = $byline_item['fields']['authorLink'] ?? null;
+			if ( ! $fields_json ) {
+				continue;
+			}
+			$fields = json_decode( $fields_json, true );
+
+			$byline_name = null;
+			$user_id     = null;
+
+			$type = $fields['type'] ?? null;
+			if ( 'user' === $type ) {
+				$user_id = $fields['linkedId'] ?? null;
+				$byline_name = $this->get_user_data( $user_id, $users_data, $prod_db )['display_name'] ?? null;
+			} elseif ( 'custom' === $type ) {
+				$payload_json = $fields['payload'] ?? null;
+				$payload = json_decode( $payload_json, true );
+				$byline_name = $payload['customText'] ?? null;
+			}
+
+			if ( $byline_name ) {
+				$bylines[] = [
+					'user_id' => $user_id,
+					'name'    => $byline_name,
+				];
+			}
+		}
+
+		return $bylines;
+	}
+
+	/**
+	 * Get all comments for an entry.
+	 *
+	 * @param int $entry_id
+	 * @param wpdb $prod_db
+	 * @return array[] Array of comments, each with keys:
+	 *   - comment_id: int
+	 *   - author_name: string|null User display name or custom text byline.
+	 *   - author_user_id: int|null If this comment came from an existing user, this is the user ID. Otherwise, null -- this may be called an "anonymous" user (because it's not a registered user), but it still has a display name.
+	 *   - comment: string
+	 *   - comment_date: string The value of comments_comments.commentDate, which is the timestamp shown on the frontend (in UTC, convert to local time for display). Other date fields exist in the DB.
+	 *   - status: string
+	 *   - user_id: int|null
+	 */
+	public function get_entry_comments( int $entry_id, wpdb $prod_db ): array {
+		$query = $prod_db->prepare(
+			'SELECT id, name, comment, commentDate, status, userId FROM comments_comments WHERE ownerId = %d ORDER BY commentDate ASC',
+			$entry_id
+		);
+		$results = $prod_db->get_results( $query );
+		$comments = [];
+		foreach ( $results as $row ) {
+			$author_name = null;
+			$author_user_id = $row->userId ? (int) $row->userId : null;
+			if ( $row->userId ) {
+				$user_query = $prod_db->prepare(
+					'SELECT fullName, username FROM users WHERE id = %d LIMIT 1',
+					$row->userId
+				);
+				$user = $prod_db->get_row( $user_query );
+				if ( $user ) {
+					$author_name = $user->fullName ? $user->fullName : $user->username;
+				}
+			} else {
+				// For anonymous comments, use the name field if present.
+				$author_name = $row->name ? $row->name : null;
+			}
+			
+			// Convert the comment date to the NHI timezone.
+			$comment_date = $row->commentDate ? date('Y-m-d H:i:s', strtotime($row->commentDate)) : null;
+			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_server_time_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
+
+			$comments[] = [
+				'comment_id'      => (int) $row->id,
+				'author_name'     => $author_name,
+				'author_user_id'  => $author_user_id,
+				'comment'         => $row->comment,
+				'comment_date'    => $comment_date_converted,
+				'status'          => $row->status,
+				'user_id'         => $row->userId ? (int) $row->userId : null,
+			];
+		}
+		return $comments;
 	}
 
 	/**
@@ -1166,8 +1350,9 @@ exit;
 						
 						// Get year and month from dateCreated.
 						$date  = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-						$year  = $date->format( 'Y' );
-						$month = $date->format( 'm' );
+						$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
+						$year  = $date_converted->format( 'Y' );
+						$month = $date_converted->format( 'm' );
 						
 						// Construct the full path for the key.
 						$key_path = sprintf( 'Images/siteNHI/%s/%s/Staff/%s', $year, $month, $asset->filename );
@@ -1417,5 +1602,24 @@ exit;
 		}
 		
 		return $lede_blocks;
+	}
+
+	/**
+	 * Convert server timestamp in UTC to the NHI (Connecticut) timezone, returning MySQL format.
+	 *
+	 * @param string $timestamp UTC timestamp (e.g. from DB)
+	 * @param string $timezone  Target timezone (e.g. self::NHI_TIMEZONE)
+	 * @return string Converted timestamp in 'Y-m-d H:i:s' format
+	 */
+	public function convert_server_time_to_nhi_time( string $timestamp, string $timezone ): string {
+		if ( ! $timestamp ) {
+			return null;
+		}
+
+		// Server time is UTC.
+		$dt = new \DateTime( $timestamp, new \DateTimeZone('UTC') );
+		$dt->setTimezone( new \DateTimeZone( $timezone ) );
+
+		return $dt->format('Y-m-d H:i:s');
 	}
 }
