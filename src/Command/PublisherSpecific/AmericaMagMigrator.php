@@ -9,6 +9,7 @@ use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use simplehtmldom\HtmlDocument;
 use WP_CLI;
 
 // use Newspack\MigrationTools\Logic\GuestContributorsHelper;
@@ -19,10 +20,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
+	const ITEM_TYPES = [ 'category', 'post', 'post_tag', 'user' ];
+
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
 	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
 	const META_KEY_PROCESSED_CONTENT_TYPE  = '_np_migration_processed_content_type';
+	const META_KEY_CLEANED_ITEM            = '_np_migration_cleaned_item';
+
+	/**
+     * WP allowed mime types.
+     *
+     * @var array
+     */
+    private $allowed_mime_types = [];
 
 	/**
 	 * Batch counts of imported nodes per type per CLI run.
@@ -82,6 +93,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	private $logger;
 
+    /**
+     * Loggers for CSVs.
+     *
+     * @var array
+     */
+    private $logger_csvs = [];
+
 	/**
 	 * Nodes to keep - lookup array.
 	 *
@@ -103,11 +121,31 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private string $required_timezone  = 'America/New_York';
 
 	/**
+	 * Constructor.
+	 */
+	private function __construct() {
+        $all_mime_types = get_allowed_mime_types();
+        foreach ( $all_mime_types as $ext => $mime ) {
+            array_push( $this->allowed_mime_types, ...explode( '|', $ext ) );
+        }
+        $this->allowed_mime_types = array_unique( $this->allowed_mime_types );
+    }
+
+	/**
 	 * CLI Commands
 	 *
 	 * @return void
 	 */
 	public static function register_commands(): void {
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-clean-up',
+			self::get_command_closure( 'cmd_clean_up' ),
+			[
+				'shortdesc' => 'Clean up in-content assets.',
+			]
+		);
+
 
 		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-co-authors',
@@ -181,6 +219,81 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			]
 		);
 
+	}
+
+	/**
+	 * Run clean up.
+	 */
+	public function cmd_clean_up( array $pos_args, array $assoc_args ): void {
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		$this->validate_item_type( $pos_args );
+
+        // Logger.
+        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+        $this->logger_set( $logger_slug );
+
+        // Run command.
+        $this->logger->info( 'Running command: ' . $logger_slug );
+                
+        do {
+
+            // Has json item from import, but not cleaned up.
+            $meta_query = [
+                [
+                    'key'     => self::META_KEY_CLEANED_ITEM,
+                    'compare' => 'NOT EXISTS',
+                ],
+            ];
+
+            $limit = 10;
+            
+            // Get items for processing.
+            switch( $pos_args[0] ) {
+                case 'post':
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+                case 'user':
+                    $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+				case 'category':
+				case 'post_tag':
+                    $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => $pos_args[0], 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+                    break;
+                default:
+                    $this->logger->error( 'No clean-up needed for: ' . $pos_args[0] );
+                    exit();
+            }
+
+            // Process items.
+            foreach( $db_items as $db_id ) {
+
+                $this->logger->info( '------------ processing id: ' . $db_id );
+
+                switch( $pos_args[0] ) {
+                    case 'post':
+                        $this->clean_up_post( $db_id, $logger_slug );
+                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        break;
+                    case 'user':
+                        $this->clean_up_user( $db_id, $logger_slug );
+                        update_user_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        break;
+                    case 'category':
+                    case 'post_tag':
+                        $this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
+                        update_term_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        break;
+                }
+
+                $this->logger->info( '-- done with item' );
+
+            } // foreach item.
+            
+        } while( ! empty( $db_items ) );
+
+		$this->logger->info( 'Done.' ); 
 	}
 
 	/**
@@ -564,6 +677,205 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	private function batch_stop( $content_type, $entity_type ) {
 		return ( $this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ] >= $this->batch_max );
 	}
+
+
+	/************************************
+	  CLEAN UP
+	************************************/
+
+    /**
+     * Clean up one post.
+     */
+    private function clean_up_post( int $post_id, $logger_slug ): void {
+
+        // Post info.
+        $post_content = get_post_field( 'post_content', $post_id, 'raw' );
+        $post_date    = get_post_field( 'post_date', $post_id, 'raw' );
+
+        // fuzzy match on int or string for 0 post_author.
+        if( 0 == get_post_field( 'post_author', $post_id, 'raw' ) ) {
+            
+            $this->logger->info( 'Post without author, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-no-author-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                'Date' => $post_date,
+                'JSON Author' => json_encode( $json_item->author ),
+            ]);
+            
+        }
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $post_content ) ) {
+            
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Post with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                    'Date' => $post_date,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+
+    }
+
+	/**
+     * Clean up one user.
+     */
+    private function clean_up_user( int $user_id, $logger_slug ): void {
+
+        $user_data = get_userdata( $user_id );
+        $description = trim( get_user_meta( $user_id, 'description', true ) );
+
+        $json_item->biography = trim( $json_item->biography );
+        $json_item->byline = trim( $json_item->byline );
+
+        // Must have both values and not start with "guest author line"...
+        // Could be a case where the same info is displayed twice on top of eachother.
+        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge' ) ) {
+    
+            $this->logger->info( 'Both bio and byline, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-bios-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                'Bio' => $description,
+            ]);
+
+        }
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->biography . $json_item->byline ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Bios with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+        
+        // redirects (trimmed author urls).
+        if( str_replace( '/about/', '', $json_item->url ) !== $user_data->user_nicename ) {
+            
+            $this->logger->info( 'Author url changed, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-redirects-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+            ]);
+    
+        }
+
+    }
+
+    /**
+     * Clean up one term using verified (checksum) json_item.
+     */
+    private function clean_up_term( int $term_id, $logger_slug, $taxonomy ): void {
+
+        $json_item->description = trim( $json_item->description );
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->description ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Terms with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com' . wp_make_link_relative( get_term_link( $term_id, $taxonomy ) ),
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+
+    }
+
+    private function clean_up_content_un_fetched( $post_content ) {
+
+        $un_fetched = [];
+
+        $html_doc = new HtmlDocument( $post_content );
+    
+        // Assets in img src.
+        $images = $html_doc->find( 'img' );
+        foreach ( $images as $img ) {
+            $src = $img?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in script src.
+        $scripts = $html_doc->find( 'script' );
+        foreach ( $scripts as $script ) {
+            $src = $script?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in a href.
+        $links = $html_doc->find( 'a' );
+        foreach ( $links as $link ) {
+            $href = $link?->getAttribute( 'href' );            
+            if ( ! $href ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $href ) ) {
+                $un_fetched[] = $href;
+            }
+        }
+
+        return $un_fetched;
+
+    }
+
+    private function clean_up_content_un_fetched_assets_single( $url_from_cralwer ) {
+        
+        // Everything already expects relative paths so convert to relative.
+        $relative_path = trim( $url_from_cralwer );
+        $relative_path = preg_replace( '#^//(www\.)?bridgemi\.com#i', '', $relative_path ); // no scheme
+        $relative_path = preg_replace( '#^https?://(www\.)?bridgemi\.com#i', '', $relative_path ); // with scheme
+
+        // Must be relative at this point or return;
+        if( str_starts_with( $relative_path, '//' ) || ! str_starts_with( $relative_path, '/' ) ) return false;
+
+        // Must be link to an asset ext.
+        $parsed_url_path = parse_url( $relative_path, PHP_URL_PATH );
+        if( ! is_string( $parsed_url_path ) || empty( $parsed_url_path ) ) {
+            return false;
+        }
+        $parsed_url_ext = pathinfo( $parsed_url_path, PATHINFO_EXTENSION );
+        if( ! is_string( $parsed_url_ext ) || empty( $parsed_url_ext ) ) {
+            return false;
+        }
+        
+        $this->logger->info( 'Un fetched: ' . $url_from_cralwer );
+
+        return true;
+    }
+
 
 	/************************************
 	  CONTENT CONVERSIONS
@@ -1180,6 +1492,22 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		);
 	}
 
+	/**
+     * Logger for csvs
+     */
+    private function logger_csv_out( $logger_slug_csv, $data ) {
+    
+        // Create and set header row.
+        if( ! isset( $this->logger_csvs[ $logger_slug_csv ] ) ) {
+            $this->logger_csvs[ $logger_slug_csv ] = fopen( str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $logger_slug_csv . microtime( true ) . '.csv', 'w' );
+            fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_keys( $data ) );
+        }
+
+        // data values.
+        fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_values( $data ) );
+
+    }
+
 	/************************************
 	  WP HOOKS
 	************************************/
@@ -1222,7 +1550,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	  VALIDATIONS
 	************************************/
 
-	private function validate_setup() {
+	private function validate_setup( $skips = [] ) {
 
 		// Verify America/New_York (eastern / utc-4 timezone):
 		if( wp_timezone_string() !== $this->required_timezone ) {
@@ -1261,11 +1589,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		// ACF PRO
-		if( ! defined('ACF_PRO') ) {
+		if( ! in_array( 'skip-acfpro', $skips ) && ! defined('ACF_PRO') ) {
 			$this->logger->error( 'ACF PRO plugin not found. Install and activate it before using this command.' );
 			exit();
 		}
 
 	}
+    
+	private function validate_item_type( array $pos_args ): void {
+        if( empty( $pos_args ) || ! in_array( $pos_args[0], self::ITEM_TYPES, true ) ) {
+            WP_CLI::error( 'Positional argument must be one of: ' . implode( ', ', self::ITEM_TYPES ), true );
+        }
+    }
+
 
 }
