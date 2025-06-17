@@ -1144,11 +1144,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		if( $this->flag_set_final_data ) {
 			
 			// Reset the counters so new content can be imported (if final data is being run again).
-			update_option('fgd2wp_last_comment_id', 0); // uses fgd2wp_pre_insert_comment (above) for uniqueness.
+			// removed: too many issues during migration: update_option('fgd2wp_last_comment_id', 0); // uses fgd2wp_pre_insert_comment (above) for uniqueness.
 			update_option('fgd2wp_last_drupal_url_id', 0); // uses "INSERT IGNORE" into wp_fg_redirects.
 			
 			// Allow import.
-			$premium_options['skip_comments']  = false;
+			// removed: too many issues during migration: $premium_options['skip_comments']  = false;
 			$premium_options['skip_redirects'] = false;
 
 		}
