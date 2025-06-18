@@ -23,14 +23,24 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	use WpCliCommandTrait;
 
 	/**
+	 * Site ID for New Haven Independent.
+	 */
+	public const SITE_ID_NEW_HAVEN_INDEPENDENT = 1;
+
+	/**
 	 * Connecticut timezone for NHI (Eastern Time, handles DST automatically).
 	 */
 	public const NHI_TIMEZONE = 'America/New_York';
-
+	
+	/**
+	 * CDN assets hostname.
+	 */
+	public const CDN_ASSET_HOSTNAME = 'd2f1dfnoetc03v.cloudfront.net';
+	
 	/**
 	 * All possible entry types in the prod DB ("fieldPreparsedEntryType").
 	 */
-	public const ENTRY_TYPES = [
+	public const CRAFT_ENTRY_TYPES = [
 		'typeLegalNotices',
 		'typeSingleLink',
 		'typeRegularArticle',
@@ -43,30 +53,25 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 *
 	 * @var array
 	 */
-	public const ENTRY_STATUSES_TO_POST_STATUSES = [
+	public const CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES = [
 		'disabled' => 'draft',
 		'expired'  => 'draft',
 		'live'     => 'publish',
 	];
 
 	/**
-	 * All possible comment status values in the prod db.
+	 * Comment status values in the prod db.
 	 */
-	public const COMMENT_STATUSES = [
+	public const CRAFT_COMMENT_STATUSES = [
 		'approved',
 		'trashed',
 		'spam',
 	];
 
 	/**
-	 * CDN asset hostname.
-	 */
-	public const CDN_ASSET_HOSTNAME = 'd2f1dfnoetc03v.cloudfront.net';
-
-	/**
 	 * Field mappings for different content types.
 	 */
-	private const FIELD_MAPPINGS = [
+	public const FIELD_MAPPINGS = [
 		'main_content' => [
 			'text_content'            => 'field_blockText_itemContent',
 			'image_content'           => 'field_blockImage_itemContent',
@@ -118,11 +123,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			'graphic_custom_width'    => 'field_blockGraphic_itemCustomWidth',
 		],
 	];
-
-	/**
-	 * Site ID for New Haven Independent.
-	 */
-	private const SITE_ID_NEW_HAVEN_INDEPENDENT = 1;
 
 	/**
 	 * Taxonomy logic.
@@ -336,12 +336,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		foreach ( $entries_json_files as $entries_json_file ) {
 			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			
-			// // Child cat.
+			// // E.g. entry with child cat.
 			// $entries = $this->get_entries_from_json_file_descending( '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_eg_withChildCat_expanded.json' );
-			// Delauro.
+			// E.g. entry Delauro.
 			$entries = $this->get_entries_from_json_file_descending( '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json' );
 
+			// Import entries.
 			foreach ( $entries as $entry ) {
+				
 				// Clear post data.
 				$post_data = [];
 				$postmetas = [];
@@ -366,8 +368,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					$post_data['post_name'] = basename( $path );
 				}
 				// Status.
-				if ( isset( self::ENTRY_STATUSES_TO_POST_STATUSES[ $entry['status'] ] ) ) {
-					$post_data['post_status'] = self::ENTRY_STATUSES_TO_POST_STATUSES[ $entry['status'] ];
+				if ( isset( self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ] ) ) {
+					$post_data['post_status'] = self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ];
 				} else {
 					WP_CLI::warning( sprintf( "ERROR inserting post id %d, title '%s', status %s -- status is not defined. Setting post 'draft' status.", $entry['id'], $post_data['title'], $entry['status'] ) );
 					$post_data['post_status'] = 'draft';
@@ -391,7 +393,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						continue;
 					}
 				}
-				// Also assign "Entry Type" subcategory, for visibility in initial migration.
+				// Also assign "Entry Type" subcategory.
 				$entry_type_category_id    = $this->get_entry_type_category( $entry['fieldPreparsedEntryType'] );
 				$post_data['categories'][] = $entry_type_category_id;
 				
@@ -410,17 +412,25 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				
 				
 				/**
+				 * Insert post.
+				 */
+				$post_id = wp_insert_post( $post_data );
+				if ( is_wp_error( $post_id ) ) {
+					WP_CLI::warning( sprintf( 'ERROR inserting post %s : %s', $post_data['title'], $post_id->get_error_message() ) );
+				}
+				WP_CLI::print_value( sprintf( 'Inserted post %s with ID %s', $post_data['title'], $post_id ) );
+				
+
+				/**
 				 * Bylines and author data.
 				 */
-				$author  = null;
-				$bylines = $this->get_entry_bylines( $entry, $users_data, $prod_db );
-
-				// Create user(s) from bylines or Craft author.
+				$coauthors = [];
+				$author    = null;
+				$bylines   = $this->get_entry_bylines( $entry, $users_data, $prod_db );
+				// If bylines are set, those are the post authors.
 				if ( ! empty( $bylines ) ) {
-					$coauthors = [];
-					// If bylines exist, they override Craft 'author' data.
 					foreach ( $bylines as $byline ) {
-						// Get or create user.
+						// Get or create WP user from byline.
 						$wp_user_unique_identifier = 'newspack_migration_byline ' . $byline;
 						$wp_user_data              = [
 							'display_name' => $byline,
@@ -434,14 +444,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						if ( is_wp_error( $wp_user ) ) {
 							WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
 						}
-						
+						// Add to coauthors.
 						$coauthors[] = $wp_user;
 					}
 				} else {
-					// If bylines aren't set, use Craft 'author' for post author.
+					// If bylines aren't set, use Craft entry author as post author.
 					$author = $this->get_user_data( $entry['authorId'], $users_data, $prod_db );
-
-					// Create WP user from 'author'.
+					// Create WP user from entry author.
 					$wp_user_unique_identifier = 'newspack_migration_author_id ' . $author['id'];
 					$wp_user_data              = [
 						'user_email'   => $entry['email'],
@@ -471,6 +480,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					// Import avatar image.
 					$avatar_attachment_id = null;
 					if ( ! empty( $author['avatar_image_url'] ) ) {
+						
 						// TODO.
 						$avatar_attachment_id;
 
@@ -496,39 +506,71 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				if ( empty( $coauthors ) ) {
 					WP_CLI::error( sprintf( "ERROR assigning coauthors to entry ID %d, title '%s' : no coauthors found", $entry['id'], $entry['title'] ) );
 				} elseif ( count( $coauthors ) === 1 ) {
-					// There's just one author. Use `wp_users`.`author`.
+					// There's just one author -- use `wp_users`.`author`.
 					$wp_user_id = $coauthors[0]->ID;
-					$wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+					$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 						$wpdb->posts,
 						[ 'post_author' => $wp_user_id ],
 						[ 'ID' => $post_id ]
 					);
+					if ( false === $updated ) {
+						WP_CLI::warning( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
+					}
 
-					// Unassign any existing coauthors.
+					// Unassign any coauthors.
 					$this->coauthors->unassign_all_guest_authors_from_post( $post_id, false );
 				} else {
-					// Multiple, assign as   coauthors.
+					// Multiple coauthors.
 					$this->coauthors->assign_authors_to_post( $coauthors, $post_id, false );
 				}
 
 				
-	
 				/**
 				 * Comments.
 				 */
-				self::COMMENT_STATUSES;
 				$comments = $this->get_entry_comments( $entry['id'], $prod_db );
-	
+				foreach ( $comments as $comment ) {
+					// Get author name either from existing Craft user ID, or from custom text byline.
+					$comment_autor_name = null;
+					if ( ! empty( $comment['author_user_id'] ) ) {
+						$comment_autor      = $this->get_user_data( $comment['author_user_id'], $users_data, $prod_db );
+						$comment_autor_name = $comment_autor['display_name'];
+					} else {
+						$comment_autor_name = $comment['author_name'];
+					}
+					if ( is_null( $comment_autor_name ) ) {
+						WP_CLI::warning( sprintf( 'ERROR inserting comment ID %d for entry ID %d, post ID %d', $comment['id'], $entry['id'], $post_id ) );
+						continue;
+					}
+					
+					// Insert comment.
+					$comment_data = [
+						'comment_post_ID'  => $post_id,
+						'comment_approved' => 'approved' === $comment['status'] ? 1 : 0,
+						'comment_author'   => $comment_autor_name,
+						'comment_content'  => $comment['comment'],
+						'comment_date'     => $comment['comment_date'],
+					];
+					$comment_id   = wp_insert_comment( $comment_data );
+					if ( false === $comment_id ) {
+						WP_CLI::warning( sprintf( 'ERROR inserting comment for post ID %s : %s', $post_id, $wpdb->last_error ) );
+						continue;
+					}
 
-				/**
-				 * Insert post.
-				 */
-				$post_id = wp_insert_post( $post_data );
-				if ( is_wp_error( $post_id ) ) {
-					WP_CLI::warning( sprintf( 'ERROR inserting post %s : %s', $post_data['title'], $post_id->get_error_message() ) );
+					// Add comment metas.
+					$commentmetas = [
+						'newspack_migration_legacy_id'   => $comment['id'],
+						'newspack_migration_flagged'     => $comment['flagged'],
+						'newspack_migration_status'      => $comment['status'],
+						'newspack_migration_author_name' => $comment['author_name'],
+						'newspack_migration_author_user_id' => $comment['author_user_id'],
+						'newspack_migration_user_id'     => $comment['user_id'],
+					];
+					foreach ( $commentmetas as $key => $value ) {
+						add_comment_meta( $comment_id, $key, $value );
+					}
 				}
-				WP_CLI::print_value( sprintf( 'Inserted post %s with ID %s', $post_data['title'], $post_id ) );
-				
+	
 
 				/**
 				 * Assign post metas.
@@ -545,7 +587,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					update_post_meta( $post_id, $key, $value );
 				}
 				
-
 
 				/**
 				 * Featured image.
@@ -568,22 +609,22 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				 *      lede "Photo Caption"        => Attachment "Caption"
 				 */
 				// Get featured image data.
-				$asset_json_data      = $this->get_matrixLede_first_block_image_data( $entry );
-				$asset_db_data        = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
-				$asset_date_created   = $this->convert_server_time_to_nhi_time( $asset_db_data['date_created'], self::NHI_TIMEZONE );
-				$featured_image_id    = $this->attachments->import_external_file(
-					$path             = $asset_db_data['url'], // phpcs:ignore -- Allow the style of multiple assignments, easier to proof read arguments for import_external_file. Squiz.PHP.DisallowMultipleAssignments.Found.
-					$title            = $asset_db_data['title'],
-					$caption          = $asset_json_data['itemContent'],
-					$description      = $asset_db_data['description'],
-					$alt              = null,
+				$asset_json_data    = $this->get_matrixLede_first_block_image_data( $entry );
+				$asset_db_data      = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
+				$asset_date_created = $this->convert_server_time_to_nhi_time( $asset_db_data['date_created'], self::NHI_TIMEZONE );
+				$featured_image_id  = $this->attachments->import_external_file(
+					$asset_db_data['url'], // phpcs:ignore -- Allow the style of multiple assignments, easier to proof read arguments for import_external_file. Squiz.PHP.DisallowMultipleAssignments.Found.
+					$asset_db_data['title'],
+					$asset_json_data['itemContent'],
+					$asset_db_data['description'],
+					null,
 					$post_id,
-					$args             = [],
-					$desired_filename = $asset_db_data['filename'],
-					$try_existing     = true
+					[],
+					$asset_db_data['filename'],
+					true
 				);
 				// Update featured image creation date to original asset date created (not a requirement, just for a bit extra convenience).
-				$wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 					$wpdb->posts,
 					[
 						'post_date'     => $asset_date_created,
@@ -591,6 +632,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					],
 					[ 'ID' => $featured_image_id ]
 				);
+				if ( false === $updated ) {
+					WP_CLI::warning( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $featured_image_id, $wpdb->last_error ) );
+				}
+				
 				$featured_image_metas = [
 					'_media_credit'                     => $asset_db_data['credit'],
 					'newspack_migration_legacy_id'      => $asset_json_data['id'],
@@ -1385,7 +1430,7 @@ exit;
 	 *   - author_name: string|null User display name or custom text byline.
 	 *   - author_user_id: int|null If this comment came from an existing user, this is the user ID. Otherwise, null -- this may be called an "anonymous" user (because it's not a registered user), but it still has a display name.
 	 *   - comment: string
-	 *   - comment_date: string The value of comments_comments.commentDate, which is the timestamp shown on the frontend (in UTC, convert to local time for display). Other date fields exist in the DB.
+	 *   - comment_date: string Converted to NHI timezone.
 	 *   - status: string
 	 *   - user_id: int|null
 	 *   - flagged: bool Whether the comment is flagged.
