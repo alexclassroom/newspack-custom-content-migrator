@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Taxonomy;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 use wpdb;
@@ -20,6 +21,28 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * Connecticut timezone for NHI (Eastern Time, handles DST automatically).
 	 */
 	public const NHI_TIMEZONE = 'America/New_York';
+
+	/**
+	 * All possible entry types in the prod DB ("fieldPreparsedEntryType").
+	 */
+	public const ENTRY_TYPES = [
+		'typeLegalNotices',
+		'typeSingleLink',
+		'typeRegularArticle',
+		'typeArchivalArticle',
+		'typeFeaturedArticle',
+	];
+
+	/**
+	 * Entry statuses to post statuses.
+	 *
+	 * @var array
+	 */
+	public const ENTRY_STATUSES_TO_POST_STATUSES = [
+		'disabled' => 'draft',
+		'expired'  => 'draft',
+		'live'     => 'publish',
+	];
 
 	/**
 	 * All possible comment status values in the prod db.
@@ -97,6 +120,20 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	private const SITE_ID_NEW_HAVEN_INDEPENDENT = 1;
 
 	/**
+	 * Taxonomy logic.
+	 *
+	 * @var Taxonomy $taxonomy_logic The taxonomy logic.
+	 */
+	private $taxonomy_logic;
+
+	/**
+	 * Constructor.
+	 */
+	public function __construct() {
+		$this->taxonomy_logic = new Taxonomy();
+	}
+
+	/**
 	 * {@inheritDoc}
 	 */
 	public static function register_commands(): void {
@@ -107,7 +144,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				'synopsis' => [
 					[
 						'type'     => 'assoc',
-						'name'     => 'json-expanded-entries',
+						'name'     => 'json-expanded-entries-folder',
 						'optional' => false,
 					],
 					[
@@ -156,7 +193,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				'synopsis' => [
 					[
 						'type'     => 'assoc',
-						'name'     => 'json-expanded-entries',
+						'name'     => 'json-expanded-entries-folder',
 						'optional' => false,
 					],
 					[
@@ -201,18 +238,17 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get the production database connection.
+	 * Get a custom database connection.
 	 *
-	 * @param string $prod_db_name The production database name.
-	 * @param string $prod_db_user The production database user.
-	 * @param string $prod_db_pass The production database password.
-	 * @param string $prod_db_host The production database host.
-	 * @param string $prod_db_port The production database port.
-	 * @return \wpdb|null The production database connection or null if the connection fails.
+	 * @param string $db_name The database name.
+	 * @param string $db_user The database user.
+	 * @param string $db_pass The database password.
+	 * @param string $db_host The database host.
+	 * @param string $db_port The database port.
+	 * @return \wpdb|null The database connection or null if the connection fails.
 	 */
-	private function get_prod_db( string $prod_db_name, string $prod_db_user, string $prod_db_pass, string $prod_db_host, string $prod_db_port ) {
-		$new_db = new \wpdb( $prod_db_user, $prod_db_pass, $prod_db_name, $prod_db_host, $prod_db_port );
-		// Verify the connection was successful.
+	private function get_db_connection( string $db_name, string $db_user, string $db_pass, string $db_host, string $db_port ) {
+		$new_db = new \wpdb( $db_user, $db_pass, $db_name, $db_host, $db_port );
 		if ( ! empty( $new_db->last_error ) ) {
 			return null;
 		}
@@ -229,21 +265,158 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args The associative arguments.
 	 */
 	public function cmd_test( array $pos_args, array $assoc_args ): void {
-		$entries_json_file                 = $assoc_args['json-expanded-entries'];
-		$users_json_file                   = $assoc_args['json-expanded-users'];
-		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
-		$prod_db_name                      = $assoc_args['prod-db-name'];
-		$prod_db_user                      = $assoc_args['prod-db-user'];
-		$prod_db_pass                      = $assoc_args['prod-db-pass'];
-		$prod_db_host                      = $assoc_args['prod-db-host'];
-		$prod_db_port                      = $assoc_args['prod-db-port'];
+		$prod_db_name                       = $assoc_args['prod-db-name'];
+		$prod_db_user                       = $assoc_args['prod-db-user'];
+		$prod_db_pass                       = $assoc_args['prod-db-pass'];
+		$prod_db_host                       = $assoc_args['prod-db-host'];
+		$prod_db_port                       = $assoc_args['prod-db-port'];
+		$entries_jsons_folder               = $assoc_args['json-expanded-entries-folder'];
+		$users_json_file                    = $assoc_args['json-expanded-users'];
+		$categories_news_expanded_json_file = $assoc_args['json-expanded-categories-news-sections'];
 		
-		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
+		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
 		// phpcs:disable -- temporary dev code.
+
+		// Test Delauro entry.
+		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
 		$users_data = json_decode( file_get_contents( $users_json_file ), true );
 		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
 		$entry      = $entry_data[0];
+		// $entry_id = 11903505; // this example has a featured image.
+
+		WP_CLI::print_value( '--- VALIDATION TEST: ARE ENTRY IDS UNIQUE IN ALL JSON FILES?  -----------------------------' );
+		
+		// Get all JSON files from folder (descending order).
+		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
+		}
+		
+		exit;
+
+		WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
+		$entry_ids = [
+			// blockHeading
+			10001903, 10001995, 10002432, 10003360, 
+			// blockText.
+			10000517, 100007, 10000737, 10000951, 10001, 
+			// blockRawHTML.
+			10101356, 10107340, 10114756, 10128962, 10134667, 
+			// blockVideo.
+			10001903, 10002432, 10003945, 10004356, 10005872, 
+			// blockImage.
+			10000517, 10001370, 10001536, 10001880, 10001906, 
+			// blockExternalImage.
+			9976675, 9977934, 9985266, 9985270, 9990704, 
+			// blockPoll.
+			10001995, 10008484, 10053994, 10066330, 10088942, 
+			//blockSeparator.
+			// -- JUST 10 TOTAL CONTENT.
+			10106224, 10114756, 10229093, 10588553, 11645370, 
+			// blockQuote.
+			// -- JUST 4 TOTAL CONTENT:
+			10282510, 10707615, 11623071, 372059, 
+			// blockGraphic.
+			// -- used in just 2 entites in Content:
+			// -- and also in just 2 entites in Lede:
+			9812751, 9864293, 
+		];
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/content_and_lede_blocktypes_IDS/0_demo_entries.json';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$entries_file_data = [];
+		$entries_picked_data = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				if ( in_array( $entry['id'], $entry_ids ) ) {
+					// $entries_picked_data[] = $entry;
+					$entries_picked_data[ $entry['id'] ][] = $entry;
+				}
+			}
+		}
+		WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
+		WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
+exit;
+		if ( file_exists( $path_single_json_entries ) ) {
+			unlink( $path_single_json_entries );
+		}
+		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
+		exit;
+
+		
+		WP_CLI::print_value( '--- GET ALL CONTENT BLOCK TYPES JSONS and ENTRY IDS WHICH USE THEM  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$folder_to_save_logs = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/content_and_lede_blocktypes';
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				if ( isset( $entry['matrixTeaser'] ) && ! empty( $entry['matrixTeaser'] ) ) {
+					foreach ( $entry['matrixTeaser'] as $teaser_block ) {
+						// Save each matrixTeaser block type file with entry IDs which use it.
+						file_put_contents(
+							$folder_to_save_logs . '/' . sprintf( 'matrixTeaser_%s.csv', $teaser_block['type'] ),
+							$entry['id'] . "\n",
+							FILE_APPEND
+						);
+					}
+				}
+				if ( isset( $entry['matrixLede'] ) && ! empty( $entry['matrixLede'] ) ) {
+					foreach ( $entry['matrixLede'] as $teaser_block ) {
+						// Save each matrixTeaser block type file with entry IDs which use it.
+						file_put_contents(
+							$folder_to_save_logs . '/' . sprintf( 'matrixLede_%s.csv', $teaser_block['type'] ),
+							$entry['id'] . "\n",
+							FILE_APPEND
+						);
+					}
+				}
+				if ( isset( $entry['matrixMainContent'] ) && ! empty( $entry['matrixMainContent'] ) ) {
+					foreach ( $entry['matrixMainContent'] as $teaser_block ) {
+						// Save each matrixTeaser block type file with entry IDs which use it.
+						file_put_contents(
+							$folder_to_save_logs . '/' . sprintf( 'matrixMainContent_%s.csv', $teaser_block['type'] ),
+							$entry['id'] . "\n",
+							FILE_APPEND
+						);
+					}
+				}
+			}
+		}
+		exit;
+
+		WP_CLI::print_value( '--- GET ALL ENTRY IDs FROM JSONS  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$entry_ids = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				$entry_ids[] = $entry['id'];
+			}
+		}
+		// Save CSV entry IDs to /Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv
+		$csv_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv';
+		$csv_file_handle = fopen( $csv_file, 'w' );
+		fputcsv( $csv_file_handle, [ 'entry_id' ] );
+		foreach ( $entry_ids as $entry_id ) {
+			fputcsv( $csv_file_handle, [ $entry_id ] );
+		}
+		fclose( $csv_file_handle );
+		exit;
 
 		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
 		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
@@ -371,172 +544,204 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args The associative arguments.
 	 */
 	public function cmd_import( array $pos_args, array $assoc_args ): void {
-		$entries_json_file                 = $assoc_args['json-expanded-entries'];
-		$users_json_file                   = $assoc_args['json-expanded-users'];
-		$categories_expanded_newsjson_file = $assoc_args['json-expanded-categories-news-sections'];
-		$prod_db_name                      = $assoc_args['prod-db-name'];
-		$prod_db_user                      = $assoc_args['prod-db-user'];
-		$prod_db_pass                      = $assoc_args['prod-db-pass'];
-		$prod_db_host                      = $assoc_args['prod-db-host'];
-		$prod_db_port                      = $assoc_args['prod-db-port'];
+		$prod_db_name                       = $assoc_args['prod-db-name'];
+		$prod_db_user                       = $assoc_args['prod-db-user'];
+		$prod_db_pass                       = $assoc_args['prod-db-pass'];
+		$prod_db_host                       = $assoc_args['prod-db-host'];
+		$prod_db_port                       = $assoc_args['prod-db-port'];
+		$entries_jsons_folder               = $assoc_args['json-expanded-entries-folder'];
+		$users_json_file                    = $assoc_args['json-expanded-users'];
+		$categories_news_expanded_json_file = $assoc_args['json-expanded-categories-news-sections'];
 		
-		$prod_db = $this->get_prod_db( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
+		// Get Craft CMS database connection.
+		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
+		// Get users data.
 		$users_data = json_decode( file_get_contents( $users_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
-		$entry_data = json_decode( file_get_contents( $entries_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+		if ( ! is_array( $users_data ) ) {
+			WP_CLI::error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $users_json_file, $users_data ) );
+		}
 
+		// Get categories data.
+		$sections_data = json_decode( file_get_contents( $categories_news_expanded_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+		if ( ! is_array( $sections_data ) ) {
+			WP_CLI::error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $categories_news_expanded_json_file, $sections_data ) );
+		}
 
-		/**
-		 * Import entries.
-		 */
-		foreach ( $entry_data as $entry ) {
+		// Import entries.
+		// Get all JSON files from folder (descending order of date created).
+		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			
-			/**
-			 * Post.
-			 */
-			$postmetas = [
-				'newspack_migration_legacy_id'  => null,
-				'newspack_migration_legacy_uid' => null,
-				'newspack_migration_legacy_url' => null,
-			];
-			$post_data = [
-				'title'          => null,
-				'content'        => null,
-				'excerpt'        => null,
-				'url'            => null,
-				'status'         => null,
-				'date_created'   => null,
-				'date_modified'  => null,
-				'comment_status' => null,
-			];
-			// --- Get post data. ---
-			$postmetas['newspack_migration_legacy_id']  = $entry['id'];
-			$postmetas['newspack_migration_legacy_uid'] = $entry['uid'];
-			$postmetas['newspack_migration_legacy_url'] = $entry['url'];
-			// Title, slug.
-			$post_data['title'] = $entry['title'];
-			$post_data['url']   = $entry['url'];
-			// Dates -- ISO 8601 timestamps in UTC, converted to NHI timezone.
-			$date_created               = new \DateTime( $entry['postDate'] );
-			$date_created_timestamp     = $date_created->format( 'Y-m-d H:i:s' );
-			$date_created_converted     = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
-			$post_data['date_created']  = $date_created_converted;
-			$date_modified              = new \DateTime( $entry['dateUpdated'] );
-			$date_modified_timestamp    = $date_modified->format( 'Y-m-d H:i:s' );
-			$date_modified_converted    = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
-			$post_data['date_modified'] = $date_modified_converted;
-			
+			$entries = $this->get_entries_from_json_file_descending( '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_eg_withChildCat_expanded.json' );
 
-			/**
-			 * Categories.
-			 */
-			foreach ( $entry['fieldSections'] as $fieldSection ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				// TODO create category using new Taxonomy/Category helper.
-				$post_data['categories'];
-			}
-			
+			foreach ( $entries as $entry ) {
+				
+				// Clear post data.
+				$post_data = [];
+				$postmetas = [];
 
-			/**
-			 * Tags.
-			 */
-			foreach ( $entry['fieldTags'] as $fieldTag_data ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				$tag_name            = $this->get_tag_by_id( $fieldTag_data['tagId'], $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				$post_data['tags'][] = $tag_name;
-			}
+				/**
+				 * Post data.
+				 */
+				$post_data['title'] = $entry['title'];
+				$post_data['url']   = $entry['url'];
+				// Dates are in ISO 8601 and in UTC, convert to NHI timezone.
+				$date_created               = new \DateTime( $entry['postDate'] );
+				$date_created_timestamp     = $date_created->format( 'Y-m-d H:i:s' );
+				$date_created_converted     = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
+				$post_data['post_date']     = $date_created_converted;
+				$date_modified              = new \DateTime( $entry['dateUpdated'] );
+				$date_modified_timestamp    = $date_modified->format( 'Y-m-d H:i:s' );
+				$date_modified_converted    = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
+				$post_data['post_modified'] = $date_modified_converted;
+				// Check entry status.
+				if ( ! isset( self::ENTRY_STATUSES_TO_POST_STATUSES[ $entry['status'] ] ) ) {
+					WP_CLI::warning( sprintf( 'ERROR inserting post %s : status %s is not defined', $post_data['title'], $entry['status'] ) );
+					continue;
+				}
+				$post_data['post_status']    = self::ENTRY_STATUSES_TO_POST_STATUSES[ $entry['status'] ];
+				$post_data['comment_status'] = isset( $entry['fieldComment']['commentEnabled'] ) && true === $entry['fieldComment']['commentEnabled'] ? 'open' : 'closed';
 
-
-			/**
-			 * Featured image.
-			 * 
-			 * Featured image data is located in two places in Craft CMS:
-			 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
-			 *    => this info is retrieved by `get_asset_image_data`:
-			 *      asset "id"                  => postmeta "newspack_migration_asset_id"
-			 *      asset "url"                 => postmeta "newspack_migration_asset_url"
-			 *                                  => Attachment "slug"
-			 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
-			 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
-			 *      asset "Title"               => Attachment "Title"
-			 *      asset "Credit"              => Attachment "Credit"
-			 *      asset "Description"         => Attachment "Description"
-			 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
-			 *      asset "width"               => postmeta "newspack_migration_asset_width"
-			 *      asset "height"              => postmeta "newspack_migration_asset_height"
-			 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
-			 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
-			 *      lede "Photo Caption"        => Attachment "Caption"
-			 */
-			// Featured image import data.
-			$featured_image       = [
-				'url'                 => null,
-				'alt'                 => null,
-				'title'               => null,
-				'caption'             => null,
-				'description'         => null,
-				'credit'              => null,
-				'credit_url'          => null,
-				'credit_organization' => null,
-			];
-			$featured_image_metas = [
-				'newspack_migration_legacy_id' => null,
-			];
-			// Get featured image data.
-			$asset_data         = $this->get_matrixLede_itemAsset_data( $entry );
-			$asset_id           = $asset_data['id'];
-			$asset_item_content = $asset_data['itemContent'];
-			$asset_data         = $this->get_asset_image_data( $asset_id, $prod_db );
-			$asset_date_created = $asset_data['date_created'];
-			$asset_url          = $asset_data['url'];
-			$asset_filename     = $asset_data['filename'];
-			$asset_title        = $asset_data['title'];
-			$asset_description  = $asset_data['description'];
-			$asset_credit       = $asset_data['credit'];
-			$asset_uploader     = $asset_data['uploader'];
-			$asset_width        = $asset_data['width'];
-			$asset_height       = $asset_data['height'];
-			$asset_item_content = $asset_data['itemContent'];
-			// Featured image meta.
-			$featured_image_metas['newspack_migration_legacy_id'] = $asset_id;
+				// TODO $post_data['post_content'];
+				// TODO $post_data['post_excerpt'];
+				
+				/**
+				 * Categories.
+				 */
+				foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					$category_id               = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
+					$post_data['categories'][] = $category_id;
+				}
+				// Add entry type subcategory migration visibility.
+				$entry_type_category_id    = $this->get_entry_type_category( $entry['fieldPreparsedEntryType'] );
+				$post_data['categories'][] = $entry_type_category_id;
+				// continue;                
+				exit;
+	
+				/**
+				 * Tags.
+				 */
+				foreach ( $entry['fieldTags'] as $fieldTag_data ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					$tag_name            = $this->get_tag_by_id( $fieldTag_data['tagId'], $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					$post_data['tags'][] = $tag_name;
+				}
+	
+	
+				/**
+				 * Featured image.
+				 * 
+				 * Featured image data is located in two places in Craft CMS:
+				 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
+				 *    => this info is retrieved by `get_asset_image_data`:
+				 *      asset "id"                  => postmeta "newspack_migration_asset_id"
+				 *      asset "url"                 => postmeta "newspack_migration_asset_url"
+				 *                                  => Attachment "slug"
+				 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+				 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
+				 *      asset "Title"               => Attachment "Title"
+				 *      asset "Credit"              => Attachment "Credit"
+				 *      asset "Description"         => Attachment "Description"
+				 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
+				 *      asset "width"               => postmeta "newspack_migration_asset_width"
+				 *      asset "height"              => postmeta "newspack_migration_asset_height"
+				 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
+				 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
+				 *      lede "Photo Caption"        => Attachment "Caption"
+				 */
+				// Featured image import data.
+				$featured_image       = [
+					'url'                 => null,
+					'alt'                 => null,
+					'title'               => null,
+					'caption'             => null,
+					'description'         => null,
+					'credit'              => null,
+					'credit_url'          => null,
+					'credit_organization' => null,
+				];
+				$featured_image_metas = [
+					'newspack_migration_legacy_id' => null,
+				];
+				// Get featured image data.
+				$asset_data         = $this->get_matrixLede_itemAsset_data( $entry );
+				$asset_id           = $asset_data['id'];
+				$asset_item_content = $asset_data['itemContent'];
+				$asset_data         = $this->get_asset_image_data( $asset_id, $prod_db );
+				$asset_date_created = $asset_data['date_created'];
+				$asset_url          = $asset_data['url'];
+				$asset_filename     = $asset_data['filename'];
+				$asset_title        = $asset_data['title'];
+				$asset_description  = $asset_data['description'];
+				$asset_credit       = $asset_data['credit'];
+				$asset_uploader     = $asset_data['uploader'];
+				$asset_width        = $asset_data['width'];
+				$asset_height       = $asset_data['height'];
+				$asset_item_content = $asset_data['itemContent'];
+				// Featured image meta.
+				$featured_image_metas['newspack_migration_legacy_id'] = $asset_id;
+		
+	
+				/**
+				 * Bylines.
+				 * If bylines exist, they override author data.
+				 */
+				$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
+	
+	
+				/**
+				 * Author.
+				 */
+				$author_data  = [
+					'email'            => null,
+					'avatar_image_url' => null,
+					'display_name'     => null,
+					'first_name'       => null,
+					'last_name'        => null,
+					'bio'              => null,
+				];
+				$author_metas = [
+					'newspack_migration_legacy_id'  => null,
+					'newspack_migration_legacy_uid' => null,
+					'newspack_migration_legacy_avatar_photo_id' => null,
+				];
+				// Get author data.
+				$author_id   = $entry['authorId'] ?? null;
+				$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
+				// Author meta.
+				$author_metas['newspack_migration_legacy_id']              = $author_id;
+				$author_metas['newspack_migration_legacy_uid']             = $author_data['uid'];
+				$author_metas['newspack_migration_legacy_avatar_photo_id'] = $author_data['avatar_photo_id'];
+	
+				// Set author.
+				$post_data['post_author'];
+	
+				/**
+				 * Comments.
+				 */
+				self::COMMENT_STATUSES;
+				$comments = $this->get_entry_comments( $entry['id'], $prod_db );
 	
 
-			/**
-			 * Bylines.
-			 * If bylines exist, they override author data.
-			 */
-			$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
+				/**
+				 * Post metas.
+				 */
+				$postmetas['newspack_migration_legacy_id']    = $entry['id'];
+				$postmetas['newspack_migration_legacy_uid']   = $entry['uid'];
+				$postmetas['newspack_migration_legacy_url']   = $entry['url'];
+				$postmetas['newspack_migration_entry_type']   = $entry['fieldPreparsedEntryType'];
+				$postmetas['newspack_migration_entry_status'] = $entry['status'];
 
 
-			/**
-			 * Author.
-			 */
-			$author_data  = [
-				'email'            => null,
-				'avatar_image_url' => null,
-				'display_name'     => null,
-				'first_name'       => null,
-				'last_name'        => null,
-				'bio'              => null,
-			];
-			$author_metas = [
-				'newspack_migration_legacy_id'  => null,
-				'newspack_migration_legacy_uid' => null,
-				'newspack_migration_legacy_avatar_photo_id' => null,
-			];
-			// Get author data.
-			$author_id   = $entry['authorId'] ?? null;
-			$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
-			// Author meta.
-			$author_metas['newspack_migration_legacy_id']              = $author_id;
-			$author_metas['newspack_migration_legacy_uid']             = $author_data['uid'];
-			$author_metas['newspack_migration_legacy_avatar_photo_id'] = $author_data['avatar_photo_id'];
-
-
-			/**
-			 * Comments.
-			 */
-			self::COMMENT_STATUSES;
-			$comments = $this->get_entry_comments( $entry['id'], $prod_db );
-
+				$post_id = wp_insert_post( $post_data );
+				if ( is_wp_error( $post_id ) ) {
+					WP_CLI::warning( sprintf( 'ERROR inserting post %s : %s', $post_data['title'], $post_id->get_error_message() ) );
+				}
+				WP_CLI::print_value( sprintf( 'Inserted post %s with ID %s', $post_data['title'], $post_id ) );
+				exit;
+	
+			}
 		}
 
 		/**
@@ -544,6 +749,136 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 *      entries
 		 *      categories
 		 */
+	}
+
+	/**
+	 * Get entries JSON files in descending order.
+	 * 
+	 * The JSONs are created via paginated exports, ordered by date created ascending.
+	 * In order to read and import the newest versions of entries first (think revisions), we need to get them in reversed order, in date created descending:
+	 *    - first order the JSON files in descending order
+	 *    - then also when reading single JSON files, order entries from those files in reverse order as well
+	 * 
+	 * @param string $entries_jsons_folder The folder containing the entries JSON files.
+	 * 
+	 * @return array JSON files in descending order.
+	 */
+	private function get_json_entries_files_descending( string $entries_jsons_folder ): array {
+		$entries_json_files = glob( $entries_jsons_folder . '/*.json' );
+
+		/**
+		 * File names will not sort correctly as strings, because page numbers have different number of digits:
+		 *   - entries_p1.json
+		 *   - entries_p10.json
+		 *   - entries_p100.json
+		 * So get the files in an array where keys are page numbers, and values are file paths, then it's easy to sort by keys.
+		 */
+		$entries_json_files_descending = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			// Expected expanded JSON export file names: "entries_p{NUMBER}.json", where {NUMBER} is page number from paginated backend entries list ordered by date created ascending.
+			$number = preg_replace( '/^.*entries_p(\d+)\.json$/', '$1', $entries_json_file );
+			if ( ! is_numeric( $number ) ) {
+				WP_CLI::error( sprintf( 'ERROR ordering JSON file %s : %s is not a number', $entries_json_file, $number ) );
+			}
+			$entries_json_files_descending[ (int) $number ] = $entries_json_file;
+		}
+
+		// First sort by keys.
+		ksort( $entries_json_files_descending );
+		// Reverse the array, so that files are in date created descending -- newest first.
+		$entries_json_files_descending = array_reverse( $entries_json_files_descending );
+		
+		return $entries_json_files_descending;
+	}
+	
+	/**
+	 * Get entries from a JSON file in reversed order.
+	 * JSON file is expected to contain an array of entries, ordered by date created ascending.
+	 * By reversing the entries, the newest ones come first.
+	 * 
+	 * @param string $entries_json_file The path to the JSON file.
+	 * 
+	 * @return array The entries data from JSON, reversed.
+	 */
+	private function get_entries_from_json_file_descending( string $entries_json_file ): array {
+		$entries_data = json_decode( file_get_contents( $entries_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+		if ( ! is_array( $entries_data ) ) {
+			WP_CLI::error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $entries_json_file, $entries_data ) );
+		}
+		// Reverse array.
+		$entries_data = array_reverse( $entries_data );
+
+		return $entries_data;
+	}
+
+	/**
+	 * Get WP category ID from fieldSection.
+	 * 
+	 * @param int   $field_section_id  The fieldSection ID.
+	 * @param array $sections_data The categories/sections data "expanded" export from Craft CMS.
+	 * 
+	 * @return ?int The category ID, or null if not found.
+	 * 
+	 * @throws \RuntimeException If errors occur.
+	 */
+	public function get_category_from_fieldSection( int $field_section_id, array $sections_data ): ?int {
+		foreach ( $sections_data as $category ) {
+			if ( $field_section_id != $category['id'] ) {
+				continue;
+			}
+
+			// Get section data.
+			$section_data = null;
+			foreach ( $sections_data as $section ) {
+				if ( $field_section_id == $section['id'] ) {
+					$section_data = $section;
+					break;
+				}
+			}
+			if ( ! $section_data ) {
+				throw new \RuntimeException( sprintf( "Category section data not found for fieldSection id '%d'", esc_attr( $field_section_id ) ) );
+			}
+
+			// Arguments.
+			$section_parent_id = $section_data['parentId'] ?? null;
+			$category_title    = $section_data['title'] ?? null;
+			if ( ! $category_title ) {
+				throw new \RuntimeException( sprintf( 'Category title not found for fieldSection id %d', esc_attr( $field_section_id ) ) );
+			}
+
+			// If parent exists, recursively call this function to get the parent title.
+			if ( ! $section_parent_id ) {
+				$category_id = wp_create_category( $category_title );
+				if ( is_wp_error( $category_id ) ) {
+					throw new \RuntimeException( sprintf( "Category creation failed for '%s' : %s", esc_attr( $category_title ), esc_html( $category_id->get_error_message() ) ) );
+				}
+				
+				return $category_id;
+			} else {
+				// If there is a parent, recursively call this function to create the parent category.
+				$category_parent_id = $this->get_category_from_fieldSection( $section_parent_id, $sections_data );
+
+				// Get or create category with parent.
+				$category_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $category_title, $category_parent_id );
+				
+				return $category_id;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Creates a special child category with entry type previously used in Craft CMS, under the parent category "Craft Entry Type".
+	 * 
+	 * @param string $entry_type 
+	 * @return string|null
+	 */
+	public function get_entry_type_category( string $entry_type ): ?int {
+		$category_parent_id = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( 'Craft Entry Type', 0 );
+		$category_id        = $this->taxonomy_logic->get_or_create_category_by_name_and_parent_id( $entry_type, $category_parent_id );
+
+		return $category_id;
 	}
 
 	/**
