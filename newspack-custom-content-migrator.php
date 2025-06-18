@@ -89,6 +89,8 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\BridgeMIMigrator::class,
 		Command\PublisherSpecific\County17Migrator::class,
 		Command\PublisherSpecific\TimesOfSanDiegoMigrator::class,
+		Command\General\Foundation\FoundationMigrator::class,
+		Command\General\Foundation\FoundationDataValidation::class,
 	]
 );
 
