@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'category', 'post', 'post_tag', 'user' ];
+	const ITEM_TYPES = [ 'book_review', 'category', 'post', 'post_tag', 'user' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -251,13 +251,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
             
             // Get items for processing.
             switch( $pos_args[0] ) {
-                case 'post':
+				case 'book_review':
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query, 'post_type' => 'book_review' ] );
+                    break;
+				case 'category':
+					$db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => $pos_args[0], 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+					break;
+				case 'post':
                     $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
                     break;
                 case 'user':
                     $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
-				case 'category':
 				case 'post_tag':
                     $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => $pos_args[0], 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
                     break;
@@ -272,7 +277,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                 $this->logger->info( '------------ processing id: ' . $db_id );
 
                 switch( $pos_args[0] ) {
-                    case 'post':
+					case 'book_review':
+                        $this->clean_up_book_review( $db_id, $logger_slug );
+                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        break;
+					case 'category':
+						$this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
+						update_term_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+						break;	
+					case 'post':
                         $this->clean_up_post( $db_id, $logger_slug );
                         update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
                         break;
@@ -280,7 +293,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                         $this->clean_up_user( $db_id, $logger_slug );
                         update_user_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
                         break;
-                    case 'category':
                     case 'post_tag':
                         $this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
                         update_term_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
@@ -686,7 +698,75 @@ class AmericaMagMigrator implements RegisterCommandInterface {
     /**
      * Clean up one post.
      */
+    private function clean_up_book_review( int $post_id, $logger_slug ): void {
+
+		$post_content = trim( get_post_field( 'post_content', $post_id, 'raw' ) );
+
+		$placeholder = '[view:book_in_review]';		
+		$html = '<!-- [view:book_in_review] -->';
+
+		// try to replace with surrounding p tags first.
+		$replacement_count = 0;
+		$post_content = str_replace( '<p>' . $placeholder . '</p>', $html, $post_content, $replacement_count );
+
+		// otherwise without p tags.
+		if( 0 === $replacement_count ) {
+			$post_content = str_replace( $placeholder, $html, $post_content );
+		}
+
+		$post = get_post( $post_id );
+
+		// Don't use wp_update_post since that will update modified dates. But we still need to make
+		// sure post_name is unique (since we're not using wp_update_post - which would done it for us).
+		$new_post_name_unique = wp_unique_post_slug( $post->post_name, $post->ID, $post->post_status, 'post', 0 );
+
+		if( $new_post_name_unique !== $post->post_name ) {
+			$this->logger->notice( 'Post name was updated to be unique.' );
+		}
+
+		global $wpdb;
+
+		// Update to post type (with possibly new content) and unique post name.
+		$wpdb->update(
+			$wpdb->posts,
+			[
+				'post_type' => 'post',
+				'post_content' => $post_content,
+				'post_name' => $new_post_name_unique,
+			],
+			[
+				'ID' => $post->ID,
+			]
+		);
+
+		// Set old post type.
+		update_post_meta( $post->ID, self::META_KEY_OLD_POST_TYPE, 'book_review' );
+
+		$this->logger->info( '-- converted to post.' );
+
+	}
+
+		/**
+     * Clean up one post.
+     */
     private function clean_up_post( int $post_id, $logger_slug ): void {
+
+/* 
+wp newspack-post-image-downloader import-images
+	--default-image-host-and-schema=https://www.americamagazine.org
+	--only-download-from-hosts=americamagazine.org,www.americamagazine.org
+	
+	doesn't do relative.  message on slack.
+*/
+
+// - americamagazine.org
+// - americamagazine-newspack.newspackstaging.com
+// - www.americamagazine.org
+// - and relative URL paths:
+	// example: ID 40937 src /sites/default/files/inline-images/iStock-504243548.jpg.png
+
+
+		die('todo');
 
         // Post info.
         $post_content = get_post_field( 'post_content', $post_id, 'raw' );
@@ -725,10 +805,39 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
     }
 
+    /**
+     * Clean up one term using verified (checksum) json_item.
+     */
+    private function clean_up_term( int $term_id, $logger_slug, $taxonomy ): void {
+
+		die('todo');
+
+        $json_item->description = trim( $json_item->description );
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->description ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Terms with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com' . wp_make_link_relative( get_term_link( $term_id, $taxonomy ) ),
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+
+    }
+
 	/**
      * Clean up one user.
      */
     private function clean_up_user( int $user_id, $logger_slug ): void {
+
+		die('todo');
 
         $user_data = get_userdata( $user_id );
         $description = trim( get_user_meta( $user_id, 'description', true ) );
@@ -776,31 +885,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                 'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
             ]);
     
-        }
-
-    }
-
-    /**
-     * Clean up one term using verified (checksum) json_item.
-     */
-    private function clean_up_term( int $term_id, $logger_slug, $taxonomy ): void {
-
-        $json_item->description = trim( $json_item->description );
-
-        // Look for un-fetch assets.
-        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->description ) ) {
-    
-            foreach( $un_fetched as $link ) {
-
-                $this->logger->info( 'Terms with un fetched asset, adding to CSV.' );
-
-                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
-                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
-                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com' . wp_make_link_relative( get_term_link( $term_id, $taxonomy ) ),
-                    'Un-fetched' => $link,
-                ]);
-    
-            }
         }
 
     }
