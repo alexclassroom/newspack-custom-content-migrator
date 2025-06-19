@@ -317,349 +317,440 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
 
-		/**
-		 * Get Craft data exported from backend, "expanded" format.
-		 */
-		// Get users data.
+		// Get Craft users data.
 		$users_data = json_decode( file_get_contents( $users_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
 		if ( ! is_array( $users_data ) ) {
 			WP_CLI::error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $users_json_file, $users_data ) );
 		}
-		// Get categories data.
+		// Get Craft sections/categories data.
 		$sections_data = json_decode( file_get_contents( $categories_news_expanded_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
 		if ( ! is_array( $sections_data ) ) {
 			WP_CLI::error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $categories_news_expanded_json_file, $sections_data ) );
 		}
 
-		// Import entries.
+		// Get entry JSON files.
 		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
 		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			
-			// // E.g. entry with child cat.
-			// $entries = $this->get_entries_from_json_file_descending( '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_eg_withChildCat_expanded.json' );
-			// E.g. entry Delauro.
-			$entries = $this->get_entries_from_json_file_descending( '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json' );
-
-			// Import entries.
+			// Get entries.
+			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			foreach ( $entries as $entry ) {
 				
-				// Clear post data.
-				$post_data = [];
-				$postmetas = [];
-
-				/**
-				 * Basic post data.
-				 */
-				// Dates are in ISO 8601 and in UTC, convert to NHI timezone.
-				$date_created               = new \DateTime( $entry['postDate'] );
-				$date_created_timestamp     = $date_created->format( 'Y-m-d H:i:s' );
-				$date_created_converted     = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
-				$post_data['post_date']     = $date_created_converted;
-				$date_modified              = new \DateTime( $entry['dateUpdated'] );
-				$date_modified_timestamp    = $date_modified->format( 'Y-m-d H:i:s' );
-				$date_modified_converted    = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
-				$post_data['post_modified'] = $date_modified_converted;
-				// Title.
-				$post_data['title'] = $entry['title'];
-				// URL slug.
-				$path = wp_parse_url( $entry['url'], PHP_URL_PATH );
-				if ( null !== $path && false !== $path ) {
-					$post_data['post_name'] = basename( $path );
+				// Insert post.
+				$post_data = $this->get_post_data( $entry, $sections_data, $prod_db );
+				$post_id   = wp_insert_post( $post_data );
+				if ( is_wp_error( $post_id ) || 0 === $post_id ) {
+					WP_CLI::warning( sprintf( "ERROR inserting post '%s' : '%s'", $post_data['post_title'], is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Post ID is 0' ) );
+					continue;
 				}
-				// Status.
-				if ( isset( self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ] ) ) {
-					$post_data['post_status'] = self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ];
-				} else {
-					WP_CLI::warning( sprintf( "ERROR inserting post id %d, title '%s', status %s -- status is not defined. Setting post 'draft' status.", $entry['id'], $post_data['title'], $entry['status'] ) );
-					$post_data['post_status'] = 'draft';
-				}
-				// Comment status (it's a boolean in Craft CMS).
-				$post_data['comment_status'] = isset( $entry['fieldComment']['commentEnabled'] ) && true === $entry['fieldComment']['commentEnabled'] ? 'open' : 'closed';
+				WP_CLI::print_value( sprintf( "Inserted post '%s' with ID '%s'", $post_data['post_title'], $post_id ) );
 
-				// TODO $post_data['post_content'];
-				// TODO $post_data['post_excerpt'];
+				// Update post modified date.
+				$this->update_post_modified_date( $post_id, $entry );
 
-
-				/**
-				 * Categories.
-				 */
-				foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-					try {
-						$category_id               = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
-						$post_data['categories'][] = $category_id;
-					} catch ( \Exception $e ) {
-						WP_CLI::warning( sprintf( "ERROR getting category from fieldSection '%s' in entry ID %d, JSON filename %s. Skipping.", $field_section_id, $entry['id'], $entries_json_file ) );
-						continue;
-					}
-				}
-				// Also assign "Entry Type" subcategory.
-				$entry_type_category_id    = $this->get_entry_type_category( $entry['fieldPreparsedEntryType'] );
-				$post_data['categories'][] = $entry_type_category_id;
+				// Set post coauthors.
+				$this->set_post_coauthors( $post_id, $entry, $users_data, $prod_db );
 				
+				// Insert post comments.
+				$this->set_post_comments( $post_id, $entry, $users_data, $prod_db );
 
-				/**
-				 * Tags.
-				 */
-				foreach ( $entry['fieldTags'] as $field_tag_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-					$tag_name            = $this->get_tag_by_id( $field_tag_id, $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-					if ( ! is_null( $tag_name ) ) {
-						$post_data['tags'][] = $tag_name;
-					} else {
-						WP_CLI::warning( sprintf( "ERROR tag not found, fieldTag '%s' in entry ID %d, JSON filename %s. Skipping.", $field_tag_id, $entry['id'], $entries_json_file ) );
-					}
-				}
-				
-				
-				/**
-				 * Insert post.
-				 */
-				$post_id = wp_insert_post( $post_data );
-				if ( is_wp_error( $post_id ) ) {
-					WP_CLI::warning( sprintf( 'ERROR inserting post %s : %s', $post_data['title'], $post_id->get_error_message() ) );
-				}
-				WP_CLI::print_value( sprintf( 'Inserted post %s with ID %s', $post_data['title'], $post_id ) );
-				
+				// Set post featured image.
+				$this->set_post_featured_image( $post_id, $entry, $prod_db );
 
-				/**
-				 * Bylines and author data.
-				 */
-				$coauthors = [];
-				$author    = null;
-				$bylines   = $this->get_entry_bylines( $entry, $users_data, $prod_db );
-				// If bylines are set, those are the post authors.
-				if ( ! empty( $bylines ) ) {
-					foreach ( $bylines as $byline ) {
-						// Get or create WP user from byline.
-						$wp_user_unique_identifier = 'newspack_migration_byline ' . $byline;
-						$wp_user_data              = [
-							'display_name' => $byline,
-							'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
-						];
-						try {
-							$wp_user = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
-						} catch ( \Exception $e ) {
-							WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $e->getMessage() ) );
-						}
-						if ( is_wp_error( $wp_user ) ) {
-							WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
-						}
-						// Add to coauthors.
-						$coauthors[] = $wp_user;
-					}
-				} else {
-					// If bylines aren't set, use Craft entry author as post author.
-					$author = $this->get_user_data( $entry['authorId'], $users_data, $prod_db );
-					// Create WP user from entry author.
-					$wp_user_unique_identifier = 'newspack_migration_author_id ' . $author['id'];
-					$wp_user_data              = [
-						'user_email'   => $entry['email'],
-						'display_name' => $entry['display_name'],
-						'first_name'   => $entry['first_name'],
-						'last_name'    => $entry['last_name'],
-						'description'  => $entry['bio'],
-						'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
-					];
-					try {
-						$wp_user = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
-					} catch ( \Exception $e ) {
-						WP_CLI::warning( sprintf( "ERROR inserting user from author name '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $author ), $wp_user_unique_identifier, $e->getMessage() ) );
-					}
-					if ( is_wp_error( $wp_user ) ) {
-						WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
-					}
-
-					// User metas.
-					$wp_user_metas = [
-						'newspack_migration_legacy_id'  => $entry['authorId'],
-						'newspack_migration_legacy_uid' => $author['uid'],
-						'newspack_migration_legacy_avatar_photo_id' => $author['avatar_photo_id'],
-						'newspack_migration_legacy_avatar_username' => $author['username'],
-					];
-					
-					// Import avatar image.
-					$avatar_attachment_id = null;
-					if ( ! empty( $author['avatar_image_url'] ) ) {
-						
-						// TODO.
-						$avatar_attachment_id;
-
-						// Add user meta.
-						$wp_user_metas['newspack_migration_legacy_avatar_photo_id'] = $author['avatar_photo_id'];
-					}
-
-					// Assign avatar to user.
-					if ( ! is_null( $avatar_attachment_id ) ) {
-						$this->simple_local_avatars->assign_new_user_avatar( $avatar_attachment_id, $wp_user->ID );
-					}
-
-					// Save user metas.
-					foreach ( $wp_user_metas as $key => $value ) {
-						update_user_meta( $wp_user->ID, $key, $value );
-					}
-
-					// Redirect save meta user_url ???
-					
-				}
-	
-				// Assign (co)authors to post.
-				if ( empty( $coauthors ) ) {
-					WP_CLI::error( sprintf( "ERROR assigning coauthors to entry ID %d, title '%s' : no coauthors found", $entry['id'], $entry['title'] ) );
-				} elseif ( count( $coauthors ) === 1 ) {
-					// There's just one author -- use `wp_users`.`author`.
-					$wp_user_id = $coauthors[0]->ID;
-					$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-						$wpdb->posts,
-						[ 'post_author' => $wp_user_id ],
-						[ 'ID' => $post_id ]
-					);
-					if ( false === $updated ) {
-						WP_CLI::warning( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
-					}
-
-					// Unassign any coauthors.
-					$this->coauthors->unassign_all_guest_authors_from_post( $post_id, false );
-				} else {
-					// Multiple coauthors.
-					$this->coauthors->assign_authors_to_post( $coauthors, $post_id, false );
-				}
-
-				
-				/**
-				 * Comments.
-				 */
-				$comments = $this->get_entry_comments( $entry['id'], $prod_db );
-				foreach ( $comments as $comment ) {
-					// Get author name either from existing Craft user ID, or from custom text byline.
-					$comment_autor_name = null;
-					if ( ! empty( $comment['author_user_id'] ) ) {
-						$comment_autor      = $this->get_user_data( $comment['author_user_id'], $users_data, $prod_db );
-						$comment_autor_name = $comment_autor['display_name'];
-					} else {
-						$comment_autor_name = $comment['author_name'];
-					}
-					if ( is_null( $comment_autor_name ) ) {
-						WP_CLI::warning( sprintf( 'ERROR inserting comment ID %d for entry ID %d, post ID %d', $comment['id'], $entry['id'], $post_id ) );
-						continue;
-					}
-					
-					// Insert comment.
-					$comment_data = [
-						'comment_post_ID'  => $post_id,
-						'comment_approved' => 'approved' === $comment['status'] ? 1 : 0,
-						'comment_author'   => $comment_autor_name,
-						'comment_content'  => $comment['comment'],
-						'comment_date'     => $comment['comment_date'],
-					];
-					$comment_id   = wp_insert_comment( $comment_data );
-					if ( false === $comment_id ) {
-						WP_CLI::warning( sprintf( 'ERROR inserting comment for post ID %s : %s', $post_id, $wpdb->last_error ) );
-						continue;
-					}
-
-					// Add comment metas.
-					$commentmetas = [
-						'newspack_migration_legacy_id'   => $comment['id'],
-						'newspack_migration_flagged'     => $comment['flagged'],
-						'newspack_migration_status'      => $comment['status'],
-						'newspack_migration_author_name' => $comment['author_name'],
-						'newspack_migration_author_user_id' => $comment['author_user_id'],
-						'newspack_migration_user_id'     => $comment['user_id'],
-					];
-					foreach ( $commentmetas as $key => $value ) {
-						add_comment_meta( $comment_id, $key, $value );
-					}
-				}
-	
-
-				/**
-				 * Assign post metas.
-				 */
+				// Save custom post metas.
 				$postmetas = [
 					'newspack_migration_legacy_id'     => $entry['id'],
 					'newspack_migration_legacy_uid'    => $entry['uid'],
 					'newspack_migration_legacy_url'    => $entry['url'],
 					'newspack_migration_entry_type'    => $entry['fieldPreparsedEntryType'],
 					'newspack_migration_entry_status'  => $entry['status'],
-					'newspack_migration_legacy_byline' => $bylines,
+					'newspack_migration_legacy_byline' => $this->get_entry_bylines( $entry, $users_data, $prod_db ),
 				];
 				foreach ( $postmetas as $key => $value ) {
 					update_post_meta( $post_id, $key, $value );
-				}
+				} // phpcs:ignore -- Allow for nicer visibility. WordPress.WhiteSpace.ControlStructureSpacing.BlankLineAfterEnd.
 				
+			}
 
-				/**
-				 * Featured image.
-				 * 
-				 * Featured image data is located in two places in Craft CMS:
-				 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
-				 *    => this info is retrieved by `get_asset_image_data`:
-				 *      asset "id"                  => postmeta "newspack_migration_asset_id"
-				 *      asset "url"                 => postmeta "newspack_migration_asset_url"
-				 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
-				 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
-				 *      asset "Title"               => Attachment "Title"
-				 *      asset "Credit"              => Attachment "Credit"
-				 *      asset "Description"         => Attachment "Description"
-				 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
-				 *      asset "width"               => postmeta "newspack_migration_asset_width"
-				 *      asset "height"              => postmeta "newspack_migration_asset_height"
-				 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
-				 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
-				 *      lede "Photo Caption"        => Attachment "Caption"
-				 */
-				// Get featured image data.
-				$asset_json_data    = $this->get_matrixLede_first_block_image_data( $entry );
-				$asset_db_data      = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
-				$asset_date_created = $this->convert_server_time_to_nhi_time( $asset_db_data['date_created'], self::NHI_TIMEZONE );
-				$featured_image_id  = $this->attachments->import_external_file(
-					$asset_db_data['url'], // phpcs:ignore -- Allow the style of multiple assignments, easier to proof read arguments for import_external_file. Squiz.PHP.DisallowMultipleAssignments.Found.
-					$asset_db_data['title'],
-					$asset_json_data['itemContent'],
-					$asset_db_data['description'],
-					null,
-					$post_id,
-					[],
-					$asset_db_data['filename'],
-					true
-				);
-				// Update featured image creation date to original asset date created (not a requirement, just for a bit extra convenience).
-				$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-					$wpdb->posts,
-					[
-						'post_date'     => $asset_date_created,
-						'post_date_gmt' => $asset_date_created,
-					],
-					[ 'ID' => $featured_image_id ]
-				);
-				if ( false === $updated ) {
-					WP_CLI::warning( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $featured_image_id, $wpdb->last_error ) );
-				}
-				
-				$featured_image_metas = [
-					'_media_credit'                     => $asset_db_data['credit'],
-					'newspack_migration_legacy_id'      => $asset_json_data['id'],
-					'newspack_migration_asset_url'      => $asset_db_data['url'],
-					'newspack_migration_asset_uploader' => $asset_db_data['uploader'],
-					'newspack_migration_asset_width'    => $asset_db_data['width'],
-					'newspack_migration_asset_height'   => $asset_db_data['height'],
-				];
-				foreach ( $featured_image_metas as $key => $value ) {
-					update_post_meta( $featured_image_id, $key, $value );
-				}           
+			/**
+			 * Redirections to custom-redirects.php
+			 *      https://wpcloudfieldguide.wordpress.com/troubleshooting/custom-redirects-php/
+			 * https://mc.a8c.com/pb/38262/
+			 *      - add regexes
+			 * Do redirects for:
+			 *      - entries
+			 *      - categories
+			 *      - users
+			 */
+		}
+	}
+
+	/**
+	 * Get post data.
+	 * 
+	 * @param array $entry         The entry data.
+	 * @param array $sections_data The sections data.
+	 * @param \wpdb $prod_db       The production database connection.
+	 * @return array The post data. TODO return WP_error.
+	 */
+	public function get_post_data( array $entry, array $sections_data, wpdb $prod_db ): array {
+		$post_data = [];
+
+		$post_data['post_type'] = 'post';
+		// Dates are in ISO 8601 and in UTC, convert to NHI timezone.
+		$date_created           = new \DateTime( $entry['postDate'] );
+		$date_created_timestamp = $date_created->format( 'Y-m-d H:i:s' );
+		$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
+		$post_data['post_date'] = $date_created_converted;
+		// Title.
+		$post_data['post_title'] = $entry['title'];
+		// URL slug.
+		$path = wp_parse_url( $entry['url'], PHP_URL_PATH );
+		if ( null !== $path && false !== $path ) {
+			$post_data['post_name'] = basename( $path );
+		}
+		// Status.
+		if ( isset( self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ] ) ) {
+			$post_data['post_status'] = self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ];
+		} else {
+			WP_CLI::warning( sprintf( "ERROR inserting post id %d, title '%s', status %s -- status is not defined. Setting post 'draft' status.", $entry['id'], $post_data['title'], $entry['status'] ) );
+			$post_data['post_status'] = 'draft';
+		}
+		// Comment status (it's a boolean in Craft CMS).
+		$post_data['comment_status'] = isset( $entry['fieldComment']['commentEnabled'] ) && true === $entry['fieldComment']['commentEnabled'] ? 'open' : 'closed';
+
+		// TODO $post_data['post_content'];
+		// TODO $post_data['post_excerpt'];
+
+
+		/**
+		* Categories.
+		*/
+		foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			try {
+				$category_id                  = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
+				$post_data['post_category'][] = $category_id;
+			} catch ( \Exception $e ) {
+				WP_CLI::warning( sprintf( "ERROR getting category from fieldSection '%s' in entry ID %d, JSON filename %s. Skipping.", $field_section_id, $entry['id'], $entries_json_file ) );
+				continue;
+			}
+		}
+		// Also assign "Entry Type" subcategory.
+		$entry_type_category_id       = $this->get_entry_type_category( $entry['fieldPreparsedEntryType'] );
+		$post_data['post_category'][] = $entry_type_category_id;
+	   
+
+		/**
+		* Tags.
+		*/
+		foreach ( $entry['fieldTags'] as $field_tag_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			$tag_name = $this->get_tag_by_id( $field_tag_id, $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			if ( ! is_null( $tag_name ) ) {
+				$post_data['tags_input'][] = $tag_name;
+			} else {
+				WP_CLI::warning( sprintf( "ERROR tag not found, fieldTag '%s' in entry ID %d, JSON filename %s. Skipping.", $field_tag_id, $entry['id'], $entries_json_file ) );
 			}
 		}
 
+		return $post_data;
+	}
+
+	/**
+	 * Update post modified date.
+	 * 
+	 * @param int   $post_id The post ID.
+	 * @param array $entry   The entry data.
+	 * @return void
+	 */
+	public function update_post_modified_date( int $post_id, array $entry ): void {
+		global $wpdb;
+
+		$date_modified           = new \DateTime( $entry['dateUpdated'] );
+		$date_modified_timestamp = $date_modified->format( 'Y-m-d H:i:s' );
+		$date_modified_converted = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
+		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			$wpdb->posts,
+			[
+				'post_modified'     => $date_modified_converted,
+				'post_modified_gmt' => $date_modified_converted,
+			],
+			[ 'ID' => $post_id ]
+		);
+		if ( false === $updated ) {
+			WP_CLI::warning( sprintf( "ERROR updating post modified date '%s' for post ID %s : '%s'", $date_modified_converted, $post_id, $wpdb->last_error ) );
+		}
+	}
+
+	/**
+	 * Set post coauthors.
+	 * 
+	 * @param int   $post_id The post ID.
+	 * @param array $entry   The entry data.
+	 * @param array $users_data The users data.
+	 * @param \wpdb $prod_db The production database connection.
+	 * @return void
+	 */
+	public function set_post_coauthors( int $post_id, array $entry, array $users_data, wpdb $prod_db ): void {
+		
+		global $wpdb;
+		$coauthors = [];
+		
 		/**
-		 * Redirections to custom-redirects.php
-		 *      https://wpcloudfieldguide.wordpress.com/troubleshooting/custom-redirects-php/
-		 * https://mc.a8c.com/pb/38262/
-		 *      - add regexes
-		 * Do redirects for:
-		 *      - entries
-		 *      - categories
-		 *      - users
+		 * Get post coauthors from entry bylines or entry author.
 		 */
+		$bylines = $this->get_entry_bylines( $entry, $users_data, $prod_db );
+		if ( ! empty( $bylines ) ) {
+
+			// If bylines are set, use those for post (co)authors.
+			foreach ( $bylines as $byline ) {
+				// Get or create WP user from byline.
+				$wp_user_unique_identifier = 'newspack_migration_byline ' . $byline;
+				$wp_user_data              = [
+					'display_name' => $byline,
+					'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
+				];
+				try {
+					$wp_user = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
+				} catch ( \Exception $e ) {
+					WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $e->getMessage() ) );
+				}
+				if ( is_wp_error( $wp_user ) ) {
+					WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
+				}
+				// Add to coauthors.
+				$coauthors[] = $wp_user;
+			} // phpcs:ignore -- Allow for nicer visibility. WordPress.WhiteSpace.ControlStructureSpacing.BlankLineAfterEnd.
+
+		} else {
+
+			// If bylines aren't set, use Craft entry author as post author.
+			$author = $this->get_user_data( $entry['authorId'], $users_data, $prod_db );
+			if ( is_null( $author ) ) {
+				WP_CLI::warning( sprintf( "ERROR getting Craft author data for entry ID %d, title '%s', author ID %d", $entry['id'], $entry['title'], $entry['authorId'] ) );
+				return;
+			}
+			
+			// Create WP user from entry author.
+			$wp_user_unique_identifier = 'newspack_migration_author_id ' . $author['id'];
+			$wp_user_data              = [
+				'user_email'   => $author['email'],
+				'display_name' => $author['display_name'],
+				'first_name'   => $author['first_name'],
+				'last_name'    => $author['last_name'],
+				'description'  => $author['bio'],
+				'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
+			];
+			try {
+				$wp_user     = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
+				$coauthors[] = $wp_user;
+			} catch ( \Exception $e ) {
+				WP_CLI::warning( sprintf( "ERROR inserting user from author name '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $author ), $wp_user_unique_identifier, $e->getMessage() ) );
+			}
+			if ( is_wp_error( $wp_user ) ) {
+				WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
+			}
+
+			// User metas.
+			$wp_user_metas = [
+				'newspack_migration_legacy_id'  => $entry['authorId'],
+				'newspack_migration_legacy_uid' => $author['uid'],
+				'newspack_migration_legacy_avatar_photo_id' => $author['avatar_photo_id'],
+				'newspack_migration_legacy_avatar_username' => $author['username'],
+			];
+			
+			// Import avatar image.
+			$avatar_attachment_id = null;
+			if ( ! empty( $author['avatar_image_url'] ) ) {
+				
+				// TODO.
+				$avatar_attachment_id;
+
+				// Add user meta.
+				$wp_user_metas['newspack_migration_legacy_avatar_photo_id'] = $author['avatar_photo_id'];
+			}
+
+			// Assign avatar to user.
+			if ( ! is_null( $avatar_attachment_id ) ) {
+				$this->simple_local_avatars->assign_new_user_avatar( $avatar_attachment_id, $wp_user->ID );
+			}
+
+			// Save user metas.
+			foreach ( $wp_user_metas as $key => $value ) {
+				update_user_meta( $wp_user->ID, $key, $value );
+			}
+
+			// Redirect save meta user_url ???
+			
+		}
+
+		/**
+		 * Assign (co)authors to post.
+		 */
+		if ( empty( $coauthors ) ) {
+			WP_CLI::error( sprintf( "ERROR assigning coauthors to entry ID %d, title '%s' : no coauthors found", $entry['id'], $entry['title'] ) );
+		} elseif ( count( $coauthors ) === 1 ) {
+			// There's just one author -- use `wp_users`.`author`.
+			$wp_user_id = $coauthors[0]->ID;
+			$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$wpdb->posts,
+				[ 'post_author' => $wp_user_id ],
+				[ 'ID' => $post_id ]
+			);
+			if ( false === $updated ) {
+				WP_CLI::warning( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
+			}
+
+			// Unassign any coauthors.
+			$this->coauthors->unassign_all_guest_authors_from_post( $post_id, false );
+		} else {
+			// Multiple coauthors.
+			$this->coauthors->assign_authors_to_post( $coauthors, $post_id, false );
+		}
+	}
+
+	/**
+	 * Set post comments.
+	 * 
+	 * @param int   $post_id    The post ID.
+	 * @param array $entry      The entry data.
+	 * @param array $users_data The users data.
+	 * @param \wpdb $prod_db    The production database connection.
+	 * @return void
+	 */
+	public function set_post_comments( int $post_id, array $entry, array $users_data, wpdb $prod_db ): void {
+		global $wpdb;
+
+		// Get entry comments.
+		$comments = $this->get_entry_comments( $entry['id'], $prod_db );
+		foreach ( $comments as $comment ) {
+
+			/**
+			 * Craft comment author name can be found in one of these two places in comment data:
+			 *   - a custom text byline, in which case we have the 'author_name' and no 'author_user_id'
+			 *   - an existing Craft user is the author comment, and in that case we have the 'author_user_id' and must get/create the author by ID
+			 */ 
+			$comment_autor_name = null;
+			if ( ! empty( $comment['author_name'] ) ) {
+				$comment_autor_name = $comment['author_name'];
+			} else {
+				$comment_autor      = $this->get_user_data( $comment['author_user_id'], $users_data, $prod_db );
+				$comment_autor_name = $comment_autor['display_name'];
+			}
+			if ( is_null( $comment_autor_name ) ) {
+				WP_CLI::warning( sprintf( 'ERROR getting comment author name for comment ID %d in entry ID %d, while importing post ID %d', $comment['comment_id'], $entry['id'], $post_id ) );
+				continue;
+			}
+			
+			// Insert comment.
+			$comment_data = [
+				'comment_post_ID'  => $post_id,
+				'comment_approved' => 'approved' === $comment['status'] ? 1 : 0,
+				'comment_author'   => $comment_autor_name,
+				'comment_content'  => $comment['comment'],
+				'comment_date'     => $comment['comment_date'],
+			];
+			$comment_id   = wp_insert_comment( $comment_data );
+			if ( false === $comment_id ) {
+				WP_CLI::warning( sprintf( 'ERROR inserting comment for post ID %s : %s', $post_id, $wpdb->last_error ) );
+				continue;
+			}
+
+			// Save comment metas.
+			$commentmetas = [
+				'newspack_migration_legacy_id'      => $comment['comment_id'],
+				'newspack_migration_flagged'        => $comment['flagged'],
+				'newspack_migration_status'         => $comment['status'],
+				'newspack_migration_author_name'    => $comment['author_name'],
+				'newspack_migration_author_user_id' => $comment['author_user_id'],
+				'newspack_migration_user_id'        => $comment['user_id'],
+			];
+			foreach ( $commentmetas as $key => $value ) {
+				add_comment_meta( $comment_id, $key, $value );
+			}
+		}
+	}
+
+	/**
+	 * Set post featured image.
+	 * 
+	 * @param int   $post_id The post ID.
+	 * @param array $entry   The entry data.
+	 * @param wpdb  $prod_db The production database connection.
+	 * @return int|null The featured image ID, or null if there was an error.
+	 */
+	public function set_post_featured_image( int $post_id, array $entry, wpdb $prod_db ): ?int {
+		global $wpdb;
+
+		/**
+		 * Featured image.
+		 * 
+		 * Featured image data is located in two places in Craft CMS:
+		 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
+		 *    => this info is retrieved by `get_asset_image_data`:
+		 *      asset "id"                  => postmeta "newspack_migration_asset_id"
+		 *      asset "url"                 => postmeta "newspack_migration_asset_url"
+		 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+		 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
+		 *      asset "Title"               => Attachment "Title"
+		 *      asset "Credit"              => Attachment "Credit"
+		 *      asset "Description"         => Attachment "Description"
+		 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
+		 *      asset "width"               => postmeta "newspack_migration_asset_width"
+		 *      asset "height"              => postmeta "newspack_migration_asset_height"
+		 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
+		 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
+		 *      lede "Photo Caption"        => Attachment "Caption"
+		 */
+		// Get featured image data.
+		$asset_json_data    = $this->get_matrixLede_first_block_image_data( $entry );
+		$asset_db_data      = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
+		$asset_date_created = $this->convert_server_time_to_nhi_time( $asset_db_data['date_created'], self::NHI_TIMEZONE );
+		$featured_image_id  = $this->attachments->import_external_file(
+			$asset_db_data['url'],
+			$asset_db_data['title'],
+			$asset_json_data['itemContent'],
+			$asset_db_data['description'],
+			null,
+			$post_id,
+			[],
+			$asset_db_data['filename'],
+			true
+		);
+		if ( is_wp_error( $featured_image_id ) ) {
+			WP_CLI::warning( sprintf( "ERROR inserting featured image URL '%s', title '%s', itemContent '%s', description '%s', post ID '%s', filename '%s' : %s", $asset_db_data['url'], $asset_db_data['title'], $asset_json_data['itemContent'], $asset_db_data['description'], $post_id, $asset_db_data['filename'], $featured_image_id->get_error_message() ) );
+			// TODO return WP_error.
+			return null;
+		}
+		
+		// Update creation date (not a requirement, just extra convenience).
+		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			$wpdb->posts,
+			[
+				'post_date'     => $asset_date_created,
+				'post_date_gmt' => $asset_date_created,
+			],
+			[ 'ID' => $featured_image_id ]
+		);
+		if ( false === $updated ) {
+			WP_CLI::warning( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $featured_image_id, $wpdb->last_error ) );
+			// TODO return WP_error.
+			return null;
+		}
+
+		// Save featured image custom metas.
+		$featured_image_metas = [
+			'_media_credit'                     => $asset_db_data['credit'],
+			'newspack_migration_legacy_id'      => $asset_json_data['id'],
+			'newspack_migration_asset_url'      => $asset_db_data['url'],
+			'newspack_migration_asset_uploader' => $asset_db_data['uploader'],
+			'newspack_migration_asset_width'    => $asset_db_data['width'],
+			'newspack_migration_asset_height'   => $asset_db_data['height'],
+		];
+		foreach ( $featured_image_metas as $key => $value ) {
+			update_post_meta( $featured_image_id, $key, $value );
+		}
+
+		return $featured_image_id;
 	}
 
 	/**
@@ -1141,11 +1232,13 @@ exit;
 	 */
 	public function get_user_data( int $user_id, array $users_data, wpdb $prod_db ): array {
 		// Search for author in users_data.
-		$author_data = null;
 		foreach ( $users_data as $user ) {
 			if ( $user_id === $user['id'] ) {
 				$photo_id         = $user['photoId'] ?? null;
-				$avatar_image_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
+				$avatar_image_url = null;
+				if ( ! is_null( $photo_id ) ) {
+					$avatar_image_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
+				}
 
 				return [
 					'id'               => $user['id'],
@@ -1380,12 +1473,17 @@ exit;
 	 * }
 	 */
 	public function get_entry_bylines( array $entry_data, array $users_data, wpdb $prod_db ): array {
-		$bylines     = [];
+		$bylines = [];
+		
+		// Get byline data.
 		$byline_data = $entry_data['matrixAuthorsByline'] ?? null;
 		if ( ! $byline_data ) {
-			return $bylines;
+			return [];
 		}
+
+		// Process byline data.
 		foreach ( $byline_data as $byline_id => $byline_item ) {
+			// Skip if not a blockAuthor.
 			if ( 'blockAuthor' !== $byline_item['type'] ) {
 				continue;
 			}
@@ -1399,6 +1497,13 @@ exit;
 			$byline_name = null;
 			$user_id     = null;
 
+			/**
+			 * Get byline type and name.
+			 * 
+			 * Byline type can be:
+			 * - "user" -- byline is in "linkedId", then $this->get_user_data( $linkedId, $users_data, $prod_db )
+			 * - "custom" -- byline is in "customText"
+			 */
 			$type = $fields['type'] ?? null;
 			if ( 'user' === $type ) {
 				$user_id     = $fields['linkedId'] ?? null;
@@ -1409,6 +1514,7 @@ exit;
 				$byline_name  = $payload['customText'] ?? null;
 			}
 
+			// Add byline to array if name is not null.
 			if ( $byline_name ) {
 				$bylines[] = [
 					'user_id' => $user_id,
