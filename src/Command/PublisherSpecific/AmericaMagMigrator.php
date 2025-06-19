@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'book_review', 'category', 'post', 'post_tag', 'user' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post_tag', 'user' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -251,8 +251,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
             
             // Get items for processing.
             switch( $pos_args[0] ) {
+				case 'attachment':
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query, 'post_type' => $pos_args[0] ] );
+                    break;
 				case 'book_review':
-                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query, 'post_type' => 'book_review' ] );
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query, 'post_type' => $pos_args[0] ] );
                     break;
 				case 'category':
 					$db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => $pos_args[0], 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
@@ -277,6 +280,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                 $this->logger->info( '------------ processing id: ' . $db_id );
 
                 switch( $pos_args[0] ) {
+					case 'attachment':
+                        $this->clean_up_attachment( $db_id, $logger_slug );
+                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        break;
 					case 'book_review':
                         $this->clean_up_book_review( $db_id, $logger_slug );
                         update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
@@ -695,8 +702,80 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	  CLEAN UP
 	************************************/
 
+	/**
+     * Clean up one attachment
+     */
+    private function clean_up_attachment( int $attachment_id, $logger_slug ): void {
+
+		$post_mime_type         = trim( get_post_field( 'post_mime_type', $attachment_id, 'raw' ) );
+		$this->logger->info( 'post_mime_type: ' . $post_mime_type );
+		
+		$fgd2wp_old_file        = trim( get_post_meta( $attachment_id, '_fgd2wp_old_file', true ) );
+		$this->logger->info( 'fgd2wp_old_file: ' . $fgd2wp_old_file );
+		
+		$wp_attached_file       = trim( get_post_meta( $attachment_id, '_wp_attached_file', true ) );
+		$this->logger->info( 'wp_attached_file: ' . $wp_attached_file );
+		
+		$wp_attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		if( ! is_array( $wp_attachment_metadata ) ) {
+			$this->logger->notice( 'No metadata' );
+			return;
+		}
+
+		$keys_to_verify = [ 'width', 'height', 'file', 'filesize' ];
+		foreach( $keys_to_verify as $key ) {
+			if( ! isset( $wp_attachment_metadata[ $key ] ) ) {
+				$this->logger->notice( 'No key: ' . $key );
+				return;
+			}
+		}
+
+		$this->logger->info( 'file: ' . $wp_attachment_metadata['file'] );
+		$this->logger->info( 'filesize: ' . number_format( $wp_attachment_metadata['filesize'], 0, '.', ',' ) );
+		$this->logger->info( 'dimensions: ' . $wp_attachment_metadata['width'] . ' x ' . $wp_attachment_metadata['height'] );
+
+		if( $wp_attachment_metadata['file'] !== $wp_attached_file ) {
+			$this->logger->warning( 'File mismatch.' );
+			return;
+		}
+
+		if( isset( $wp_attachment_metadata['original_image'] ) ) {
+			$this->logger->info( 'original_image: ' . $wp_attachment_metadata['original_image'] );
+		}
+		
+		// Fetch thumbnail.
+		if( ! isset( $wp_attachment_metadata['sizes']['thumbnail']['file'] ) ) {
+			$this->logger->notice( 'No thumbnail file.' );
+			return;
+		}
+
+		if( isset( $wp_attachment_metadata['sizes']['thumbnail']['virtual'] ) ) {
+			$this->logger->info( 'Virtual: ' . $wp_attachment_metadata['sizes']['thumbnail']['virtual'] );
+		}
+
+		$thumb_url = 'https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/';
+		$thumb_url .= str_replace( wp_basename( $wp_attached_file ), '', $wp_attached_file );
+		$thumb_url .= $wp_attachment_metadata['sizes']['thumbnail']['file'];
+
+		$this->logger->info( 'Thumb url: ' . $thumb_url );
+		
+		$remote_head = wp_remote_head( $thumb_url );
+		
+		$status = $remote_head['response']['code'] ?? 'error';
+
+		$this->logger->info( 'Status: ' .  $status );
+
+		// if( 200 !== $status ) {
+		// 	exit();
+		// }
+
+		sleep( 1 );
+
+	}
+
     /**
-     * Clean up one post.
+     * Clean up one book review.
      */
     private function clean_up_book_review( int $post_id, $logger_slug ): void {
 
@@ -765,6 +844,8 @@ wp newspack-post-image-downloader import-images
 // - and relative URL paths:
 	// example: ID 40937 src /sites/default/files/inline-images/iStock-504243548.jpg.png
 
+// redirects
+// check for change in urls?  book_reviews too! and when wp_unique_post_slug was called...
 
 		die('todo');
 
@@ -836,6 +917,9 @@ wp newspack-post-image-downloader import-images
      * Clean up one user.
      */
     private function clean_up_user( int $user_id, $logger_slug ): void {
+
+		// Profile content was saved to: 'description' => wp_kses( $post->post_content, 'post' ),
+		// check for change in urls?
 
 		die('todo');
 
