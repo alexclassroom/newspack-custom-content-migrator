@@ -781,24 +781,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		
 		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
+		
 		// phpcs:disable -- temporary dev code.
-
-		// Test Delauro entry.
-		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
-		$users_data = json_decode( file_get_contents( $users_json_file ), true );
-		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		$entry      = $entry_data[0];
-		// $entry_id = 11903505; // this example has a featured image.
-
-		WP_CLI::print_value( '--- VALIDATION TEST: ARE ENTRY IDS UNIQUE IN ALL JSON FILES?  -----------------------------' );
-		
-		// Get all JSON files from folder (descending order).
-		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
-		}
-		
-		exit;
 
 		WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
 		$entry_ids = [
@@ -846,58 +830,20 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 		WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
 		WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
-exit;
 		if ( file_exists( $path_single_json_entries ) ) {
 			unlink( $path_single_json_entries );
 		}
 		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
 		exit;
 
-		
-		WP_CLI::print_value( '--- GET ALL CONTENT BLOCK TYPES JSONS and ENTRY IDS WHICH USE THEM  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$folder_to_save_logs = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/content_and_lede_blocktypes';
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			foreach ( $entries_file_data as $entry ) {
-				if ( isset( $entry['matrixTeaser'] ) && ! empty( $entry['matrixTeaser'] ) ) {
-					foreach ( $entry['matrixTeaser'] as $teaser_block ) {
-						// Save each matrixTeaser block type file with entry IDs which use it.
-						file_put_contents(
-							$folder_to_save_logs . '/' . sprintf( 'matrixTeaser_%s.csv', $teaser_block['type'] ),
-							$entry['id'] . "\n",
-							FILE_APPEND
-						);
-					}
-				}
-				if ( isset( $entry['matrixLede'] ) && ! empty( $entry['matrixLede'] ) ) {
-					foreach ( $entry['matrixLede'] as $teaser_block ) {
-						// Save each matrixTeaser block type file with entry IDs which use it.
-						file_put_contents(
-							$folder_to_save_logs . '/' . sprintf( 'matrixLede_%s.csv', $teaser_block['type'] ),
-							$entry['id'] . "\n",
-							FILE_APPEND
-						);
-					}
-				}
-				if ( isset( $entry['matrixMainContent'] ) && ! empty( $entry['matrixMainContent'] ) ) {
-					foreach ( $entry['matrixMainContent'] as $teaser_block ) {
-						// Save each matrixTeaser block type file with entry IDs which use it.
-						file_put_contents(
-							$folder_to_save_logs . '/' . sprintf( 'matrixMainContent_%s.csv', $teaser_block['type'] ),
-							$entry['id'] . "\n",
-							FILE_APPEND
-						);
-					}
-				}
-			}
-		}
+
+		WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
+		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
+		$users_data = json_decode( file_get_contents( $users_json_file ), true );
+		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
+		$entry      = $entry_data[0];
 		exit;
+
 
 		WP_CLI::print_value( '--- GET ALL ENTRY IDs FROM JSONS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
@@ -923,121 +869,8 @@ exit;
 		fclose( $csv_file_handle );
 		exit;
 
-		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
-		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
-		// $entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
-		// $comments = $this->get_entry_comments( $entry_id, $prod_db );
-		$entry_id = 8282206; // this example has flagged comment
-		$comments = $this->get_entry_comments( $entry_id, $prod_db );
-		var_dump( $comments );
-		foreach ( $comments as $comment ) {
-			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
-				// $comment_date_converted = $this->convert_utc_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
-				// var_dump( $comment_date_converted );
-				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
-				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
-			}
-		}
-		exit;
-
-		WP_CLI::print_value( '--- COMMENTS  -----------------------------' );
-		// $comments = $this->get_entry_comments( $entry['id'], $prod_db );
-		// $entry_id = 8220233; // this example has comments by "anonymous" users, meaning it will have a display name, but not user_id because it's not a registered user.
-		// $comments = $this->get_entry_comments( $entry_id, $prod_db );
-		$entry_id = 8282206; // this example has flagged comment
-		$comments = $this->get_entry_comments( $entry_id, $prod_db );
-		var_dump( $comments );
-		foreach ( $comments as $comment ) {
-			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
-				// $comment_date_converted = $this->convert_utc_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
-				// var_dump( $comment_date_converted );
-				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
-				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
-			}
-		}
-		exit;
-
-		exit;
-		WP_CLI::print_value( '--- BYLINES  -----------------------------' );
-		$entry_id        = 145569; // multiple bylines
-		$test_entry_json = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities/entries_p251.json';
-		$test_data       = json_decode( file_get_contents( $test_entry_json ), true );
-		$entry_data      = null;
-		foreach ( $test_data as $entry ) {
-			if ( $entry['id'] === $entry_id ) {
-				$entry_data = $entry;
-				break;
-			}
-		}
-		$bylines = $this->get_entry_bylines( $entry_id, $entry_data, $users_data, $prod_db );
-		var_dump( $bylines );
-		exit;
-
-		WP_CLI::print_value( '--- LEDE FEATURED IMAGE  -----------------------------' );
-		/**
-		 * Featured image data is located in two places in Craft CMS:
-		 *  - asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
-		 *    => this info is retrieved by `get_asset_image_data`:
-		 *      asset "id"                  => postmeta "newspack_migration_asset_id"
-		 *      asset "url"                 => postmeta "newspack_migration_asset_url"
-		 *                                  => Attachment "slug"
-		 *      asset "date_created"        => Attachment date_created
-		 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
-		 *      asset "Title"               => Attachment "Title"
-		 *      asset "Credit"              => Attachment "Credit"
-		 *      asset "Description"         => Attachment "Description"
-		 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
-		 *      asset "width"               => postmeta "newspack_migration_asset_width"
-		 *      asset "height"              => postmeta "newspack_migration_asset_height"
-		 *  - lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
-		 *    => this info is retrieved by `_________`:
-		 *      lede "Photo Caption"        => Attachment "Caption"
-		 */
-
-		$author_id   = $entry['authorId'] ?? null;
-		$author_id   = 58453; // e.g. "Brian Slattery" has avatar image and bio.
-		$author_data = $this->get_user_data( $author_id, $users_data, $prod_db );
-		var_dump( $author_data );
-		exit;
-		$photo_id  = $author_data['avatar_photo_id'] ?? null;
-		$photo_url = $this->get_author_photo_url_by_id( $photo_id, $prod_db );
-		WP_CLI::print_value( sprintf( 'photo_id: %s photo_url: %s', $photo_id, $photo_url ) );
-		exit;
-
-		$asset_data         = $this->get_matrixLede_first_block_image_data( $entry );
-		$asset_id           = $asset_data['id'];
-		$asset_item_content = $asset_data['itemContent'];
-
-		// $asset_id = 11903556; // Delauro1 https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI
-		// $asset_id = 9555531; // https://www.newhavenindependent.org/admin/assets/edit/9555531-JR-Whirl-Pak_2022-01-03-012346_dxav?site=siteNHI
-		// $asset_id = 10476150; // https://www.newhavenindependent.org/admin/assets/edit/10476150-Orange-tikka?site=siteNHI
-
-		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
-		WP_CLI::print_value( '---> from asset data' );
-		WP_CLI::print_value( 'asset_id: ' . $asset_data['id'] );
-		WP_CLI::print_value( 'asset_date_created: ' . $asset_data['date_created'] );
-		WP_CLI::print_value( 'asset_url: ' . $asset_data['url'] );
-		WP_CLI::print_value( 'asset_filename: ' . $asset_data['filename'] );
-		WP_CLI::print_value( 'asset_title: ' . $asset_data['title'] );
-		WP_CLI::print_value( 'asset_description: ' . $asset_data['description'] );
-		WP_CLI::print_value( 'asset_credit: ' . $asset_data['credit'] );
-		WP_CLI::print_value( 'asset_uploader: ' . $asset_data['uploader'] );
-		WP_CLI::print_value( 'asset_width: ' . $asset_data['width'] );
-		WP_CLI::print_value( 'asset_height: ' . $asset_data['height'] );
-		WP_CLI::print_value( '---> from matrixLede_itemAsset_data' );
-		WP_CLI::print_value( 'asset_item_content: ' . $asset_item_content );
-
-		exit;
-		WP_CLI::print_value( '--- TEST IMAGE DATA -----------------------------' );
-		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
-		var_dump( $asset_data );
-		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
-		var_dump( $asset_data );
-		$asset_data = $this->get_asset_image_data( $asset_id, $prod_db );
-		var_dump( $asset_data );
-		exit;
-
 		// phpcs:enable
+
 	}
 
 	/**
