@@ -368,8 +368,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				];
 				foreach ( $postmetas as $key => $value ) {
 					update_post_meta( $post_id, $key, $value );
-				} // phpcs:ignore -- Allow for nicer visibility. WordPress.WhiteSpace.ControlStructureSpacing.BlankLineAfterEnd.
-				
+				}
 			}
 
 			/**
@@ -399,9 +398,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$post_data['post_type'] = 'post';
 		// Dates are in ISO 8601 and in UTC, convert to NHI timezone.
 		$date_created           = new \DateTime( $entry['postDate'] );
-		$date_created_timestamp = $date_created->format( 'Y-m-d H:i:s' );
-		$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created_timestamp, self::NHI_TIMEZONE );
-		$post_data['post_date'] = $date_created_converted;
+		$post_data['post_date'] = $date_created->format( 'Y-m-d H:i:s' );
 		// Title.
 		$post_data['post_title'] = $entry['title'];
 		// URL slug.
@@ -467,17 +464,20 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		$date_modified           = new \DateTime( $entry['dateUpdated'] );
 		$date_modified_timestamp = $date_modified->format( 'Y-m-d H:i:s' );
-		$date_modified_converted = $this->convert_server_time_to_nhi_time( $date_modified_timestamp, self::NHI_TIMEZONE );
+		$date_modified_gmt       = clone $date_modified;
+		$date_modified_gmt->setTimezone( new \DateTimeZone( 'UTC' ) );
+		$date_modified_gmt_timestamp = $date_modified_gmt->format( 'Y-m-d H:i:s' );
+
 		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 			$wpdb->posts,
 			[
-				'post_modified'     => $date_modified_converted,
-				'post_modified_gmt' => $date_modified_converted,
+				'post_modified'     => $date_modified_timestamp,
+				'post_modified_gmt' => $date_modified_gmt_timestamp,
 			],
 			[ 'ID' => $post_id ]
 		);
 		if ( false === $updated ) {
-			WP_CLI::warning( sprintf( "ERROR updating post modified date '%s' for post ID %s : '%s'", $date_modified_converted, $post_id, $wpdb->last_error ) );
+			WP_CLI::warning( sprintf( "ERROR updating post modified date '%s' and GMT '%s' for post ID %s : '%s'", $date_modified_timestamp, $date_modified_gmt_timestamp, $post_id, $wpdb->last_error ) );
 		}
 	}
 
@@ -504,9 +504,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			// If bylines are set, use those for post (co)authors.
 			foreach ( $bylines as $byline ) {
 				// Get or create WP user from byline.
-				$wp_user_unique_identifier = 'newspack_migration_byline ' . $byline;
+				$wp_user_unique_identifier = 'newspack_migration_byline ' . $byline['name'];
 				$wp_user_data              = [
-					'display_name' => $byline,
+					'display_name' => $byline['name'],
 					'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
 				];
 				try {
@@ -517,10 +517,15 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				if ( is_wp_error( $wp_user ) ) {
 					WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
 				}
+
+				// If there's a $byline['user_id'], save it as usermeta.
+				if ( ! is_null( $byline['user_id'] ) ) {
+					update_user_meta( $wp_user->ID, 'newspack_migration_byline_user_id', $byline['user_id'] );
+				}
+
 				// Add to coauthors.
 				$coauthors[] = $wp_user;
-			} // phpcs:ignore -- Allow for nicer visibility. WordPress.WhiteSpace.ControlStructureSpacing.BlankLineAfterEnd.
-
+			}
 		} else {
 
 			// If bylines aren't set, use Craft entry author as post author.
@@ -704,7 +709,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		// Get featured image data.
 		$asset_json_data    = $this->get_matrixLede_first_block_image_data( $entry );
 		$asset_db_data      = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
-		$asset_date_created = $this->convert_server_time_to_nhi_time( $asset_db_data['date_created'], self::NHI_TIMEZONE );
+		$asset_date_created = $asset_db_data['date_created'];
 		$featured_image_id  = $this->attachments->import_external_file(
 			$asset_db_data['url'],
 			$asset_db_data['title'],
@@ -749,6 +754,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		foreach ( $featured_image_metas as $key => $value ) {
 			update_post_meta( $featured_image_id, $key, $value );
 		}
+
+		// Set featured image as post thumbnail.
+		set_post_thumbnail( $post_id, $featured_image_id );
 
 		return $featured_image_id;
 	}
@@ -924,7 +932,7 @@ exit;
 		var_dump( $comments );
 		foreach ( $comments as $comment ) {
 			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
-				// $comment_date_converted = $this->convert_server_time_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
+				// $comment_date_converted = $this->convert_utc_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
 				// var_dump( $comment_date_converted );
 				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
 				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
@@ -941,7 +949,7 @@ exit;
 		var_dump( $comments );
 		foreach ( $comments as $comment ) {
 			if ( false !== strpos( $comment['comment'], 'If anyone is interested in learnin' ) ) {
-				// $comment_date_converted = $this->convert_server_time_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
+				// $comment_date_converted = $this->convert_utc_to_nhi_time( $comment['comment_date'], self::NHI_TIMEZONE );
 				// var_dump( $comment_date_converted );
 				WP_CLI::print_value( 'comment_date server: ' . $comment['comment_date'] );
 				// WP_CLI::print_value( 'comment_date converted: ' . $comment_date_converted );
@@ -1339,7 +1347,7 @@ exit;
 	 *  int 'id'               Asset ID.
 	 *  int 'width'            Asset width.
 	 *  int 'height'           Asset height.
-	 *  string 'date_created'  Timestamp.
+	 *  string 'date_created'  Timestamp, returns in NHI timezone.
 	 *  string 'url'           Public URL.
 	 *  string 'filename'      File name.
 	 *  string 'title'         Title field.
@@ -1375,9 +1383,9 @@ exit;
 			$folder_name  = $prod_db->get_var( $folder_query );
 		}
 
-		// Parse dateCreated to get year and month.
+		// Parse dateCreated to get year and month, and convert to NHI timezone.
 		$date_created           = $asset->dateCreated; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-		$date_created_converted = $this->convert_server_time_to_nhi_time( $date_created, self::NHI_TIMEZONE );
+		$date_created_converted = $this->convert_utc_to_nhi_time( $date_created, self::NHI_TIMEZONE );
 		$year                   = null;
 		$month                  = null;
 		if ( ! empty( $date_created_converted ) ) {
@@ -1488,11 +1496,11 @@ exit;
 				continue;
 			}
 			
-			$fields_json = $byline_item['fields']['authorLink'] ?? null;
-			if ( ! $fields_json ) {
+			$byline_item_fields_json = $byline_item['fields']['authorLink'] ?? null;
+			if ( ! $byline_item_fields_json ) {
 				continue;
 			}
-			$fields = json_decode( $fields_json, true );
+			$byline_item_fields = json_decode( $byline_item_fields_json, true );
 
 			$byline_name = null;
 			$user_id     = null;
@@ -1504,14 +1512,22 @@ exit;
 			 * - "user" -- byline is in "linkedId", then $this->get_user_data( $linkedId, $users_data, $prod_db )
 			 * - "custom" -- byline is in "customText"
 			 */
-			$type = $fields['type'] ?? null;
+			$type = $byline_item_fields['type'] ?? null;
 			if ( 'user' === $type ) {
-				$user_id     = $fields['linkedId'] ?? null;
+				$user_id     = $byline_item_fields['linkedId'] ?? null;
 				$byline_name = $this->get_user_data( $user_id, $users_data, $prod_db )['display_name'] ?? null;
 			} elseif ( 'custom' === $type ) {
-				$payload_json = $fields['payload'] ?? null;
+				// Try getting byline from payload.customText field.
+				$payload_json = $byline_item_fields['payload'] ?? null;
 				$payload      = json_decode( $payload_json, true );
 				$byline_name  = $payload['customText'] ?? null;
+
+				// Try getting byline from linkedUrl field.
+				if ( is_null( $byline_name ) ) {
+					if ( isset( $byline_item_fields['linkedUrl'] ) && ! empty( $byline_item_fields['linkedUrl'] ) ) {
+						$byline_name = $byline_item_fields['linkedUrl'];
+					}
+				}
 			}
 
 			// Add byline to array if name is not null.
@@ -1550,42 +1566,61 @@ exit;
 		$flagged_ids   = $prod_db->get_col( $flagged_query );
 		$flagged_set   = array_flip( $flagged_ids ); // For fast lookup.
 
-		$query    = $prod_db->prepare(
+		// Get comments from DB.
+		$comments       = [];
+		$comments_query = $prod_db->prepare(
 			'SELECT id, name, comment, commentDate, status, userId FROM comments_comments WHERE ownerId = %d ORDER BY commentDate ASC',
 			$entry_id
 		);
-		$results  = $prod_db->get_results( $query );
-		$comments = [];
-		foreach ( $results as $row ) {
-			$author_name    = null;
-			$author_user_id = $row->userId ? (int) $row->userId : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-			if ( $row->userId ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				$user_query = $prod_db->prepare(
-					'SELECT fullName, username FROM users WHERE id = %d LIMIT 1',
-					$row->userId // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+		$comments_rows  = $prod_db->get_results( $comments_query );
+		foreach ( $comments_rows as $comment_row ) {
+			$author_name = null;
+			
+			// Get author name from user object.
+			$author_user_id = $comment_row->userId ? (int) $comment_row->userId : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			if ( $author_user_id ) {
+				// Try and get the value of "Screen Name" field associated with user objects.
+				$screen_name_query = $prod_db->prepare(
+					'SELECT field_screenName FROM content WHERE elementId = %d AND siteId = %d LIMIT 1',
+					$comment_row->userId, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					self::SITE_ID_NEW_HAVEN_INDEPENDENT
 				);
-				$user       = $prod_db->get_row( $user_query );
-				if ( $user ) {
-					$author_name = $user->fullName ? $user->fullName : $user->username; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				$screen_name       = $prod_db->get_var( $screen_name_query );
+				if ( ! empty( $screen_name ) ) {
+					$author_name = $screen_name;
+				}
+				
+				// If there's no Screen Name, get full name or username from users table.
+				if ( is_null( $author_name ) ) {
+					$user_query = $prod_db->prepare(
+						'SELECT fullName, username FROM users WHERE id = %d LIMIT 1',
+						$comment_row->userId // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					);
+					$user_row   = $prod_db->get_row( $user_query );
+					if ( $user_row ) {
+						$author_name = $user_row->fullName ? $user_row->fullName : $user_row->username; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+					}
 				}
 			} else {
 				// For anonymous comments, use the name field if present.
-				$author_name = $row->name ? $row->name : null;
+				$author_name = $comment_row->name ? $comment_row->name : null;
 			}
-			// Convert the comment date to the NHI timezone.
-			$comment_date           = $row->commentDate ? date( 'Y-m-d H:i:s', strtotime( $row->commentDate ) ) : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_server_time_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
+
+			// Comment timestamps are in UTC, and need to be converted.
+			$comment_date           = $comment_row->commentDate ? date( 'Y-m-d H:i:s', strtotime( $comment_row->commentDate ) ) : null; // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_utc_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
 
 			$comments[] = [
-				'comment_id'     => (int) $row->id,
+				'comment_id'     => (int) $comment_row->id,
 				'author_name'    => $author_name,
 				'author_user_id' => $author_user_id,
-				'comment'        => $row->comment,
+				'comment'        => $comment_row->comment,
 				'comment_date'   => $comment_date_converted,
-				'status'         => $row->status,
-				'user_id'        => $row->userId ? (int) $row->userId : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				'flagged'        => isset( $flagged_set[ $row->id ] ),
+				'status'         => $comment_row->status,
+				'user_id'        => $comment_row->userId ? (int) $comment_row->userId : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				'flagged'        => isset( $flagged_set[ $comment_row->id ] ),
 			];
+			$d          = 1;
 		}
 		return $comments;
 	}
@@ -1701,7 +1736,7 @@ exit;
 						
 						// Get year and month from dateCreated.
 						$date  = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-						$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
+						$date_converted = $this->convert_utc_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
 						$year           = $date_converted->format( 'Y' );
 						$month          = $date_converted->format( 'm' );
 						
@@ -1962,7 +1997,7 @@ exit;
 	 * @param string $timezone  Target timezone (e.g. self::NHI_TIMEZONE).
 	 * @return string Converted timestamp in 'Y-m-d H:i:s' format
 	 */
-	public function convert_server_time_to_nhi_time( string $timestamp, string $timezone ): string {
+	public function convert_utc_to_nhi_time( string $timestamp, string $timezone ): string {
 		if ( ! $timestamp ) {
 			return null;
 		}
@@ -2009,7 +2044,7 @@ exit;
 
 		// Parse dateCreated to get year and month.
 		$date           = new \DateTime( $asset->dateCreated ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-		$date_converted = $this->convert_server_time_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
+		$date_converted = $this->convert_utc_to_nhi_time( $date->format( 'Y-m-d H:i:s' ), self::NHI_TIMEZONE );
 		$year           = $date_converted->format( 'Y' );
 		$month          = $date_converted->format( 'm' );
 
