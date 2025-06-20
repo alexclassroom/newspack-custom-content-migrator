@@ -1239,7 +1239,583 @@ class NNECategoryMap {
 	];
 
 	/**
-	 * Helper fucnction to add categories and tags to a post based on the mapping provided by the publisher.
+	 * Map of internal category names to new category names and tags.
+	 *
+	 * @var array[] $monadnock_ledger_transcript_map Map of legacy category names to new category names and tags.
+	 */
+	protected array $monadnock_ledger_transcript_map = [
+		[
+			'name'       => 'Arts-Living',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Food',
+						],
+						[
+							'name' => 'Faith & Religion',
+						],
+					],
+				],
+			],
+			'tags'       => [
+				'Health',
+			],
+		],
+		[
+			'name'       => 'News',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Business',
+						],
+						[
+							'name' => 'Police-Fire-Courts',
+						],
+						[
+							'name' => 'Education',
+						],
+					],
+				],
+			],
+			'tags'       => [
+				'Environment',
+			],
+		],
+		[
+			'name'       => 'Opinion',
+			'categories' => [
+				[
+					'name'     => 'Opinion',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Arts-Living/Environment',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Environment',
+			],
+		],
+		[
+			'name'       => 'Arts-Living/Food',
+			'categories' => [
+				[
+					'name'     => 'Food',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Arts-Living/Health',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Health',
+			],
+		],
+		[
+			'name'       => 'Arts-Living/Spirituality',
+			'categories' => [
+				[
+					'name'     => 'Faith & Religion',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Business',
+			'categories' => [
+				[
+					'name'     => 'Business',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Crime',
+			'categories' => [
+				[
+					'name'     => 'Police-Fire-Courts',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Schools',
+			'categories' => [
+				[
+					'name'     => 'Education',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+	];
+
+	/**
+	 * Map of internal category names to new category names and tags.
+	 *
+	 * @var array[] $valley_news_map Map of legacy category names to new category names and tags.
+	 */
+	protected array $valley_news_map = [
+		[
+			'name'       => 'Features',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Entertainment',
+						],
+						[
+							'name' => 'Eating Out',
+						],
+						[
+							'name' => 'Faith & Religion',
+						],
+						[
+							'name' => 'Home & Garden',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Community Briefs',
+						],
+						[
+							'name' => 'Business',
+						],
+						[
+							'name' => 'Education',
+						],
+						[
+							'name' => 'Politics',
+						],
+						[
+							'name' => 'Police-Fire-Courts',
+						],
+						[
+							'name' => 'Town-City-Government',
+						],
+					],
+				],
+			],
+			'tags'       => [
+				'Health',
+				'Science & Technology',
+				'Valley Visual',
+			],
+		],
+		[
+			'name'       => 'Opinion',
+			'categories' => [
+				[
+					'name'     => 'Opinion',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Columns',
+						],
+						[
+							'name' => 'Editorials',
+						],
+						[
+							'name' => 'Letters',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => [
+						[
+							'name' => 'Dartmouth',
+						],
+						[
+							'name' => 'High School & Youth',
+						],
+						[
+							'name' => 'Outdoors',
+						],
+					],
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Obituaries',
+			'categories' => [
+				[
+					'name'     => 'Obituaries',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Announcements',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Announcements/Births',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Announcements/Engagements',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Announcements/Listings',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Announcements/Weddings',
+			'categories' => [
+				[
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Arts-Entertainment-Theater',
+			'categories' => [
+				[
+					'name'     => 'Entertainment',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Books-TV-Movies',
+			'categories' => [
+				[
+					'name'     => 'Entertainment',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Cooking-Dining',
+			'categories' => [
+				[
+					'name'     => 'Eating Out',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Essays',
+			'categories' => [
+				[
+					'name'     => 'Arts & Life',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Faith',
+			'categories' => [
+				[
+					'name'     => 'Faith & Religion',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Home-Garden',
+			'categories' => [
+				[
+					'name'     => 'Home & Garden',
+					'parent'   => 'Arts & Life',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Features/Science',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Science & Technology',
+			],
+		],
+		[
+			'name'       => 'News/Business',
+			'categories' => [
+				[
+					'name'     => 'Business',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Cops-Fires-Courts',
+			'categories' => [
+				[
+					'name'     => 'Police-Fire-Courts',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Education',
+			'categories' => [
+				[
+					'name'     => 'Education',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Health-Care',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Health',
+			],
+		],
+		[
+			'name'       => 'News/Local-Government',
+			'categories' => [
+				[
+					'name'     => 'Town-City-Government',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'News/Politics',
+			'categories' => [
+				[
+					'name'     => 'Politics',
+					'parent'   => 'News',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Columns',
+			'categories' => [
+				[
+					'name'     => 'Columns',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Editorials',
+			'categories' => [
+				[
+					'name'     => 'Editorials',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Opinion/Letters-to-the-editor',
+			'categories' => [
+				[
+					'name'     => 'Letters',
+					'parent'   => 'Opinion',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Photos',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Photos/Valley-Visual',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => [
+				'Valley Visual',
+			],
+		],
+		[
+			'name'       => 'Sports/College',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/Dartmouth',
+			'categories' => [
+				[
+					'name'     => 'Dartmouth',
+					'parent'   => 'Sports',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/High-School',
+			'categories' => [
+				[
+					'name'     => 'High School & Youth',
+					'parent'   => 'Sports',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports/Outdoors-Recreation',
+			'categories' => [
+				[
+					'name'     => 'Outdoors',
+					'parent'   => 'Sports',
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+	];
+
+	/**
+	 * Helper function to add categories and tags to a post based on the mapping provided by the publisher.
 	 *
 	 * @param string|NNEPublisherEnum $publisher The publisher from which to retrieve the category map.
 	 * @param int                     $post_id The ID of the post to which to add the categories and tags.
@@ -1365,6 +1941,8 @@ class NNECategoryMap {
 			NNEPublisherEnum::CONCORD_MONITOR => ( new self() )->concord_monitor_map,
 			NNEPublisherEnum::DAILY_HAMPSHIRE => ( new self() )->daily_hampshire_gazette_map,
 			NNEPublisherEnum::GREENFIELD_RECORDER => ( new self() )->greenfield_recorder_map,
+			NNEPublisherEnum::MONADNOCK_LEDGER => ( new self() )->monadnock_ledger_transcript_map,
+			NNEPublisherEnum::VALLEY_NEWS => ( new self() )->valley_news_map,
 			default => [],
 		};
 	}
