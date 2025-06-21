@@ -12,6 +12,7 @@ use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
+use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use Newspack\Guest_Contributor_Role;
 use Simple_Local_Avatars;
@@ -36,7 +37,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * CDN assets hostname.
 	 */
 	public const CDN_ASSET_HOSTNAME = 'd2f1dfnoetc03v.cloudfront.net';
-	
+
 	/**
 	 * All possible entry types in the prod DB ("fieldPreparsedEntryType").
 	 */
@@ -151,6 +152,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @var CoAuthorsPlusHelper $coauthors The coauthors helper.
 	 */
 	private $coauthors;
+
+	/**
+	 * Gutenberg blocks helper.
+	 *
+	 * @var GutenbergBlockGenerator $gutenberg_blocks The gutenberg blocks helper.
+	 */
+	private $gutenberg_blocks;
 	
 	/**
 	 * Simple_Local_Avatars.
@@ -168,6 +176,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$this->users                = new UsersHelper();
 		$this->coauthors            = new CoAuthorsPlusHelper();
 		$this->simple_local_avatars = new Simple_Local_Avatars();
+		$this->gutenberg_blocks     = new GutenbergBlockGenerator();
 	}
 
 	/**
@@ -336,8 +345,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			foreach ( $entries as $entry ) {
 				
-				// Insert post.
-				$post_data = $this->get_post_data( $entry, $sections_data, $prod_db );
+				// Create post.
+				$post_data = $this->get_basic_post_data( $entry, $sections_data, $prod_db );
 				$post_id   = wp_insert_post( $post_data );
 				if ( is_wp_error( $post_id ) || 0 === $post_id ) {
 					WP_CLI::warning( sprintf( "ERROR inserting post '%s' : '%s'", $post_data['post_title'], is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Post ID is 0' ) );
@@ -345,8 +354,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				}
 				WP_CLI::print_value( sprintf( "Inserted post '%s' with ID '%s'", $post_data['post_title'], $post_id ) );
 
-				// Update post modified date.
-				$this->update_post_modified_date( $post_id, $entry );
+				// Set remaining post data: content, excerpt, modified date.
+				$this->set_remaining_post_data( $post_id, $entry, $prod_db );
 
 				// Set post coauthors.
 				$this->set_post_coauthors( $post_id, $entry, $users_data, $prod_db );
@@ -392,32 +401,30 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param \wpdb $prod_db       The production database connection.
 	 * @return array The post data. TODO return WP_error.
 	 */
-	public function get_post_data( array $entry, array $sections_data, wpdb $prod_db ): array {
+	public function get_basic_post_data( array $entry, array $sections_data, wpdb $prod_db ): array {
 		$post_data = [];
 
-		$post_data['post_type'] = 'post';
-		// Dates are in ISO 8601 and in UTC, convert to NHI timezone.
-		$date_created           = new \DateTime( $entry['postDate'] );
-		$post_data['post_date'] = $date_created->format( 'Y-m-d H:i:s' );
-		// Title.
+		/**
+		 * Basic post data.
+		 */
+		$post_data['post_type']  = 'post';
 		$post_data['post_title'] = $entry['title'];
-		// URL slug.
-		$path = wp_parse_url( $entry['url'], PHP_URL_PATH );
-		if ( null !== $path && false !== $path ) {
-			$post_data['post_name'] = basename( $path );
+		$date_created            = new \DateTime( $entry['postDate'] );
+		$post_data['post_date']  = $date_created->format( 'Y-m-d H:i:s' );
+		// Slug.
+		$url_path = wp_parse_url( $entry['url'], PHP_URL_PATH );
+		if ( null !== $url_path && false !== $url_path ) {
+			$post_data['post_name'] = basename( $url_path );
 		}
 		// Status.
 		if ( isset( self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ] ) ) {
 			$post_data['post_status'] = self::CRAFT_ENTRY_STATUSES_TO_WP_POST_STATUSES[ $entry['status'] ];
 		} else {
-			WP_CLI::warning( sprintf( "ERROR inserting post id %d, title '%s', status %s -- status is not defined. Setting post 'draft' status.", $entry['id'], $post_data['title'], $entry['status'] ) );
+			WP_CLI::warning( sprintf( "ERROR getting post_status for entry ID %d, title '%s', status '%s'. Setting 'draft'.", $entry['id'], $post_data['title'], $entry['status'] ) );
 			$post_data['post_status'] = 'draft';
 		}
 		// Comment status (it's a boolean in Craft CMS).
 		$post_data['comment_status'] = isset( $entry['fieldComment']['commentEnabled'] ) && true === $entry['fieldComment']['commentEnabled'] ? 'open' : 'closed';
-
-		// TODO $post_data['post_content'];
-		// TODO $post_data['post_excerpt'];
 
 
 		/**
@@ -453,31 +460,259 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Update post modified date.
+	 * Get Gutenberg post content blocks.
+	 * 
+	 * @param int   $entry_id     The entry ID.
+	 * @param array $craft_blocks The Craft content blocks.
+	 * @param int   $post_id      The post ID.
+	 * @param \wpdb $prod_db      The production database connection.
+	 * @return array The Gutenberg post content blocks.
+	 */
+	public function convert_craft_content_blocks_to_gutenberg_blocks( int $entry_id, array $craft_blocks, int $post_id, wpdb $prod_db ): array {
+		
+		// Both Craft and Gutenberg use "blocks".
+		$gutenberg_blocks = [];
+
+		foreach ( $craft_blocks as $craft_block_id => $craft_block ) {
+			switch ( $craft_block['type'] ) {
+				case 'blockHeading':
+					$heading_level   = $craft_block['fields']['itemType'] ?? null;
+					$heading_level   = $craft_block['fields']['itemType'] ?? null;
+					$heading_content = $craft_block['fields']['itemHeading'] ?? null;
+					if ( is_null( $heading_content ) || is_null( $heading_level ) ) {
+						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockHeading: level '%s', content '%s'.", $entry_id, $heading_level, $heading_content ) );
+						break;
+					}
+					$heading_block      = $this->gutenberg_blocks->get_heading( $heading_content, $heading_level );
+					$gutenberg_blocks[] = $heading_block;
+					break;
+				
+				case 'blockText':
+					$content = $craft_block['fields']['itemContent'] ?? null;
+					if ( is_null( $content ) ) {
+						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockText: content '%s'.", $entry_id, $content ) );
+						break;
+					}
+					// $this->gutenberg_blocks->get_paragraph will add a <p> tag, so let's remove it if it exists.
+					$content            = $this->formatting_strip_outer_p_tag( $content );
+					$text_block         = $this->gutenberg_blocks->get_paragraph( $content );
+					$gutenberg_blocks[] = $text_block;
+					break;
+
+				case 'blockRawHTML':
+					$html_content = $craft_block['fields']['itemContent'] ?? null;
+					if ( is_null( $html_content ) ) {
+						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockRawHTML: content '%s'.", $entry_id, $html_content ) );
+						break;
+					}
+					$html_block         = $this->gutenberg_blocks->get_html( $html_content );
+					$gutenberg_blocks[] = $html_block;
+					break;
+
+				case 'blockVideo':
+					$video_url = $craft_block['fields']['itemVideoEmbed']['url'] ?? null;
+					if ( is_null( $video_url ) ) {
+						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockVideo: video URL '%s'.", $entry_id, $video_url ) );
+						break;
+					}
+					// Get video hostname without subdomains.
+					$hostname = wp_parse_url( $video_url, PHP_URL_HOST );
+					if ( substr_count( $hostname, '.' ) > 1 ) {
+						$pos_1st_dot_from_right = strrpos( $hostname, '.' );
+						$pos_2nd_dot_from_right = strrpos( substr( $hostname, 0, $pos_1st_dot_from_right ), '.' );
+						$hostname               = substr( $hostname, $pos_2nd_dot_from_right + 1 );
+					}
+					// Get video block.
+					$video_block = null;
+					switch ( $hostname ) {
+						case 'youtube.com':
+						case 'youtu.be':
+							$video_block = $this->gutenberg_blocks->get_youtube( $video_url );
+							break;
+						case 'vimeo.com':
+							$video_block = $this->gutenberg_blocks->get_vimeo( $video_url );
+							break;
+						default:
+							WP_CLI::warning( sprintf( "ERROR unknown video hostname '%s' in entry ID %d. Skipping.", $hostname, $entry_id ) );
+							break;
+					}
+					if ( ! is_null( $video_block ) ) {
+						$gutenberg_blocks[] = $video_block;
+					}
+					break;
+
+				case 'blockImage':
+					// Check if $craft_block_data['fields']['itemAsset'] contains more than one asset.
+					if ( count( $craft_block['fields']['itemAsset'] ) > 1 ) {
+						WP_CLI::warning( sprintf( 'ERROR -DEBUG- entry ID %d matrixMainContent blockImage: multiple assets found. Skipping.', $entry_id ) );
+						break;
+					}
+
+					// Get asset data.
+					$asset_id = $craft_block['fields']['itemAsset'][0] ?? null;
+					if ( is_null( $asset_id ) ) {
+						WP_CLI::warning( sprintf( 'ERROR entry ID %d matrixMainContent blockImage missing asset ID.', $entry_id ) );
+						break;
+					}
+					$caption = null;
+					if ( isset( $craft_block['fields']['itemContent'] ) && ! empty( $craft_block['fields']['itemContent'] ) ) {
+						$caption = $this->formatting_strip_outer_p_tag( $craft_block['fields']['itemContent'] ?? null );
+					}
+
+					// Import image.
+					$image_id = $this->import_image_from_asset( $asset_id, $post_id, $prod_db, $caption );
+					if ( is_wp_error( $image_id ) ) {
+						WP_CLI::warning( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset '%d' : '%s'.", $entry_id, $asset_id, $image_id->get_error_message() ) );
+						break;
+					}
+					$image = get_post( $image_id );
+
+					// Get block.
+					$image_block        = $this->gutenberg_blocks->get_image( $image );
+					$gutenberg_blocks[] = $image_block;
+					break;
+
+				case 'blockExternalImage':
+					$image_url = $craft_block['fields']['itemURL']['url'] ?? null;
+					if ( is_null( $image_url ) ) {
+						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockExternalImage: image URL '%s'.", $entry_id, $image_url ) );
+						break;
+					}
+					$image_caption      = $craft_block['fields']['itemContent'] ?? null;
+					$image_block        = $this->gutenberg_blocks->get_external_image( $image_url, $image_caption );
+					$gutenberg_blocks[] = $image_block;
+					break;
+
+				case 'blockSeparator':
+					$is_visible = $craft_block['fields']['itemIsVisible'] ?? null;
+					// Only add separator if it's visible field is set.
+					if ( is_null( $is_visible ) || false == $is_visible ) {
+						break;
+					}
+					$separator_block    = $this->gutenberg_blocks->get_separator();
+					$gutenberg_blocks[] = $separator_block;
+					break;
+					
+				case 'blockQuote':
+					$heading = $craft_block['fields']['itemHeading'] ?? null;
+					$content = $craft_block['fields']['itemContent'] ?? null;
+					if ( is_null( $content ) || empty( $content ) ) {
+						break;
+					}
+					$quote_block        = $this->gutenberg_blocks->get_quote( $content, $heading );
+					$gutenberg_blocks[] = $quote_block;
+					break;
+					
+				case 'blockPoll':
+					WP_CLI::warning( sprintf( 'ERROR, warning -- skipping blockPoll contentin entry ID %d.', $entry_id ) );
+					break;
+					
+				case 'blockGraphic':
+					WP_CLI::warning( sprintf( 'ERROR, warning -- skipping blockGraphic content entry ID %d.', $entry_id ) );
+					break;
+	
+				default:
+					WP_CLI::warning( sprintf( "ERROR unknown block type '%s' in entry ID %d. Skipping.", $craft_block['type'], $entry_id ) );
+					break;
+			}
+		}
+
+		return $gutenberg_blocks;
+	}
+
+	/**
+	 * If the string is encapsulated in a <p> tag, remove it.
+	 *
+	 * @param string $text The input string, which may or may not be wrapped in a <p> tag.
+	 * @return string The text with the outer <p> tag removed, or the original string.
+	 */
+	public function formatting_strip_outer_p_tag( string $text ): string {
+
+		$text = trim( $text );
+
+		/**
+		 * Look for a string that starts and ends with a <p> tag.
+		 *   ^\s*       : The start of the string (plus any leading whitespace, though we trimmed it)
+		 *   <p[^>]*>   : Opening <p> tag, including any attributes
+		 *   (.*?)      : Lazily capture everything in between -- this is the content we want to keep
+		 *   <\/p>      : Closing </p> tag
+		 *   \s*$       : Any trailing whitespace and the end of the string
+		 *   /is        : 'i' case-insensitive, 's' (dotall) allows '.' to match newlines
+		 */
+		$pattern = '/^\s*<p[^>]*>(.*?)<\/p>\s*$/is';
+		
+		// If there is no match, it conveniently returns the original string unchanged.
+		$result = preg_replace( $pattern, '$1', $text );
+		
+		// If preg_replace failed, return the original.
+		$result = $result ?? $text;
+
+		return $result;
+	}
+
+	/**
+	 * Update post content, excerpt, and modified date.
 	 * 
 	 * @param int   $post_id The post ID.
 	 * @param array $entry   The entry data.
+	 * @param \wpdb $prod_db The production database connection.
 	 * @return void
 	 */
-	public function update_post_modified_date( int $post_id, array $entry ): void {
+	public function set_remaining_post_data( int $post_id, array $entry, wpdb $prod_db ): void {
 		global $wpdb;
 
+		/**
+		 * Post excerpt.
+		 */
+		$post_excerpt        = '';
+		$post_excerpt_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixLede'], $post_id, $prod_db );
+		foreach ( $post_excerpt_blocks as $key_block => $block ) {
+			// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
+			if ( $key_block > 0 ) {
+				$post_excerpt .= "\n\n";
+			}
+			$post_excerpt .= serialize_block( $block );
+		}
+
+		/**
+		 * Post content.
+		 */
+		$post_content_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixMainContent'], $post_id, $prod_db );
+		// In Craft, the excerpt i.e. "Lede" is dynamically prepended to entity content, so it gets prepended to the post content.
+		$post_content = $post_excerpt;
+		foreach ( $post_content_blocks as $key_block => $block ) {
+			// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
+			if ( $key_block > 0 ) {
+				$post_content .= "\n\n";
+			}
+			$post_content .= serialize_block( $block );
+		}
+		
+		/**
+		 * Date modified.
+		 */
 		$date_modified           = new \DateTime( $entry['dateUpdated'] );
 		$date_modified_timestamp = $date_modified->format( 'Y-m-d H:i:s' );
 		$date_modified_gmt       = clone $date_modified;
 		$date_modified_gmt->setTimezone( new \DateTimeZone( 'UTC' ) );
 		$date_modified_gmt_timestamp = $date_modified_gmt->format( 'Y-m-d H:i:s' );
 
+		/**
+		 * Update post.
+		 */
+		$post_data = [
+			'post_excerpt'      => $post_excerpt,
+			'post_content'      => $post_content,
+			'post_modified'     => $date_modified_timestamp,
+			'post_modified_gmt' => $date_modified_gmt_timestamp,
+		];
 		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 			$wpdb->posts,
-			[
-				'post_modified'     => $date_modified_timestamp,
-				'post_modified_gmt' => $date_modified_gmt_timestamp,
-			],
+			$post_data,
 			[ 'ID' => $post_id ]
 		);
 		if ( false === $updated ) {
-			WP_CLI::warning( sprintf( "ERROR updating post modified date '%s' and GMT '%s' for post ID %s : '%s'", $date_modified_timestamp, $date_modified_gmt_timestamp, $post_id, $wpdb->last_error ) );
+			WP_CLI::warning( sprintf( "ERROR updating post ID %s, context %s : '%s'", $post_id, wp_json_encode( $post_data ), $wpdb->last_error ) );
 		}
 	}
 
@@ -559,23 +794,29 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$wp_user_metas = [
 				'newspack_migration_legacy_id'  => $entry['authorId'],
 				'newspack_migration_legacy_uid' => $author['uid'],
-				'newspack_migration_legacy_avatar_photo_id' => $author['avatar_photo_id'],
 				'newspack_migration_legacy_avatar_username' => $author['username'],
 			];
 			
 			// Import avatar image.
 			$avatar_attachment_id = null;
 			if ( ! empty( $author['avatar_image_url'] ) ) {
-				
-				// TODO.
-				$avatar_attachment_id;
+				$url = $author['avatar_image_url'];
 
-				// Add user meta.
-				$wp_user_metas['newspack_migration_legacy_avatar_photo_id'] = $author['avatar_photo_id'];
+				// Import image.
+				$avatar_attachment_id = $this->attachments->import_external_file( $url );
+				if ( is_wp_error( $avatar_attachment_id ) ) {
+					WP_CLI::warning( sprintf( "ERROR inserting avatar image URL '%s' : %s", $url, $avatar_attachment_id->get_error_message() ) );
+				} else {
+					// Save custom attachment metas.
+					update_post_meta( $avatar_attachment_id, 'newspack_migration_asset_url', $url );
+	
+					// Also add this to user metas.
+					$wp_user_metas['newspack_migration_legacy_avatar_photo_id'] = $avatar_attachment_id;
+				}
 			}
 
-			// Assign avatar to user.
-			if ( ! is_null( $avatar_attachment_id ) ) {
+			// Set user avatar.
+			if ( ! is_null( $avatar_attachment_id ) && ! is_wp_error( $avatar_attachment_id ) ) {
 				$this->simple_local_avatars->assign_new_user_avatar( $avatar_attachment_id, $wp_user->ID );
 			}
 
@@ -678,81 +919,44 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	/**
 	 * Set post featured image.
 	 * 
+	 * Featured image data is located in two places in Craft CMS:
+	 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
+	 *    => this info is retrieved by `get_asset_image_data`:
+	 *      asset "id"                  => postmeta "newspack_migration_asset_id"
+	 *      asset "url"                 => postmeta "newspack_migration_asset_url"
+	 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
+	 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
+	 *      asset "Title"               => Attachment "Title"
+	 *      asset "Credit"              => Attachment "Credit"
+	 *      asset "Description"         => Attachment "Description"
+	 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
+	 *      asset "width"               => postmeta "newspack_migration_asset_width"
+	 *      asset "height"              => postmeta "newspack_migration_asset_height"
+	 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
+	 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
+	 *      lede "Photo Caption"        => Attachment "Caption"
+	 * 
 	 * @param int   $post_id The post ID.
 	 * @param array $entry   The entry data.
 	 * @param wpdb  $prod_db The production database connection.
 	 * @return int|null The featured image ID, or null if there was an error.
 	 */
 	public function set_post_featured_image( int $post_id, array $entry, wpdb $prod_db ): ?int {
-		global $wpdb;
-
-		/**
-		 * Featured image.
-		 * 
-		 * Featured image data is located in two places in Craft CMS:
-		 * 1. asset image object itself has (e.g. https://www.newhavenindependent.org/admin/assets/edit/11903556-delauro1?site=siteNHI):
-		 *    => this info is retrieved by `get_asset_image_data`:
-		 *      asset "id"                  => postmeta "newspack_migration_asset_id"
-		 *      asset "url"                 => postmeta "newspack_migration_asset_url"
-		 *      asset "date_created"        => Attachment date_created, GMT. (e.g. 2025-06-15 12:00:00)
-		 *      asset "filename"            => Attachment "newspack_migration_asset_filename"
-		 *      asset "Title"               => Attachment "Title"
-		 *      asset "Credit"              => Attachment "Credit"
-		 *      asset "Description"         => Attachment "Description"
-		 *      asset "Uploader"            => postmetameta "newspack_migration_asset_uploader"
-		 *      asset "width"               => postmeta "newspack_migration_asset_width"
-		 *      asset "height"              => postmeta "newspack_migration_asset_height"
-		 * 2. lede ("excerpt") blockImage component also has ( e.g. https://www.newhavenindependent.org/admin/entries/sectionArticles/11903505-ethans_law?site=siteNHI#tab02--content):
-		 *    => this info is retrieved by `get_matrixLede_itemAsset_data`:
-		 *      lede "Photo Caption"        => Attachment "Caption"
-		 */
 		// Get featured image data.
-		$asset_json_data    = $this->get_matrixLede_first_block_image_data( $entry );
-		$asset_db_data      = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
-		$asset_date_created = $asset_db_data['date_created'];
-		$featured_image_id  = $this->attachments->import_external_file(
-			$asset_db_data['url'],
-			$asset_db_data['title'],
-			$asset_json_data['itemContent'],
-			$asset_db_data['description'],
-			null,
-			$post_id,
-			[],
-			$asset_db_data['filename'],
-			true
-		);
+		$asset_json_data = $this->get_matrixLede_first_block_image_data( $entry );
+		if ( is_null( $asset_json_data ) ) {
+			// No featured image.
+			return null;
+		}
+
+		$caption = $asset_json_data['itemContent'];
+
+		// Import image.
+		$featured_image_id = $this->import_image_from_asset( $asset_json_data['id'], $post_id, $prod_db, $caption );
 		if ( is_wp_error( $featured_image_id ) ) {
 			WP_CLI::warning( sprintf( "ERROR inserting featured image URL '%s', title '%s', itemContent '%s', description '%s', post ID '%s', filename '%s' : %s", $asset_db_data['url'], $asset_db_data['title'], $asset_json_data['itemContent'], $asset_db_data['description'], $post_id, $asset_db_data['filename'], $featured_image_id->get_error_message() ) );
 			// TODO return WP_error.
 			return null;
-		}
-		
-		// Update creation date (not a requirement, just extra convenience).
-		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-			$wpdb->posts,
-			[
-				'post_date'     => $asset_date_created,
-				'post_date_gmt' => $asset_date_created,
-			],
-			[ 'ID' => $featured_image_id ]
-		);
-		if ( false === $updated ) {
-			WP_CLI::warning( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $featured_image_id, $wpdb->last_error ) );
-			// TODO return WP_error.
-			return null;
-		}
-
-		// Save featured image custom metas.
-		$featured_image_metas = [
-			'_media_credit'                     => $asset_db_data['credit'],
-			'newspack_migration_legacy_id'      => $asset_json_data['id'],
-			'newspack_migration_asset_url'      => $asset_db_data['url'],
-			'newspack_migration_asset_uploader' => $asset_db_data['uploader'],
-			'newspack_migration_asset_width'    => $asset_db_data['width'],
-			'newspack_migration_asset_height'   => $asset_db_data['height'],
-		];
-		foreach ( $featured_image_metas as $key => $value ) {
-			update_post_meta( $featured_image_id, $key, $value );
 		}
 
 		// Set featured image as post thumbnail.
@@ -800,7 +1004,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			9976675, 9977934, 9985266, 9985270, 9990704, 
 			// blockPoll.
 			10001995, 10008484, 10053994, 10066330, 10088942, 
-			//blockSeparator.
+			// blockSeparator.
 			// -- JUST 10 TOTAL CONTENT.
 			10106224, 10114756, 10229093, 10588553, 11645370, 
 			// blockQuote.
@@ -812,7 +1016,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			9812751, 9864293, 
 		];
 		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/content_and_lede_blocktypes_IDS/0_demo_entries.json';
+		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
 		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
 		$entries_file_data = [];
 		$entries_picked_data = [];
@@ -823,8 +1027,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			}
 			foreach ( $entries_file_data as $entry ) {
 				if ( in_array( $entry['id'], $entry_ids ) ) {
-					// $entries_picked_data[] = $entry;
-					$entries_picked_data[ $entry['id'] ][] = $entry;
+					$entries_picked_data[] = $entry;
+					// $entries_picked_data[ $entry['id'] ][] = $entry;
 				}
 			}
 		}
@@ -835,7 +1039,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
 		exit;
-
+	
 
 		WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
 		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
@@ -870,7 +1074,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		exit;
 
 		// phpcs:enable
-
 	}
 
 	/**
@@ -1252,6 +1455,65 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			'credit'       => $asset->field_fieldCredit, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 			'uploader'     => $asset->fullName, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 		];
+	}
+
+	/**
+	 * Import image from asset.
+	 * 
+	 * @param int     $asset_id The asset ID.
+	 * @param int     $post_id  The post ID.
+	 * @param \wpdb   $prod_db  The production database connection.
+	 * @param ?string $caption  The caption.
+	 * @return int|WP_Error Attachment image ID.
+	 */
+	public function import_image_from_asset( int $asset_id, int $post_id, \wpdb $prod_db, ?string $caption = null ): int|WP_Error {
+		global $wpdb;
+		$asset_db_data = $this->get_asset_image_data( $asset_id, $prod_db );
+
+		// Import image.
+		$attachment_id = $this->attachments->import_external_file(
+			$asset_db_data['url'],
+			$asset_db_data['title'],
+			$caption,
+			$asset_db_data['description'],
+			null,
+			$post_id,
+			[],
+			$asset_db_data['filename'],
+			true
+		);
+		if ( is_wp_error( $attachment_id ) ) {
+			return $attachment_id;
+		}
+
+		// Save custom metas.
+		$featured_image_metas = [
+			'_media_credit'                     => $asset_db_data['credit'],
+			'newspack_migration_legacy_id'      => $asset_id,
+			'newspack_migration_asset_url'      => $asset_db_data['url'],
+			'newspack_migration_asset_uploader' => $asset_db_data['uploader'],
+			'newspack_migration_asset_width'    => $asset_db_data['width'],
+			'newspack_migration_asset_height'   => $asset_db_data['height'],
+		];
+		foreach ( $featured_image_metas as $key => $value ) {
+			update_post_meta( $attachment_id, $key, $value );
+		}
+		
+		// Update creation date (not a requirement, just an extra convenience).
+		$asset_date_created = $asset_db_data['date_created'];
+		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			$wpdb->posts,
+			[
+				'post_date'     => $asset_date_created,
+				'post_date_gmt' => $asset_date_created,
+			],
+			[ 'ID' => $attachment_id ]
+		);
+		if ( false === $updated ) {
+			WP_CLI::warning( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $attachment_id, $wpdb->last_error ) );
+		}
+
+		return $attachment_id;
 	}
 
 	/**
