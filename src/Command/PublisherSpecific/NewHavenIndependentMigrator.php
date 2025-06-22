@@ -70,6 +70,25 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	];
 
 	/**
+	 * If defined and not empty/null, the section categories will be created under this parent category, otherwise sections will be created as top-level categories.
+	 * 
+	 * In Craft CMS there's two main types of "categories":
+	 * - "sectionId"
+	 *      - primary site structure (e.g., "Main News," "Obituaries," "Legal Notices")
+	 *      - only one sectionId per entry
+	 *  - "fieldSections"
+	 *      - topical categories (e.g., "Religion," "Arts & Culture," "Politics")
+	 *      - more granular organization across different primary sections
+	 */
+	public const SECTION_PARENT_CATEGORY_NAME = 'Section';
+
+	/**
+	 * Will also add a category for entry type, to keep things more visible in migration.
+	 * If this is defined, will add entry type category as this parent's category.
+	 */
+	public const CRAFT_ENTRY_TYPE_CATEGORY_NAME = 'Entry Type';
+
+	/**
 	 * Field mappings for different content types.
 	 */
 	public const FIELD_MAPPINGS = [
@@ -352,7 +371,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					WP_CLI::warning( sprintf( "ERROR inserting post '%s' : '%s'", $post_data['post_title'], is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Post ID is 0' ) );
 					continue;
 				}
-				WP_CLI::print_value( sprintf( "Inserted post '%s' with ID '%s'", $post_data['post_title'], $post_id ) );
+				WP_CLI::print_value( sprintf( "Inserted post '%s' with ID '%s', entry ID %d", $post_data['post_title'], $post_id, $entry['id'] ) );
 
 				// Set remaining post data: content, excerpt, modified date.
 				$this->set_remaining_post_data( $post_id, $entry, $prod_db );
@@ -371,7 +390,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					'newspack_migration_legacy_id'     => $entry['id'],
 					'newspack_migration_legacy_uid'    => $entry['uid'],
 					'newspack_migration_legacy_url'    => $entry['url'],
-					'newspack_migration_entry_type'    => $entry['fieldPreparsedEntryType'],
+					'newspack_migration_entry_type'    => $entry['fieldPreparsedEntryType'] ?? null,
 					'newspack_migration_entry_status'  => $entry['status'],
 					'newspack_migration_legacy_byline' => $this->get_entry_bylines( $entry, $users_data, $prod_db ),
 				];
@@ -428,31 +447,74 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 
 		/**
-		* Categories.
-		*/
-		foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-			try {
-				$category_id                  = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
-				$post_data['post_category'][] = $category_id;
-			} catch ( \Exception $e ) {
-				WP_CLI::warning( sprintf( "ERROR getting category from fieldSection '%s' in entry ID %d, JSON filename %s. Skipping.", $field_section_id, $entry['id'], $entries_json_file ) );
-				continue;
+		 * Categories. Setting multiple types of categories for post.
+		 */
+		// Set "sectionId" -- only one per entry, category for primary site structure (e.g., "Main News," "Obituaries," "Legal Notices").
+		if ( isset( $entry['sectionId'] ) && ! empty( $entry['sectionId'] ) ) {
+			$section_name = $this->get_section_name_by_id( $entry['sectionId'], $prod_db );
+			if ( is_null( $section_name ) ) {
+				WP_CLI::warning( sprintf( "ERROR section not found, sectionId '%s' in entry ID %d. Skipping.", $entry['sectionId'], $entry['id'] ) );
+			} else {
+				// Get section category and parent category (if defined in constant).
+				$section_parent_category_id = 0;
+				if ( ! empty( self::SECTION_PARENT_CATEGORY_NAME ) ) {
+					$section_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::SECTION_PARENT_CATEGORY_NAME, 0 );
+				}
+				$section_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $section_name, $section_parent_category_id );
+
+				// Add section category to post.
+				if ( ! is_null( $section_category_id ) ) {
+					$post_data['post_category'][] = $section_category_id;
+				} else {
+					WP_CLI::warning( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
+				}
 			}
 		}
-		// Also assign "Entry Type" subcategory.
-		$entry_type_category_id       = $this->get_entry_type_category( $entry['fieldPreparsedEntryType'] );
-		$post_data['post_category'][] = $entry_type_category_id;
+		// Set "fieldSections" -- topical hierarchical categories (e.g., "Religion," "Arts & Culture," "Politics").
+		if ( isset( $entry['fieldSections'] ) && ! empty( $entry['fieldSections'] ) ) {
+			foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				try {
+					$field_section_category_id = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
+					if ( is_null( $field_section_category_id ) ) {
+						WP_CLI::warning( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
+					} else {
+						// Add fieldSection category to post.
+						$post_data['post_category'][] = $field_section_category_id;
+					}
+				} catch ( \Exception $e ) {
+					WP_CLI::warning( sprintf( "ERROR getting category from fieldSection '%s' in entry ID %d, JSON filename %s. Skipping.", $field_section_id, $entry['id'], $entries_json_file ) );
+					continue;
+				}
+			}
+		}
+		// Also set and EntryType subcategory.
+		if ( isset( $entry['fieldPreparsedEntryType'] ) && ! empty( $entry['fieldPreparsedEntryType'] ) ) {
+			// Get entry type category and parent category (if defined in constant).
+			$entry_type_parent_category_id = 0;
+			if ( ! empty( self::CRAFT_ENTRY_TYPE_CATEGORY_NAME ) ) {
+				$entry_type_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::CRAFT_ENTRY_TYPE_CATEGORY_NAME, 0 );
+			}
+			$entry_type_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $entry['fieldPreparsedEntryType'], $entry_type_parent_category_id );
+			if ( ! is_null( $entry_type_category_id ) ) {
+				// Add entry type category to post.
+				$post_data['post_category'][] = $entry_type_category_id;
+			} else {
+				WP_CLI::warning( sprintf( "ERROR creating entry type category, entry type '%s' in entry ID %d, parent category ID '%s'.", $entry['fieldPreparsedEntryType'], $entry['id'], $entry_type_parent_category_id ) );
+			}
+		}
 	   
 
 		/**
-		* Tags.
-		*/
-		foreach ( $entry['fieldTags'] as $field_tag_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-			$tag_name = $this->get_tag_by_id( $field_tag_id, $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-			if ( ! is_null( $tag_name ) ) {
-				$post_data['tags_input'][] = $tag_name;
-			} else {
-				WP_CLI::warning( sprintf( "ERROR tag not found, fieldTag '%s' in entry ID %d, JSON filename %s. Skipping.", $field_tag_id, $entry['id'], $entries_json_file ) );
+		 * Tags.
+		 */
+		if ( isset( $entry['fieldTags'] ) && ! empty( $entry['fieldTags'] ) ) {
+			foreach ( $entry['fieldTags'] as $field_tag_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				$tag_name = $this->get_tag_by_id( $field_tag_id, $prod_db ); // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				if ( ! is_null( $tag_name ) ) {
+					$post_data['tags_input'][] = $tag_name;
+				} else {
+					WP_CLI::warning( sprintf( "ERROR tag not found, fieldTag '%s' in entry ID %d, JSON filename %s. Skipping.", $field_tag_id, $entry['id'], $entries_json_file ) );
+				}
 			}
 		}
 
@@ -652,7 +714,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					break;
 					
 				case 'blockPoll':
-					WP_CLI::warning( sprintf( 'ERROR, warning -- skipping blockPoll contentin entry ID %d.', $entry_id ) );
+					WP_CLI::warning( sprintf( 'ERROR, warning -- skipping blockPoll content in entry ID %d.', $entry_id ) );
 					break;
 					
 				case 'blockGraphic':
@@ -682,7 +744,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			[
 				CURLOPT_FOLLOWLOCATION => true,
 				CURLOPT_RETURNTRANSFER => true,
-				CURLOPT_NOBODY         => true,          // Don’t fetch body.
+				CURLOPT_NOBODY         => true,          // Don't fetch body.
 				CURLOPT_USERAGENT      => 'Mozilla/5.0', // Soften Facebook's bot detection.
 			]
 		);
@@ -1016,7 +1078,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @return int|null The featured image ID, or null if there was an error.
 	 */
 	public function set_post_featured_image( int $post_id, array $entry, wpdb $prod_db ): ?int {
-		// Get featured image data.
+				// Get featured image data.
 		$asset_json_data = $this->get_matrixLede_first_block_image_data( $entry );
 		if ( is_null( $asset_json_data ) ) {
 			// No featured image.
@@ -1035,6 +1097,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		// Set featured image as post thumbnail.
 		set_post_thumbnail( $post_id, $featured_image_id );
+
+		// Hide the featured image, because in Craft it's a part of Lede, which is always prepended to the post content.
+		update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
 
 		return $featured_image_id;
 	}
@@ -1113,75 +1178,72 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$post_content .= serialize_block( $separator_block );
 		}
 		// SAVE DIRECTLY TO TEST POST CONTENT.
-		// global $wpdb;
-		// $wpdb->update(
-		// 	$wpdb->posts,
-		// 	[ 'post_content' => $post_content ],
-		// 	[ 'ID' => 12 ]
-		// );
+		global $wpdb;
+		$wpdb->update(
+			$wpdb->posts,
+			[ 'post_content' => $post_content ],
+			[ 'ID' => 12 ]
+		);
 		exit;
 
+		WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
+		$entry_ids = [
+			// blockHeading
+			10001903, 10001995, 10002432, 10003360, 
+			// blockText.
+			10000517, 100007, 10000737, 10000951, 10001, 
+			// blockRawHTML.
+			10101356, 10107340, 10114756, 10128962, 10134667, 
+			// blockVideo.
+			10001903, 10002432, 10003945, 10004356, 10005872, 
+			// blockImage.
+			10000517, 10001370, 10001536, 10001880, 10001906, 
+			// blockExternalImage.
+			9976675, 9977934, 9985266, 9985270, 9990704, 
+			// blockPoll.
+			10001995, 10008484, 10053994, 10066330, 10088942, 
+			// blockSeparator.
+			// -- JUST 10 TOTAL CONTENT.
+			10106224, 10114756, 10229093, 10588553, 11645370, 
+			// blockQuote.
+			// -- JUST 4 TOTAL CONTENT:
+			10282510, 10707615, 11623071, 372059, 
+			// blockGraphic.
+			// -- used in just 2 entites in Content:
+			// -- and also in just 2 entites in Lede:
+			9812751, 9864293, 
+		];
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$entries_file_data = [];
+		$entries_picked_data = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				if ( in_array( $entry['id'], $entry_ids ) ) {
+					$entries_picked_data[] = $entry;
+					// $entries_picked_data[ $entry['id'] ][] = $entry;
+				}
+			}
+		}
+		WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
+		WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
+		if ( file_exists( $path_single_json_entries ) ) {
+			unlink( $path_single_json_entries );
+		}
+		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
+		exit;
 
-		// WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
-		// $entry_ids = [
-		// 	// blockHeading
-		// 	10001903, 10001995, 10002432, 10003360, 
-		// 	// blockText.
-		// 	10000517, 100007, 10000737, 10000951, 10001, 
-		// 	// blockRawHTML.
-		// 	10101356, 10107340, 10114756, 10128962, 10134667, 
-		// 	// blockVideo.
-		// 	10001903, 10002432, 10003945, 10004356, 10005872, 
-		// 	// blockImage.
-		// 	10000517, 10001370, 10001536, 10001880, 10001906, 
-		// 	// blockExternalImage.
-		// 	9976675, 9977934, 9985266, 9985270, 9990704, 
-		// 	// blockPoll.
-		// 	10001995, 10008484, 10053994, 10066330, 10088942, 
-		// 	// blockSeparator.
-		// 	// -- JUST 10 TOTAL CONTENT.
-		// 	10106224, 10114756, 10229093, 10588553, 11645370, 
-		// 	// blockQuote.
-		// 	// -- JUST 4 TOTAL CONTENT:
-		// 	10282510, 10707615, 11623071, 372059, 
-		// 	// blockGraphic.
-		// 	// -- used in just 2 entites in Content:
-		// 	// -- and also in just 2 entites in Lede:
-		// 	9812751, 9864293, 
-		// ];
-		// $folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		// $path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
-		// $entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		// $entries_file_data = [];
-		// $entries_picked_data = [];
-		// foreach ( $entries_json_files as $entries_json_file ) {
-		// 	$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-		// 	if ( ! is_array( $entries_file_data ) ) {
-		// 		continue;
-		// 	}
-		// 	foreach ( $entries_file_data as $entry ) {
-		// 		if ( in_array( $entry['id'], $entry_ids ) ) {
-		// 			$entries_picked_data[] = $entry;
-		// 			// $entries_picked_data[ $entry['id'] ][] = $entry;
-		// 		}
-		// 	}
-		// }
-		// WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
-		// WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
-		// if ( file_exists( $path_single_json_entries ) ) {
-		// 	unlink( $path_single_json_entries );
-		// }
-		// file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
-		// exit;
-	
-
-		// WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
-		// $entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
-		// $users_data = json_decode( file_get_contents( $users_json_file ), true );
-		// $entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		// $entry      = $entry_data[0];
-		// exit;
-
+		WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
+		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
+		$users_data = json_decode( file_get_contents( $users_json_file ), true );
+		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
+		$entry      = $entry_data[0];
+		exit;
 
 		WP_CLI::print_value( '--- GET VIDEO BLOCK URLS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
@@ -1193,18 +1255,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				continue;
 			}
 			foreach ( $entries_file_data as $entry ) {
-/**
-        "matrixMainContent": {
-            "10006259": {
-                "type": "blockVideo",
-                "enabled": true,
-                "collapsed": false,
-                "fields": {
-                    "itemVideoEmbed": {
-                        "url": "https:\/\/www.youtube.com\/watch?v=ETw1xEgNJ6E&feature=youtu.be"
-                    },
-
- */
 				if ( ! isset( $entry['matrixMainContent'] ) ) {
 					continue;
 				}
@@ -1216,7 +1266,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			}
 		}
 		exit;
-
 
 		WP_CLI::print_value( '--- GET REPEATING/DUPLICATE ENTRY IDs FROM JSONS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
@@ -1242,7 +1291,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			}
 		}
 		exit;
-
 
 		WP_CLI::print_value( '--- GET ALL ENTRY IDs FROM JSONS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
@@ -1332,6 +1380,24 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Get section name by ID.
+	 * 
+	 * @param int  $section_id The section ID.
+	 * @param wpdb $prod_db    The production database connection.
+	 * 
+	 * @return ?string The section name, or null if not found.
+	 */
+	public function get_section_name_by_id( int $section_id, wpdb $prod_db ): ?string {
+		$query  = $prod_db->prepare(
+			'SELECT name FROM sections WHERE id = %d LIMIT 1',
+			$section_id
+		);
+		$result = $prod_db->get_var( $query );
+
+		return $result ?: null; // phpcs:ignore -- Allow truthy return, if empty string also return null, which is consistent with a well defined return we want here, Universal.Operators.DisallowShortTernary.Found.
+	}
+
+	/**
 	 * Get WP category ID from fieldSection.
 	 * 
 	 * @param int   $field_section_id  The fieldSection ID.
@@ -1386,19 +1452,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 
 		return null;
-	}
-
-	/**
-	 * Creates a special child category with entry type previously used in Craft CMS, under the parent category "Craft Entry Type".
-	 * 
-	 * @param string $entry_type 
-	 * @return string|null
-	 */
-	public function get_entry_type_category( string $entry_type ): ?int {
-		$category_parent_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( 'Craft Entry Type', 0 );
-		$category_id        = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $entry_type, $category_parent_id );
-
-		return $category_id;
 	}
 
 	/**
