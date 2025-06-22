@@ -529,11 +529,29 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						case 'youtu.be':
 							$video_block = $this->gutenberg_blocks->get_youtube( $video_url );
 							break;
+
 						case 'vimeo.com':
 							$video_block = $this->gutenberg_blocks->get_vimeo( $video_url );
 							break;
+							
+						case 'facebook.com':
+						case 'fb.watch':
+							$embed_url            = $this->get_final_redirect_url( $video_url );
+							$html_content_sprintf = sprintf(
+								"\n%s\n%s\n",
+								'<div id="fb-root"></div><script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v22.0"></script>',
+								'<div class="fb-video" data-href="%s" data-width="500" data-show-text="false"></div>'
+							);
+							$html_content         = sprintf( $html_content_sprintf, $embed_url );
+							$video_block          = $this->gutenberg_blocks->get_html( $html_content );
+							break;
+								
 						default:
-							WP_CLI::warning( sprintf( "ERROR unknown video hostname '%s' in entry ID %d. Skipping.", $hostname, $entry_id ) );
+							// TODO: other video hosts.
+
+							// $replacement = sprintf( '<a href="%s" target="_blank">%s</a>', $url_trimmed, $url_trimmed );
+							WP_CLI::warning( sprintf( "ERROR unknown video hostname '%s' in entry ID %d. Inserted <a> link.", $hostname, $entry_id ) );
+
 							break;
 					}
 					if ( ! is_null( $video_block ) ) {
@@ -618,6 +636,32 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 
 		return $gutenberg_blocks;
+	}
+
+	/**
+	 * Get the final redirect URL from a given URL.
+	 *
+	 * @param string $url The URL to get the final redirect URL from.
+	 * @return string The final redirect URL.
+	 */
+	public function get_final_redirect_url( string $url ): string {
+		// phpcs:disable -- WordPress.WP.AlternativeFunctions.curl_curl_init.
+		$ch = curl_init( $url );
+		curl_setopt_array(
+			$ch,
+			[
+				CURLOPT_FOLLOWLOCATION => true,
+				CURLOPT_RETURNTRANSFER => true,
+				CURLOPT_NOBODY         => true,          // Don’t fetch body.
+				CURLOPT_USERAGENT      => 'Mozilla/5.0', // Soften Facebook's bot detection.
+			]
+		);
+		curl_exec( $ch );
+		$final_url = curl_getinfo( $ch, CURLINFO_EFFECTIVE_URL );
+		curl_close( $ch );
+		// phpcs:enable
+
+		return $final_url;
 	}
 
 	/**
@@ -985,67 +1029,165 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		
 		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
-		
 		// phpcs:disable -- temporary dev code.
 
-		WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
-		$entry_ids = [
-			// blockHeading
-			10001903, 10001995, 10002432, 10003360, 
-			// blockText.
-			10000517, 100007, 10000737, 10000951, 10001, 
-			// blockRawHTML.
-			10101356, 10107340, 10114756, 10128962, 10134667, 
-			// blockVideo.
-			10001903, 10002432, 10003945, 10004356, 10005872, 
-			// blockImage.
-			10000517, 10001370, 10001536, 10001880, 10001906, 
-			// blockExternalImage.
-			9976675, 9977934, 9985266, 9985270, 9990704, 
-			// blockPoll.
-			10001995, 10008484, 10053994, 10066330, 10088942, 
-			// blockSeparator.
-			// -- JUST 10 TOTAL CONTENT.
-			10106224, 10114756, 10229093, 10588553, 11645370, 
-			// blockQuote.
-			// -- JUST 4 TOTAL CONTENT:
-			10282510, 10707615, 11623071, 372059, 
-			// blockGraphic.
-			// -- used in just 2 entites in Content:
-			// -- and also in just 2 entites in Lede:
-			9812751, 9864293, 
+		
+
+		// WP_CLI::print_value( '--- TEST FB VIDEO EMBEDS  -----------------------------' );
+		$video_urls = [
+			'https://fb.watch/aWmrsqLA3N/',
+			'https://facebook.com/watch/live/?ref=watch_permalink&v=1162598517894556',
+			'https://www.facebook.com/100005396685702/videos/1583287642064956/',
+			'https://www.facebook.com/100063466693955/posts/pfbid0URDs4XYD2HT2MbDexGsUkgwDxfMwnE61XhjxeoDp2QuNvRXiEdKr5RsPCu6uAFm5l/?app=fbl',
+			'https://www.facebook.com/NewHavenIndependent/videos/1013196649872007',
+			'https://www.facebook.com/watch/?v=429471115872806',
 		];
+		$post_content = '';
+		foreach ( $video_urls as $video_url ) {
+			$parsed_url           = wp_parse_url( $video_url );
+			// $url_noparams         = sprintf( '%s://%s%s', $parsed_url['scheme'], $parsed_url['host'], $parsed_url['path'] );
+			$html_content_sprintf = sprintf(
+				"\n%s\n%s\n",
+				'<div id="fb-root"></div><script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v22.0"></script>',
+				'<div class="fb-video" data-href="%s" data-width="500" data-show-text="false"></div>'
+			);
+			$embed_url = $this->get_final_redirect_url( $video_url );
+			$html_content         = sprintf( $html_content_sprintf, $embed_url );
+			$video_block          = $this->gutenberg_blocks->get_html( $html_content );
+			$separator_block      = $this->gutenberg_blocks->get_separator();
+			$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+			$post_content .= serialize_block( $video_block );
+			$post_content .= serialize_block( $separator_block );
+		}
+		// SAVE DIRECTLY TO TEST POST CONTENT.
+		// global $wpdb;
+		// $wpdb->update(
+		// 	$wpdb->posts,
+		// 	[ 'post_content' => $post_content ],
+		// 	[ 'ID' => 12 ]
+		// );
+		exit;
+
+
+		// WP_CLI::print_value( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
+		// $entry_ids = [
+		// 	// blockHeading
+		// 	10001903, 10001995, 10002432, 10003360, 
+		// 	// blockText.
+		// 	10000517, 100007, 10000737, 10000951, 10001, 
+		// 	// blockRawHTML.
+		// 	10101356, 10107340, 10114756, 10128962, 10134667, 
+		// 	// blockVideo.
+		// 	10001903, 10002432, 10003945, 10004356, 10005872, 
+		// 	// blockImage.
+		// 	10000517, 10001370, 10001536, 10001880, 10001906, 
+		// 	// blockExternalImage.
+		// 	9976675, 9977934, 9985266, 9985270, 9990704, 
+		// 	// blockPoll.
+		// 	10001995, 10008484, 10053994, 10066330, 10088942, 
+		// 	// blockSeparator.
+		// 	// -- JUST 10 TOTAL CONTENT.
+		// 	10106224, 10114756, 10229093, 10588553, 11645370, 
+		// 	// blockQuote.
+		// 	// -- JUST 4 TOTAL CONTENT:
+		// 	10282510, 10707615, 11623071, 372059, 
+		// 	// blockGraphic.
+		// 	// -- used in just 2 entites in Content:
+		// 	// -- and also in just 2 entites in Lede:
+		// 	9812751, 9864293, 
+		// ];
+		// $folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		// $path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
+		// $entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		// $entries_file_data = [];
+		// $entries_picked_data = [];
+		// foreach ( $entries_json_files as $entries_json_file ) {
+		// 	$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+		// 	if ( ! is_array( $entries_file_data ) ) {
+		// 		continue;
+		// 	}
+		// 	foreach ( $entries_file_data as $entry ) {
+		// 		if ( in_array( $entry['id'], $entry_ids ) ) {
+		// 			$entries_picked_data[] = $entry;
+		// 			// $entries_picked_data[ $entry['id'] ][] = $entry;
+		// 		}
+		// 	}
+		// }
+		// WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
+		// WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
+		// if ( file_exists( $path_single_json_entries ) ) {
+		// 	unlink( $path_single_json_entries );
+		// }
+		// file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
+		// exit;
+	
+
+		// WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
+		// $entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
+		// $users_data = json_decode( file_get_contents( $users_json_file ), true );
+		// $entry_data = json_decode( file_get_contents( $entries_json_file ), true );
+		// $entry      = $entry_data[0];
+		// exit;
+
+
+		WP_CLI::print_value( '--- GET VIDEO BLOCK URLS  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
 		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
 		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$entries_file_data = [];
-		$entries_picked_data = [];
 		foreach ( $entries_json_files as $entries_json_file ) {
 			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
 			if ( ! is_array( $entries_file_data ) ) {
 				continue;
 			}
 			foreach ( $entries_file_data as $entry ) {
-				if ( in_array( $entry['id'], $entry_ids ) ) {
-					$entries_picked_data[] = $entry;
-					// $entries_picked_data[ $entry['id'] ][] = $entry;
+/**
+        "matrixMainContent": {
+            "10006259": {
+                "type": "blockVideo",
+                "enabled": true,
+                "collapsed": false,
+                "fields": {
+                    "itemVideoEmbed": {
+                        "url": "https:\/\/www.youtube.com\/watch?v=ETw1xEgNJ6E&feature=youtu.be"
+                    },
+
+ */
+				if ( ! isset( $entry['matrixMainContent'] ) ) {
+					continue;
+				}
+				foreach ( $entry['matrixMainContent'] as $block ) {
+					if ( 'blockVideo' === $block['type'] ) {
+						WP_CLI::print_value( $block['fields']['itemVideoEmbed']['url'] );
+					}
 				}
 			}
 		}
-		WP_CLI::print_value( '--- $entry_ids: ' . count($entry_ids) );
-		WP_CLI::print_value( '--- $entries_picked_data: ' . count($entries_picked_data) );
-		if ( file_exists( $path_single_json_entries ) ) {
-			unlink( $path_single_json_entries );
-		}
-		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
 		exit;
-	
 
-		WP_CLI::print_value( '--- TEST DELAURO ENTRY  -----------------------------' );
-		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
-		$users_data = json_decode( file_get_contents( $users_json_file ), true );
-		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		$entry      = $entry_data[0];
+
+		WP_CLI::print_value( '--- GET REPEATING/DUPLICATE ENTRY IDs FROM JSONS  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$entry_ids_files = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				$entry_ids_files[$entry['id']]['title'] = $entry['title'];
+				$entry_ids_files[$entry['id']]['files'][] = $entries_json_file;
+			}
+		}
+		// Save CSV entry IDs to /Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv
+		foreach ( $entry_ids_files as $entry_id => $arr ) {
+			$files = $arr['files'];
+			$title = $arr['title'];
+			if ( count( $files ) > 1 ) {
+				WP_CLI::print_value( sprintf( "- ID '%d' title '%s' is repeating in %d files: \n- %s", $entry_id, $title, count( $files ), implode( "\n- ", $files ) ) );
+			}
+		}
 		exit;
 
 
