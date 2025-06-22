@@ -511,18 +511,23 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 				case 'blockVideo':
 					$video_url = $craft_block['fields']['itemVideoEmbed']['url'] ?? null;
+					if ( empty( trim( $video_url ) ) ) {
+						break;
+					}
 					if ( is_null( $video_url ) ) {
 						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockVideo: video URL '%s'.", $entry_id, $video_url ) );
 						break;
 					}
-					// Get video hostname without subdomains.
+
+					// Get video hostname without the subdomains.
 					$hostname = wp_parse_url( $video_url, PHP_URL_HOST );
 					if ( substr_count( $hostname, '.' ) > 1 ) {
 						$pos_1st_dot_from_right = strrpos( $hostname, '.' );
 						$pos_2nd_dot_from_right = strrpos( substr( $hostname, 0, $pos_1st_dot_from_right ), '.' );
 						$hostname               = substr( $hostname, $pos_2nd_dot_from_right + 1 );
 					}
-					// Get video block.
+
+					// Get Gutenberg block depending on hostname.
 					$video_block = null;
 					switch ( $hostname ) {
 						case 'youtube.com':
@@ -536,6 +541,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 							
 						case 'facebook.com':
 						case 'fb.watch':
+							// Embedding some of these short URLs isn't working, final redirects are needed.
 							$embed_url            = $this->get_final_redirect_url( $video_url );
 							$html_content_sprintf = sprintf(
 								"\n%s\n%s\n",
@@ -546,12 +552,36 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 							$video_block          = $this->gutenberg_blocks->get_html( $html_content );
 							break;
 								
+						case 'tiktok.com':
+						case 'twitter.com':
+							$video_block = $this->gutenberg_blocks->get_core_embed( $video_url );
+							break;
+
+						case 'instagram.com':
+							$html_content_sprintf = sprintf(
+								"\n%s\n%s\n",
+								'<blockquote class="instagram-media" data-instgrm-permalink="%s" data-instgrm-version="14"></blockquote>',
+								'<script async src="//www.instagram.com/embed.js"></script>'
+							);
+							$html_content         = sprintf( $html_content_sprintf, $video_url );
+							$video_block          = $this->gutenberg_blocks->get_html( $html_content );
+							break;
+
+						case 'bandcamp.com':
+						case 'cafenine.com':
+						case 'christiansonlee.com':
+						case 'google.com':
+						case 'soundcloud.com':
+						case 'spotify.com':
+						case 'wpt.org':
+							// These work with iframe block.                                
+							$video_block = $this->gutenberg_blocks->get_iframe( $video_url );
+							break;
+
 						default:
-							// TODO: other video hosts.
-
-							// $replacement = sprintf( '<a href="%s" target="_blank">%s</a>', $url_trimmed, $url_trimmed );
-							WP_CLI::warning( sprintf( "ERROR unknown video hostname '%s' in entry ID %d. Inserted <a> link.", $hostname, $entry_id ) );
-
+							// Insert other unembeddable videos as links.
+							$link        = sprintf( '<a href="%s" class="nhi-blockVideo-link" target="_blank">%s</a>', $video_url, $video_url );
+							$video_block = $this->gutenberg_blocks->get_paragraph( $link );
 							break;
 					}
 					if ( ! is_null( $video_block ) ) {
@@ -1031,7 +1061,30 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		// phpcs:disable -- temporary dev code.
 
-		
+		// WP_CLI::print_value( '--- TEST VARIOUS "BLOCK VIDEO" HOST EMBEDS  -----------------------------' );
+		$video_urls = [
+			'https://baba.com/c'
+		];
+		$post_content = '';
+		foreach ( $video_urls as $video_url ) {
+			$link        = sprintf( '<a href="%s" class="nhi-blockVideo-link" target="_blank">%s</a>', $video_url, $video_url );
+			$video_block = $this->gutenberg_blocks->get_paragraph( $link );
+
+			$paragraph_block          = $this->gutenberg_blocks->get_paragraph( $video_url );
+			$separator_block      = $this->gutenberg_blocks->get_separator();
+			$post_content .= ! empty( $post_content ) ? "\n\n" : '';
+			$post_content .= serialize_block( $paragraph_block );
+			$post_content .= serialize_block( $video_block );
+			$post_content .= serialize_block( $separator_block );
+		}
+		// SAVE DIRECTLY TO TEST POST CONTENT.
+		global $wpdb;
+		$wpdb->update(
+			$wpdb->posts,
+			[ 'post_content' => $post_content ],
+			[ 'ID' => 12 ]
+		);
+		exit;
 
 		// WP_CLI::print_value( '--- TEST FB VIDEO EMBEDS  -----------------------------' );
 		$video_urls = [
