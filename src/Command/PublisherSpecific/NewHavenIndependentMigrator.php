@@ -80,8 +80,15 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 */
 	public const SECTION_PARENT_CATEGORY_NAME = 'Sections';
 	
+	/**
+	 * If defined and not empty/null, the neighborhoods categories will be created under this parent category, otherwise neighborhoods will be created as top-level categories.
+	 */
 	public const NEIGHBORHOODS_PARENT_CATEGORY_NAME = 'Neighborhoods';
-	public const FEATURES_PARENT_CATEGORY_NAME      = 'Features';
+
+	/**
+	 * If defined and not empty/null, the features categories will be created under this parent category, otherwise features will be created as top-level categories.
+	 */
+	public const FEATURES_PARENT_CATEGORY_NAME = 'Features';
 
 	/**
 	 * Will also add a category for entry type, to keep things more visible in migration.
@@ -496,8 +503,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				$post_data['post_category'][] = $neighborhood;
 			}
 		}
-
-		// $features      = $this->get_features( $entry['id'], $prod_db );
+		// Set features.
+		$features = $this->get_features_categories( $entry['id'], $prod_db );
+		if ( ! empty( $features ) ) {
+			foreach ( $features as $feature ) {
+				$post_data['post_category'][] = $feature;
+			}
+		}
 
 		// Also set and EntryType subcategory.
 		if ( isset( $entry['fieldPreparsedEntryType'] ) && ! empty( $entry['fieldPreparsedEntryType'] ) ) {
@@ -935,7 +947,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				WP_CLI::warning( sprintf( "ERROR inserting user from author name '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $author ), $wp_user_unique_identifier, $e->getMessage() ) );
 			}
 			if ( is_wp_error( $wp_user ) ) {
-				WP_CLI::warning( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
+				WP_CLI::warning( sprintf( "ERROR inserting user from author name '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $author ), $wp_user_unique_identifier, $wp_user->get_error_message() ) );
 			}
 
 			// User metas.
@@ -1563,6 +1575,90 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		// Create the current neighborhood category under its WordPress parent.
 		return $this->taxonomy->get_or_create_category_by_name_and_parent_id( $neighborhood_data->title, $parent_wp_cat_id );
+	}
+
+	/**
+	 * Get features categories for an entry.
+	 *
+	 * @param int   $entry_id The entry ID.
+	 * @param \wpdb $prod_db  The production database connection.
+	 * @return int[] Array of category IDs.
+	 */
+	public function get_features_categories( int $entry_id, wpdb $prod_db ): array {
+		// fieldId for 'fieldFeatures' is 15. -- SELECT id FROM fields WHERE handle = 'fieldFeatures';.
+		$field_id_features = 15;
+
+		$query_target_ids   = $prod_db->prepare(
+			'SELECT targetId FROM relations WHERE sourceId = %d AND fieldId = %d',
+			$entry_id,
+			$field_id_features
+		);
+		$feature_target_ids = $prod_db->get_col( $query_target_ids );
+
+		if ( empty( $feature_target_ids ) ) {
+			return [];
+		}
+
+		$category_ids = [];
+		foreach ( $feature_target_ids as $target_id ) {
+			$category_id = $this->get_or_create_hierarchical_feature_category( $target_id, $prod_db );
+			if ( ! is_null( $category_id ) ) {
+				$category_ids[] = $category_id;
+			}
+		}
+
+		return array_unique( $category_ids );
+	}
+
+	/**
+	 * Recursively get or create a hierarchical feature category.
+	 *
+	 * @param int   $feature_id The feature category ID from Craft.
+	 * @param \wpdb $prod_db    The production database connection.
+	 *
+	 * @return int|null The WordPress category ID, or null on failure.
+	 */
+	private function get_or_create_hierarchical_feature_category( int $feature_id, wpdb $prod_db ): ?int {
+		// Get feature details from Craft DB.
+		$feature_query = $prod_db->prepare(
+			'SELECT c.title, se.lft, se.rgt, se.level
+			FROM content c
+			JOIN structureelements se ON c.elementId = se.elementId
+			WHERE c.elementId = %d
+			LIMIT 1',
+			$feature_id
+		);
+		$feature_data  = $prod_db->get_row( $feature_query );
+
+		if ( ! $feature_data ) {
+			WP_CLI::warning( sprintf( 'Could not find feature data for ID %d.', $feature_id ) );
+			return null;
+		}
+
+		// Find the parent in Craft DB.
+		$parent_id        = null;
+		$parent_wp_cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::FEATURES_PARENT_CATEGORY_NAME, 0 );
+
+		if ( $feature_data->level > 1 ) {
+			$parent_query = $prod_db->prepare(
+				'SELECT elementId FROM structureelements 
+				WHERE lft < %d AND rgt > %d AND level = %d
+				ORDER BY rgt ASC
+				LIMIT 1',
+				$feature_data->lft,
+				$feature_data->rgt,
+				$feature_data->level - 1
+			);
+			$parent_id    = $prod_db->get_var( $parent_query );
+		}
+
+		// If a Craft parent exists, recursively create it in WordPress.
+		if ( $parent_id ) {
+			$parent_wp_cat_id = $this->get_or_create_hierarchical_feature_category( $parent_id, $prod_db );
+		}
+
+		// Create the current feature category under its WordPress parent.
+		return $this->taxonomy->get_or_create_category_by_name_and_parent_id( $feature_data->title, $parent_wp_cat_id );
 	}
 
 	/**
