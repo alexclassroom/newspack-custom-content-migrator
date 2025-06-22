@@ -71,16 +71,17 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 	/**
 	 * If defined and not empty/null, the section categories will be created under this parent category, otherwise sections will be created as top-level categories.
-	 * 
-	 * In Craft CMS there's two main types of "categories":
-	 * - "sectionId"
+	 * - field "sectionId"
 	 *      - primary site structure (e.g., "Main News," "Obituaries," "Legal Notices")
 	 *      - only one sectionId per entry
+	 * 
+	 * If defined and not empty/null, the section categories will be created under this parent category, otherwise sections will be created as top-level categories.
 	 *  - "fieldSections"
-	 *      - topical categories (e.g., "Religion," "Arts & Culture," "Politics")
-	 *      - more granular organization across different primary sections
 	 */
-	public const SECTION_PARENT_CATEGORY_NAME = 'Section';
+	public const SECTION_PARENT_CATEGORY_NAME = 'Sections';
+	
+	public const NEIGHBORHOODS_PARENT_CATEGORY_NAME = 'Neighborhoods';
+	public const FEATURES_PARENT_CATEGORY_NAME      = 'Features';
 
 	/**
 	 * Will also add a category for entry type, to keep things more visible in migration.
@@ -365,7 +366,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			foreach ( $entries as $entry ) {
 				
 				// Create post.
-				$post_data = $this->get_basic_post_data( $entry, $sections_data, $prod_db );
+				$post_data = $this->get_basic_post_data( $entry, $sections_data, $prod_db, $entries_json_file );
 				$post_id   = wp_insert_post( $post_data );
 				if ( is_wp_error( $post_id ) || 0 === $post_id ) {
 					WP_CLI::warning( sprintf( "ERROR inserting post '%s' : '%s'", $post_data['post_title'], is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Post ID is 0' ) );
@@ -415,12 +416,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	/**
 	 * Get post data.
 	 * 
-	 * @param array $entry         The entry data.
-	 * @param array $sections_data The sections data.
-	 * @param \wpdb $prod_db       The production database connection.
+	 * @param array  $entry         The entry data.
+	 * @param array  $sections_data The sections data.
+	 * @param \wpdb  $prod_db       The production database connection.
+	 * @param string $entries_json_file The JSON file containing the entry.
 	 * @return array The post data. TODO return WP_error.
 	 */
-	public function get_basic_post_data( array $entry, array $sections_data, wpdb $prod_db ): array {
+	public function get_basic_post_data( array $entry, array $sections_data, wpdb $prod_db, string $entries_json_file ): array {
 		$post_data = [];
 
 		/**
@@ -487,6 +489,16 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				}
 			}
 		}
+		// Set neighborhoods.
+		$neighborhood_cats = $this->get_neighborhoods_categories( $entry['id'], $prod_db );
+		if ( ! empty( $neighborhood_cats ) ) {
+			foreach ( $neighborhood_cats as $neighborhood ) {
+				$post_data['post_category'][] = $neighborhood;
+			}
+		}
+
+		// $features      = $this->get_features( $entry['id'], $prod_db );
+
 		// Also set and EntryType subcategory.
 		if ( isset( $entry['fieldPreparsedEntryType'] ) && ! empty( $entry['fieldPreparsedEntryType'] ) ) {
 			// Get entry type category and parent category (if defined in constant).
@@ -818,7 +830,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$post_content = $post_excerpt;
 		foreach ( $post_content_blocks as $key_block => $block ) {
 			// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
-			if ( $key_block > 0 ) {
+			if ( $key_block > 0 || ! empty( $post_content ) ) {
 				$post_content .= "\n\n";
 			}
 			$post_content .= serialize_block( $block );
@@ -1002,7 +1014,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	public function set_post_comments( int $post_id, array $entry, array $users_data, wpdb $prod_db ): void {
 		global $wpdb;
 
-		// Get entry comments.
+		// This map will store the mapping from Craft comment IDs to new WordPress comment IDs.
+		$craft_comment_id_to_wp_id = [];
+
+		// Get entry comments. The comments must be ordered by hierarchy (lft) for this to work.
 		$comments = $this->get_entry_comments( $entry['id'], $prod_db );
 		foreach ( $comments as $comment ) {
 
@@ -1010,7 +1025,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			 * Craft comment author name can be found in one of these two places in comment data:
 			 *   - a custom text byline, in which case we have the 'author_name' and no 'author_user_id'
 			 *   - an existing Craft user is the author comment, and in that case we have the 'author_user_id' and must get/create the author by ID
-			 */ 
+			 */
 			$comment_autor_name = null;
 			if ( ! empty( $comment['author_name'] ) ) {
 				$comment_autor_name = $comment['author_name'];
@@ -1022,7 +1037,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				WP_CLI::warning( sprintf( 'ERROR getting comment author name for comment ID %d in entry ID %d, while importing post ID %d', $comment['comment_id'], $entry['id'], $post_id ) );
 				continue;
 			}
-			
+
 			// Insert comment.
 			$comment_data = [
 				'comment_post_ID'  => $post_id,
@@ -1030,12 +1045,22 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				'comment_author'   => $comment_autor_name,
 				'comment_content'  => $comment['comment'],
 				'comment_date'     => $comment['comment_date'],
+				'comment_parent'   => 0,
 			];
-			$comment_id   = wp_insert_comment( $comment_data );
-			if ( false === $comment_id ) {
+
+			// If this is a reply, find the parent's WP ID and set it.
+			if ( ! is_null( $comment['reply_to_comment_id'] ) && isset( $craft_comment_id_to_wp_id[ $comment['reply_to_comment_id'] ] ) ) {
+				$comment_data['comment_parent'] = $craft_comment_id_to_wp_id[ $comment['reply_to_comment_id'] ];
+			}
+
+			$comment_id = wp_insert_comment( $comment_data );
+			if ( false === $comment_id || 0 === $comment_id ) {
 				WP_CLI::warning( sprintf( 'ERROR inserting comment for post ID %s : %s', $post_id, $wpdb->last_error ) );
 				continue;
 			}
+
+			// Store the new ID in our map.
+			$craft_comment_id_to_wp_id[ $comment['comment_id'] ] = $comment_id;
 
 			// Save comment metas.
 			$commentmetas = [
@@ -1078,7 +1103,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @return int|null The featured image ID, or null if there was an error.
 	 */
 	public function set_post_featured_image( int $post_id, array $entry, wpdb $prod_db ): ?int {
-				// Get featured image data.
+		// Get featured image data.
 		$asset_json_data = $this->get_matrixLede_first_block_image_data( $entry );
 		if ( is_null( $asset_json_data ) ) {
 			// No featured image.
@@ -1090,6 +1115,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		// Import image.
 		$featured_image_id = $this->import_image_from_asset( $asset_json_data['id'], $post_id, $prod_db, $caption );
 		if ( is_wp_error( $featured_image_id ) ) {
+			$asset_db_data = $this->get_asset_image_data( $asset_json_data['id'], $prod_db );
 			WP_CLI::warning( sprintf( "ERROR inserting featured image URL '%s', title '%s', itemContent '%s', description '%s', post ID '%s', filename '%s' : %s", $asset_db_data['url'], $asset_db_data['title'], $asset_json_data['itemContent'], $asset_db_data['description'], $post_id, $asset_db_data['filename'], $featured_image_id->get_error_message() ) );
 			// TODO return WP_error.
 			return null;
@@ -1455,6 +1481,91 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Get neighborhood sections for an entry.
+	 *
+	 * @param int   $entry_id The entry ID.
+	 * @param \wpdb $prod_db  The production database connection.
+	 * @return int[] Array of category IDs.
+	 */
+	public function get_neighborhoods_categories( int $entry_id, wpdb $prod_db ): array {
+		// fieldId for 'fieldNeighborhoods' is 14. -- SELECT id FROM fields WHERE handle = 'fieldNeighborhoods';.
+		$field_id_neighborhoods = 14;
+
+		// Get neighborhood target IDs from relations table.
+		$query_target_ids        = $prod_db->prepare(
+			'SELECT targetId FROM relations WHERE sourceId = %d AND fieldId = %d',
+			$entry_id,
+			$field_id_neighborhoods
+		);
+		$neighborhood_target_ids = $prod_db->get_col( $query_target_ids );
+
+		if ( empty( $neighborhood_target_ids ) ) {
+			return [];
+		}
+
+		$category_ids = [];
+		foreach ( $neighborhood_target_ids as $target_id ) {
+			$category_id = $this->get_or_create_hierarchical_neighborhood_category( $target_id, $prod_db );
+			if ( ! is_null( $category_id ) ) {
+				$category_ids[] = $category_id;
+			}
+		}
+
+		return array_unique( $category_ids );
+	}
+
+	/**
+	 * Recursively get or create a hierarchical neighborhood category.
+	 *
+	 * @param int   $neighborhood_id The neighborhood category ID from Craft.
+	 * @param \wpdb $prod_db         The production database connection.
+	 *
+	 * @return int|null The WordPress category ID, or null on failure.
+	 */
+	private function get_or_create_hierarchical_neighborhood_category( int $neighborhood_id, wpdb $prod_db ): ?int {
+		// Get neighborhood details from Craft DB.
+		$neighborhood_query = $prod_db->prepare(
+			'SELECT c.title, se.lft, se.rgt, se.level
+			FROM content c
+			JOIN structureelements se ON c.elementId = se.elementId
+			WHERE c.elementId = %d
+			LIMIT 1',
+			$neighborhood_id
+		);
+		$neighborhood_data  = $prod_db->get_row( $neighborhood_query );
+
+		if ( ! $neighborhood_data ) {
+			WP_CLI::warning( sprintf( 'Could not find neighborhood data for ID %d.', $neighborhood_id ) );
+			return null;
+		}
+
+		// Find the parent in Craft DB.
+		$parent_id        = null;
+		$parent_wp_cat_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::NEIGHBORHOODS_PARENT_CATEGORY_NAME, 0 );
+
+		if ( $neighborhood_data->level > 1 ) {
+			$parent_query = $prod_db->prepare(
+				'SELECT elementId FROM structureelements 
+				WHERE lft < %d AND rgt > %d AND level = %d
+				ORDER BY rgt ASC
+				LIMIT 1',
+				$neighborhood_data->lft,
+				$neighborhood_data->rgt,
+				$neighborhood_data->level - 1
+			);
+			$parent_id    = $prod_db->get_var( $parent_query );
+		}
+
+		// If a Craft parent exists, recursively create it in WordPress.
+		if ( $parent_id ) {
+			$parent_wp_cat_id = $this->get_or_create_hierarchical_neighborhood_category( $parent_id, $prod_db );
+		}
+
+		// Create the current neighborhood category under its WordPress parent.
+		return $this->taxonomy->get_or_create_category_by_name_and_parent_id( $neighborhood_data->title, $parent_wp_cat_id );
+	}
+
+	/**
 	 * Featured image is found in entry['matrixLede'], in the first blockImage type, and fields itemAsset array.
 	 * e.g.
 	 *  "matrixLede": {
@@ -1522,7 +1633,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 *  ?string 'avatar_image_url' Avatar image URL.
 	 * }
 	 */
-	public function get_user_data( int $user_id, array $users_data, wpdb $prod_db ): array {
+	public function get_user_data( int $user_id, array $users_data, wpdb $prod_db ): ?array {
 		// Search for author in users_data.
 		foreach ( $users_data as $user ) {
 			if ( $user_id === $user['id'] ) {
@@ -1890,15 +2001,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 *
 	 * @param int  $entry_id The entry ID.
 	 * @param wpdb $prod_db  The production database connection.
-	 * @return array[] Array of comments, each with keys:
-	 *   - comment_id: int
-	 *   - author_name: string|null User display name or custom text byline.
-	 *   - author_user_id: int|null If this comment came from an existing user, this is the user ID. Otherwise, null -- this may be called an "anonymous" user (because it's not a registered user), but it still has a display name.
-	 *   - comment: string
-	 *   - comment_date: string Converted to NHI timezone.
-	 *   - status: string
-	 *   - user_id: int|null
-	 *   - flagged: bool Whether the comment is flagged.
+	 * @return array[] Array of comments, each with keys. {
+	 *  int     'comment_id'          The comment ID.
+	 *  ?int    'reply_to_comment_id' The ID of the comment this is a reply to.
+	 *  ?null   'level'               The depth of the comment in the reply chain.
+	 *  ?string 'author_name'         User display name or custom text byline.
+	 *  ?null   'author_user_id'      If this comment came from an existing user, this is the user ID. Otherwise, null -- this may be called an "anonymous" user (because it's not a registered user), but it still has a display name.
+	 *  string  'comment'             The comment text.
+	 *  string  'comment_date'        Converted to NHI timezone.
+	 *  string  'status'              The comment status.
+	 *  ?int    'user_id'             The user ID.
+	 *  bool    'flagged'             Whether the comment is flagged.
+	 * }
 	 */
 	public function get_entry_comments( int $entry_id, wpdb $prod_db ): array {
 		// Fetch all flagged comment IDs for this entry in one query.
@@ -1910,9 +2024,30 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$flagged_set   = array_flip( $flagged_ids ); // For fast lookup.
 
 		// Get comments from DB.
-		$comments       = [];
+		$comments = [];
+		// The comment hierarchy (i.e., replies) is stored in the `structureelements` table using a nested set model (lft, rgt, level columns).
+		// This query joins the comments with their structure information and uses a subquery to find the direct parent of each comment.
+		// The results are ordered by `lft` to ensure parents are processed before their children.
 		$comments_query = $prod_db->prepare(
-			'SELECT id, name, comment, commentDate, status, userId FROM comments_comments WHERE ownerId = %d ORDER BY commentDate ASC',
+			'SELECT
+				c.id, c.name, c.comment, c.commentDate, c.status, c.userId,
+				se.level,
+				(
+					SELECT parent.elementId
+					FROM structureelements AS child
+					JOIN structureelements AS parent ON child.lft > parent.lft AND child.rgt < parent.rgt AND child.level = parent.level + 1
+					WHERE child.elementId = c.id
+					ORDER BY parent.lft DESC
+					LIMIT 1
+				) AS reply_to_comment_id
+			FROM
+				comments_comments c
+			LEFT JOIN
+				structureelements se ON c.id = se.elementId
+			WHERE
+				c.ownerId = %d
+			ORDER BY
+				se.lft ASC',
 			$entry_id
 		);
 		$comments_rows  = $prod_db->get_results( $comments_query );
@@ -1954,16 +2089,17 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$comment_date_converted = ! is_null( $comment_date ) ? $this->convert_utc_to_nhi_time( $comment_date, self::NHI_TIMEZONE ) : null;
 
 			$comments[] = [
-				'comment_id'     => (int) $comment_row->id,
-				'author_name'    => $author_name,
-				'author_user_id' => $author_user_id,
-				'comment'        => $comment_row->comment,
-				'comment_date'   => $comment_date_converted,
-				'status'         => $comment_row->status,
-				'user_id'        => $comment_row->userId ? (int) $comment_row->userId : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
-				'flagged'        => isset( $flagged_set[ $comment_row->id ] ),
+				'comment_id'          => (int) $comment_row->id,
+				'reply_to_comment_id' => $comment_row->reply_to_comment_id ? (int) $comment_row->reply_to_comment_id : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				'level'               => $comment_row->level ? (int) $comment_row->level : null,
+				'author_name'         => $author_name,
+				'author_user_id'      => $author_user_id,
+				'comment'             => $comment_row->comment,
+				'comment_date'        => $comment_date_converted,
+				'status'              => $comment_row->status,
+				'user_id'             => $comment_row->userId ? (int) $comment_row->userId : null, // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
+				'flagged'             => isset( $flagged_set[ $comment_row->id ] ),
 			];
-			$d          = 1;
 		}
 		return $comments;
 	}
