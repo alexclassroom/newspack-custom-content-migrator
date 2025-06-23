@@ -37,6 +37,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * CDN assets hostname.
 	 */
 	public const CDN_ASSET_HOSTNAME = 'd2f1dfnoetc03v.cloudfront.net';
+	
+	/**
+	 * S3 hostname.
+	 */
+	public const S3_HOSTNAME = 'ojp-content.s3.us-east-2.amazonaws.com';
 
 	/**
 	 * All possible entry types in the prod DB ("fieldPreparsedEntryType").
@@ -606,12 +611,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					}
 
 					// Get video hostname without the subdomains.
-					$hostname = wp_parse_url( $video_url, PHP_URL_HOST );
-					if ( substr_count( $hostname, '.' ) > 1 ) {
-						$pos_1st_dot_from_right = strrpos( $hostname, '.' );
-						$pos_2nd_dot_from_right = strrpos( substr( $hostname, 0, $pos_1st_dot_from_right ), '.' );
-						$hostname               = substr( $hostname, $pos_2nd_dot_from_right + 1 );
-					}
+					$hostname = $this->get_hostname_from_url( $video_url );
 
 					// Get Gutenberg block depending on hostname.
 					$video_block = null;
@@ -688,12 +688,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						WP_CLI::warning( sprintf( 'ERROR entry ID %d matrixMainContent blockImage missing asset ID.', $entry_id ) );
 						break;
 					}
+					// Caption is contained in JSON data.
 					$caption = null;
 					if ( isset( $craft_block['fields']['itemContent'] ) && ! empty( $craft_block['fields']['itemContent'] ) ) {
 						$caption = $this->formatting_strip_outer_p_tag( $craft_block['fields']['itemContent'] ?? null );
 					}
 
 					// Import image.
+					// Credit is contained in DB asset data.
 					$image_id = $this->import_image_from_asset( $asset_id, $post_id, $prod_db, $caption );
 					if ( is_wp_error( $image_id ) ) {
 						WP_CLI::warning( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset '%d' : '%s'.", $entry_id, $asset_id, $image_id->get_error_message() ) );
@@ -712,9 +714,70 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockExternalImage: image URL '%s'.", $entry_id, $image_url ) );
 						break;
 					}
-					$image_caption      = $craft_block['fields']['itemContent'] ?? null;
-					$image_block        = $this->gutenberg_blocks->get_external_image( $image_url, $image_caption );
-					$gutenberg_blocks[] = $image_block;
+
+					/**
+					 * If image is hosted on own hostnames, download it and use regular image block.
+					 */
+					// Allow any subdomain of this host.
+					$hostnames_no_subdomain = [
+						'newhavenindependent.org',
+					];
+					// Only allow these specific subdomains (don't download the entire amazonaws.com :D ).
+					$hostnames_with_subdomains   = [
+						self::CDN_ASSET_HOSTNAME,
+						self::S3_HOSTNAME,
+					];
+					$img_hostname_no_subdomain   = $this->get_hostname_from_url( $image_url );
+					$img_hostname_with_subdomain = wp_parse_url( $image_url, PHP_URL_HOST );
+					if ( in_array( $img_hostname_no_subdomain, $hostnames_no_subdomain ) || in_array( $img_hostname_with_subdomain, $hostnames_with_subdomains ) ) {
+
+						// Caption and Credit are both contained in JSON data for external image block.
+						$caption = null;
+						if ( isset( $craft_block['fields']['itemContent'] ) && ! empty( $craft_block['fields']['itemContent'] ) ) {
+							$caption = $this->formatting_strip_outer_p_tag( $craft_block['fields']['itemContent'] ?? null );
+						}
+						$credit = null;
+						if ( isset( $craft_block['fields']['itemHeading'] ) && ! empty( $craft_block['fields']['itemHeading'] ) ) {
+							$credit = $this->formatting_strip_outer_p_tag( $craft_block['fields']['itemHeading'] ?? null );
+						}
+
+						// Download and import image.
+						$image_id = $this->attachments->import_external_file(
+							$image_url,
+							null,
+							$caption,
+							null,
+							null,
+							$post_id
+						);
+						if ( is_wp_error( $image_id ) ) {
+							WP_CLI::warning( sprintf( "ERROR downloading image for entry ID %d, post ID %d -- matrixMainContent blockExternalImage itemURL '%s' : '%s'.", $entry_id, $post_id, $image_url, $image_id->get_error_message() ) );
+							break;
+						}
+
+						// Set postmetas, including credit.
+						$image_metas = [
+							'_media_credit'                => $credit,
+							'newspack_migration_asset_url' => $image_url,
+							'newspack_migration_asset_itemPosition' => $craft_block['fields']['itemPosition'] ?? null,
+							'newspack_migration_asset_itemWidth' => $craft_block['fields']['itemWidth'] ?? null,
+						];
+						foreach ( $image_metas as $key => $value ) {
+							update_post_meta( $image_id, $key, $value );
+						}
+
+						// Get image block.
+						$image              = get_post( $image_id );
+						$image_block        = $this->gutenberg_blocks->get_image( $image );
+						$gutenberg_blocks[] = $image_block;
+					} else {
+						/**
+						 * If image is hosted on some external hostname, use external image block.
+						 */
+						$image_caption      = $craft_block['fields']['itemContent'] ?? null;
+						$image_block        = $this->gutenberg_blocks->get_external_image( $image_url, $image_caption );
+						$gutenberg_blocks[] = $image_block;
+					}
 					break;
 
 				case 'blockSeparator':
@@ -808,6 +871,24 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$result = $result ?? $text;
 
 		return $result;
+	}
+
+	/**
+	 * Get the hostname from a given URL.
+	 * 
+	 * @param string $url The URL to get the hostname from.
+	 * @return string The hostname.
+	 */
+	public function get_hostname_from_url( string $url ): string {
+		$hostname = wp_parse_url( $url, PHP_URL_HOST );
+		if ( substr_count( $hostname, '.' ) > 1 ) {
+			// Remove one or more subdomains.
+			$pos_1st_dot_from_right = strrpos( $hostname, '.' );
+			$pos_2nd_dot_from_right = strrpos( substr( $hostname, 0, $pos_1st_dot_from_right ), '.' );
+			$hostname               = substr( $hostname, $pos_2nd_dot_from_right + 1 );
+		}
+
+		return $hostname;
 	}
 
 	/**
@@ -1163,6 +1244,40 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
 		// phpcs:disable -- temporary dev code.
+
+		WP_CLI::print_value( '--- GET EXTERNAL IMAGE BLOCK URLS  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			$urls = [];
+			foreach ( $entries_file_data as $entry ) {
+				if ( isset( $entry['matrixLede'] ) ) {
+					foreach ( $entry['matrixLede'] as $block ) {
+						if ( 'blockExternalImage' === $block['type'] ) {
+							if ( ! in_array( $block['fields']['itemURL']['url'], $urls ) ) {
+								$urls[] = $block['fields']['itemURL']['url'];
+							}
+						}
+					}
+				}
+				if ( isset( $entry['matrixMainContent'] ) ) {
+					foreach ( $entry['matrixMainContent'] as $block ) {
+						if ( 'blockExternalImage' === $block['type'] ) {
+							if ( ! in_array( $block['fields']['itemURL']['url'], $urls ) ) {
+								$urls[] = $block['fields']['itemURL']['url'];
+							}
+						}
+					}
+				}
+			}
+			WP_CLI::print_value( implode( "\n", $urls ) );
+		}
+		exit;
 
 		// WP_CLI::print_value( '--- TEST VARIOUS "BLOCK VIDEO" HOST EMBEDS  -----------------------------' );
 		$video_urls = [
