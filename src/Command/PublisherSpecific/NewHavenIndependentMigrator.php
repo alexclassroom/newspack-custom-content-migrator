@@ -23,6 +23,7 @@ use Bramus\Monolog\Formatter\ColoredLineFormatter;
 use Monolog\Level;
 use Simple_Local_Avatars;
 use WP_CLI;
+use WP_Error;
 use wpdb;
 
 class NewHavenIndependentMigrator implements RegisterCommandInterface {
@@ -164,6 +165,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	];
 
 	/**
+	 * Dry run flag.
+	 *
+	 * @var bool $dry_run The dry run flag.
+	 */
+	private $dry_run = false;
+
+	/**
 	 * Logger
 	 *
 	 * @var MultiLog
@@ -234,6 +242,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			[
 				'synopsis' => [
 					[
+						'type'     => 'flag',
+						'name'     => 'dry-run',
+						'optional' => true,
+					],
+					[
 						'type'     => 'assoc',
 						'name'     => 'json-expanded-entries-folder',
 						'optional' => false,
@@ -287,6 +300,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_import' ),
 			[
 				'synopsis' => [
+					[
+						'type'     => 'flag',
+						'name'     => 'dry-run',
+						'optional' => true,
+					],
 					[
 						'type'     => 'assoc',
 						'name'     => 'json-expanded-entries-folder',
@@ -399,6 +417,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args The associative arguments.
 	 */
 	public function cmd_import( array $pos_args, array $assoc_args ): void {
+		$this->dry_run                      = isset( $assoc_args['dry-run'] ) ? true : false;
 		$craft_db_name                      = $assoc_args['craft-db-name'] ?? null;
 		$craft_db_user                      = $assoc_args['craft-db-user'] ?? null;
 		$craft_db_pass                      = $assoc_args['craft-db-pass'] ?? null;
@@ -408,12 +427,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$users_json_file                    = $assoc_args['json-expanded-users'];
 		$categories_news_expanded_json_file = $assoc_args['json-expanded-categories-news-sections'];
 		
-		global $wpdb;
-
 		// Set logger.
 		$this->setup_logger( __FUNCTION__ );
 
-		// Get database connection to Craft CMS tables. If not all params are provided, will return the global $wpdb to try and access the required Craft tables from the local schema.
+		// If not all connection params are provided, this will return the local WP DB connection and try and work with Craft tables in the WP schema.
 		$craft_db = $this->get_craft_db_connection( $craft_db_name, $craft_db_user, $craft_db_pass, $craft_db_host, $craft_db_port );
 
 		// Get Craft users data.
@@ -429,15 +446,19 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		// Get entry JSON files.
 		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
-		foreach ( $entries_json_files as $entries_json_file ) {
+		foreach ( $entries_json_files as $key_entries_json_file => $entries_json_file ) {
+			// Progress.
+			$this->logger->info( sprintf( '===== (%d)/(%d) JSON File %s', $key_entries_json_file + 1, count( $entries_json_files ), $entries_json_file ) );
 			
 			// Get entries.
 			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
-			foreach ( $entries as $entry ) {
+			foreach ( $entries as $key_entry => $entry ) {
+				// Progress.                
+				$this->logger->info( sprintf( '(%d)/(%d) ; (%d)/(%d) Entry ID %s', $key_entries_json_file + 1, count( $entries_json_files ), $key_entry + 1, count( $entries ), $entry['id'] ) );
 				
 				// Create post.
 				$post_data = $this->get_basic_post_data( $entry, $sections_data, $craft_db, $entries_json_file );
-				$post_id   = wp_insert_post( $post_data );
+				$post_id   = ! $this->dry_run ? wp_insert_post( $post_data ) : -1;
 				if ( is_wp_error( $post_id ) || 0 === $post_id ) {
 					$this->logger->error( sprintf( "ERROR inserting post '%s' : '%s'", $post_data['post_title'], is_wp_error( $post_id ) ? $post_id->get_error_message() : 'Post ID is 0' ) );
 					continue;
@@ -465,21 +486,12 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					'newspack_migration_entry_status'  => $entry['status'],
 					'newspack_migration_legacy_byline' => $this->get_entry_bylines( $entry, $users_data, $craft_db ),
 				];
-				foreach ( $postmetas as $key => $value ) {
-					update_post_meta( $post_id, $key, $value );
+				if ( ! $this->dry_run ) {
+					foreach ( $postmetas as $key => $value ) {
+						update_post_meta( $post_id, $key, $value );
+					}
 				}
-			}
-
-			/**
-			 * Redirections to custom-redirects.php
-			 *      https://wpcloudfieldguide.wordpress.com/troubleshooting/custom-redirects-php/
-			 * https://mc.a8c.com/pb/38262/
-			 *      - add regexes
-			 * Do redirects for:
-			 *      - entries
-			 *      - categories
-			 *      - users
-			 */
+			}       
 		}
 	}
 
@@ -490,7 +502,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array  $sections_data The sections data.
 	 * @param \wpdb  $craft_db       The production database connection.
 	 * @param string $entries_json_file The JSON file containing the entry.
-	 * @return array The post data. TODO return WP_error.
+	 * @return array The post data.
 	 */
 	public function get_basic_post_data( array $entry, array $sections_data, wpdb $craft_db, string $entries_json_file ): array {
 		$post_data = [];
@@ -530,15 +542,21 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				// Get section category and parent category (if defined in constant).
 				$section_parent_category_id = 0;
 				if ( ! empty( self::SECTION_PARENT_CATEGORY_NAME ) ) {
-					$section_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::SECTION_PARENT_CATEGORY_NAME, 0 );
+					if ( ! $this->dry_run ) {
+						$section_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::SECTION_PARENT_CATEGORY_NAME, 0 );
+					}
 				}
-				$section_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $section_name, $section_parent_category_id );
+				if ( ! $this->dry_run ) {
+					$section_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $section_name, $section_parent_category_id );
+				}
 
 				// Add section category to post.
-				if ( ! is_null( $section_category_id ) ) {
-					$post_data['post_category'][] = $section_category_id;
-				} else {
-					$this->logger->error( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
+				if ( ! $this->dry_run ) {
+					if ( ! is_null( $section_category_id ) ) {
+						$post_data['post_category'][] = $section_category_id;
+					} else {
+						$this->logger->error( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
+					}
 				}
 			}
 		}
@@ -546,12 +564,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		if ( isset( $entry['fieldSections'] ) && ! empty( $entry['fieldSections'] ) ) {
 			foreach ( $entry['fieldSections'] as $field_section_id ) { // phpcs:ignore -- Snake case matching production DB column names. WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase.
 				try {
-					$field_section_category_id = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
-					if ( is_null( $field_section_category_id ) ) {
-						$this->logger->error( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
-					} else {
-						// Add fieldSection category to post.
-						$post_data['post_category'][] = $field_section_category_id;
+					if ( ! $this->dry_run ) {
+						$field_section_category_id = $this->get_category_from_fieldSection( $field_section_id, $sections_data );
+						if ( is_null( $field_section_category_id ) ) {
+							$this->logger->error( sprintf( "ERROR creating section category, sectionId '%s' in entry ID %d, parent category ID '%s'.", $entry['sectionId'], $entry['id'], $section_parent_category_id ) );
+						} else {
+							// Add fieldSection category to post.
+							$post_data['post_category'][] = $field_section_category_id;
+						}
 					}
 				} catch ( \Exception $e ) {
 					$this->logger->error( sprintf( "ERROR getting category from fieldSection '%s' in entry ID %d, JSON filename %s. Skipping.", $field_section_id, $entry['id'], $entries_json_file ) );
@@ -560,17 +580,21 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			}
 		}
 		// Set neighborhoods.
-		$neighborhood_cats = $this->get_neighborhoods_categories( $entry['id'], $craft_db );
-		if ( ! empty( $neighborhood_cats ) ) {
-			foreach ( $neighborhood_cats as $neighborhood ) {
-				$post_data['post_category'][] = $neighborhood;
+		if ( ! $this->dry_run ) {
+			$neighborhood_cats = $this->get_neighborhoods_categories( $entry['id'], $craft_db );
+			if ( ! empty( $neighborhood_cats ) ) {
+				foreach ( $neighborhood_cats as $neighborhood ) {
+					$post_data['post_category'][] = $neighborhood;
+				}
 			}
 		}
 		// Set features.
-		$features = $this->get_features_categories( $entry['id'], $craft_db );
-		if ( ! empty( $features ) ) {
-			foreach ( $features as $feature ) {
-				$post_data['post_category'][] = $feature;
+		if ( ! $this->dry_run ) {
+			$features = $this->get_features_categories( $entry['id'], $craft_db );
+			if ( ! empty( $features ) ) {
+				foreach ( $features as $feature ) {
+					$post_data['post_category'][] = $feature;
+				}
 			}
 		}
 
@@ -579,14 +603,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			// Get entry type category and parent category (if defined in constant).
 			$entry_type_parent_category_id = 0;
 			if ( ! empty( self::CRAFT_ENTRY_TYPE_CATEGORY_NAME ) ) {
-				$entry_type_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::CRAFT_ENTRY_TYPE_CATEGORY_NAME, 0 );
+				if ( ! $this->dry_run ) {
+					$entry_type_parent_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( self::CRAFT_ENTRY_TYPE_CATEGORY_NAME, 0 );
+				}
 			}
-			$entry_type_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $entry['fieldPreparsedEntryType'], $entry_type_parent_category_id );
-			if ( ! is_null( $entry_type_category_id ) ) {
-				// Add entry type category to post.
-				$post_data['post_category'][] = $entry_type_category_id;
-			} else {
-				$this->logger->error( sprintf( "ERROR creating entry type category, entry type '%s' in entry ID %d, parent category ID '%s'.", $entry['fieldPreparsedEntryType'], $entry['id'], $entry_type_parent_category_id ) );
+			if ( ! $this->dry_run ) {
+				$entry_type_category_id = $this->taxonomy->get_or_create_category_by_name_and_parent_id( $entry['fieldPreparsedEntryType'], $entry_type_parent_category_id );
+				if ( ! is_null( $entry_type_category_id ) ) {
+					// Add entry type category to post.
+					$post_data['post_category'][] = $entry_type_category_id;
+				} else {
+					$this->logger->error( sprintf( "ERROR creating entry type category, entry type '%s' in entry ID %d, parent category ID '%s'.", $entry['fieldPreparsedEntryType'], $entry['id'], $entry_type_parent_category_id ) );
+				}
 			}
 		}
 	   
@@ -660,7 +688,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 				case 'blockVideo':
 					$video_url = $craft_block['fields']['itemVideoEmbed']['url'] ?? null;
-					if ( empty( trim( $video_url ) ) ) {
+					if ( is_null( $video_url ) || empty( $video_url ) || empty( trim( $video_url ) ) ) {
+						$this->logger->error( sprintf( 'ERROR entry ID %d matrixMainContent blockVideo: video URL is empty.', $entry_id ) );
 						break;
 					}
 					if ( is_null( $video_url ) ) {
@@ -686,7 +715,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						case 'facebook.com':
 						case 'fb.watch':
 							// Embedding some of these short URLs isn't working, final redirects are needed.
-							$embed_url            = $this->get_final_redirect_url( $video_url );
+							$embed_url = $this->get_final_redirect_url( $video_url );
+							if ( $this->dry_run ) {
+								$this->logger->info( sprintf( "blockVideo facebook get_final_redirect_url entry ID %d: \n- from: '%s'\n-to: '%s'", $entry_id, $video_url, $embed_url ) );
+							}
 							$html_content_sprintf = sprintf(
 								"\n%s\n%s\n",
 								'<div id="fb-root"></div><script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v22.0"></script>',
@@ -757,16 +789,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 					// Import image.
 					// Credit is contained in DB asset data.
-					$image_id = $this->import_image_from_asset( $asset_id, $post_id, $craft_db, $caption );
+					$image_id = ! $this->dry_run ? $this->import_image_from_asset( $asset_id, $post_id, $entry_id, $craft_db, $caption ) : -1;
 					if ( is_wp_error( $image_id ) ) {
 						$this->logger->error( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset '%d' : '%s'.", $entry_id, $asset_id, $image_id->get_error_message() ) );
 						break;
 					}
-					$image = get_post( $image_id );
-
+					
 					// Get block.
-					$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
-					$gutenberg_blocks[] = $image_block;
+					if ( ! $this->dry_run ) {
+						$image              = get_post( $image_id );
+						$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
+						$gutenberg_blocks[] = $image_block;
+					}
 					break;
 
 				case 'blockExternalImage':
@@ -806,14 +840,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						}
 
 						// Download and import image.
-						$image_id = $this->attachments->import_external_file(
+						$image_id = ! $this->dry_run ? $this->attachments->import_external_file(
 							$image_url,
 							null,
 							$caption,
 							null,
 							null,
 							$post_id
-						);
+						) : -1;
 						if ( is_wp_error( $image_id ) ) {
 							$this->logger->error( sprintf( "ERROR downloading image for entry ID %d, post ID %d -- matrixMainContent blockExternalImage itemURL '%s' : '%s'.", $entry_id, $post_id, $image_url, $image_id->get_error_message() ) );
 							break;
@@ -826,14 +860,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 							'newspack_migration_asset_itemPosition' => $craft_block['fields']['itemPosition'] ?? null,
 							'newspack_migration_asset_itemWidth' => $craft_block['fields']['itemWidth'] ?? null,
 						];
-						foreach ( $image_metas as $key => $value ) {
-							update_post_meta( $image_id, $key, $value );
+						if ( ! $this->dry_run ) {
+							foreach ( $image_metas as $key => $value ) {
+								update_post_meta( $image_id, $key, $value );
+							}
 						}
 
 						// Get image block.
-						$image              = get_post( $image_id );
-						$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
-						$gutenberg_blocks[] = $image_block;
+						if ( ! $this->dry_run ) {
+							$image              = get_post( $image_id );
+							$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
+							$gutenberg_blocks[] = $image_block;
+						}
 					} else {
 						/**
 						 * If image is hosted on some external hostname, use external image block.
@@ -991,28 +1029,35 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		/**
 		 * Post excerpt.
 		 */
-		$post_excerpt        = '';
-		$post_excerpt_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixLede'], $post_id, $craft_db );
-		foreach ( $post_excerpt_blocks as $key_block => $block ) {
-			// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
-			if ( $key_block > 0 ) {
-				$post_excerpt .= "\n\n";
+		$post_excerpt = '';
+		if ( ! empty( $entry['matrixLede'] ) ) {
+			$post_excerpt_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixLede'], $post_id, $craft_db );
+			foreach ( $post_excerpt_blocks as $key_block => $block ) {
+				// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
+				if ( $key_block > 0 ) {
+					$post_excerpt .= "\n\n";
+				}
+				$post_excerpt .= serialize_block( $block );
 			}
-			$post_excerpt .= serialize_block( $block );
 		}
 
 		/**
 		 * Post content.
 		 */
-		$post_content_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixMainContent'], $post_id, $craft_db );
-		// In Craft, the excerpt i.e. "Lede" is dynamically prepended to entity content, so it gets prepended to the post content.
-		$post_content = $post_excerpt;
-		foreach ( $post_content_blocks as $key_block => $block ) {
-			// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
-			if ( $key_block > 0 || ! empty( $post_content ) ) {
-				$post_content .= "\n\n";
+		$post_content = null;
+		if ( empty( $entry['matrixMainContent'] ) ) {
+			$this->logger->error( sprintf( "ERROR, warning -- empty \$entry['matrixMainContent'] for entry ID %d.", $entry['id'] ) );
+		} else {
+			$post_content_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixMainContent'], $post_id, $craft_db );
+			// In Craft, the excerpt i.e. "Lede" is dynamically prepended to entity content, so it gets prepended to the post content.
+			$post_content = $post_excerpt;
+			foreach ( $post_content_blocks as $key_block => $block ) {
+				// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
+				if ( $key_block > 0 || ! empty( $post_content ) ) {
+					$post_content .= "\n\n";
+				}
+				$post_content .= serialize_block( $block );
 			}
-			$post_content .= serialize_block( $block );
 		}
 		
 		/**
@@ -1033,13 +1078,15 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			'post_modified'     => $date_modified_timestamp,
 			'post_modified_gmt' => $date_modified_gmt_timestamp,
 		];
-		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-			$wpdb->posts,
-			$post_data,
-			[ 'ID' => $post_id ]
-		);
-		if ( false === $updated ) {
-			$this->logger->error( sprintf( "ERROR updating post ID %s, context %s : '%s'", $post_id, wp_json_encode( $post_data ), $wpdb->last_error ) );
+		if ( ! $this->dry_run ) {
+			$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$wpdb->posts,
+				$post_data,
+				[ 'ID' => $post_id ]
+			);
+			if ( false === $updated ) {
+				$this->logger->error( sprintf( "ERROR updating post ID %s, context %s : '%s'", $post_id, wp_json_encode( $post_data ), $wpdb->last_error ) );
+			}
 		}
 	}
 
@@ -1072,7 +1119,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
 				];
 				try {
-					$wp_user = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
+					$wp_user = ! $this->dry_run ? $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier ) : new \WP_User();
 				} catch ( \Exception $e ) {
 					$this->logger->error( sprintf( "ERROR inserting user from byline '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $byline ), $wp_user_unique_identifier, $e->getMessage() ) );
 				}
@@ -1082,7 +1129,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 				// If there's a $byline['user_id'], save it as usermeta.
 				if ( ! is_null( $byline['user_id'] ) ) {
-					update_user_meta( $wp_user->ID, 'newspack_migration_byline_user_id', $byline['user_id'] );
+					if ( ! $this->dry_run ) {
+						update_user_meta( $wp_user->ID, 'newspack_migration_byline_user_id', $byline['user_id'] );
+					}
 				}
 
 				// Add to coauthors.
@@ -1091,6 +1140,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		} else {
 
 			// If bylines aren't set, use Craft entry author as post author.
+			if ( ! isset( $entry['authorId'] ) || empty( $entry['authorId'] ) ) {
+				$this->logger->error( sprintf( "ERROR, entry ID %d, title '%s' : after no bylines were found, no author ID is set either", $entry['id'], $entry['title'] ) );
+				return;
+			}
+
 			$author = $this->get_user_data( $entry['authorId'], $users_data, $craft_db );
 			if ( is_null( $author ) ) {
 				$this->logger->error( sprintf( "ERROR getting Craft author data for entry ID %d, title '%s', author ID %d", $entry['id'], $entry['title'], $entry['authorId'] ) );
@@ -1108,7 +1162,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
 			];
 			try {
-				$wp_user     = $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier );
+				$wp_user     = ! $this->dry_run ? $this->users->create_or_get_user( $wp_user_data, $wp_user_unique_identifier ) : new \WP_User();
 				$coauthors[] = $wp_user;
 			} catch ( \Exception $e ) {
 				$this->logger->error( sprintf( "ERROR inserting user from author name '%s' (data: %s) and unique identifier '%s' : %s'", $wp_user_data['display_name'], wp_json_encode( $author ), $wp_user_unique_identifier, $e->getMessage() ) );
@@ -1130,12 +1184,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				$url = $author['avatar_image_url'];
 
 				// Import image.
-				$avatar_attachment_id = $this->attachments->import_external_file( $url );
+				$avatar_attachment_id = ! $this->dry_run ? $this->attachments->import_external_file( $url ) : -1;
 				if ( is_wp_error( $avatar_attachment_id ) ) {
 					$this->logger->error( sprintf( "ERROR inserting avatar image URL '%s' : %s", $url, $avatar_attachment_id->get_error_message() ) );
 				} else {
 					// Save custom attachment metas.
-					update_post_meta( $avatar_attachment_id, 'newspack_migration_asset_url', $url );
+					if ( ! $this->dry_run ) {
+						update_post_meta( $avatar_attachment_id, 'newspack_migration_asset_url', $url );
+					}
 	
 					// Also add this to user metas.
 					$wp_user_metas['newspack_migration_legacy_avatar_photo_id'] = $avatar_attachment_id;
@@ -1143,17 +1199,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			}
 
 			// Set user avatar.
-			if ( ! is_null( $avatar_attachment_id ) && ! is_wp_error( $avatar_attachment_id ) ) {
-				$this->simple_local_avatars->assign_new_user_avatar( $avatar_attachment_id, $wp_user->ID );
+			if ( ! $this->dry_run ) {
+				if ( ! is_null( $avatar_attachment_id ) && ! is_wp_error( $avatar_attachment_id ) ) {
+					$this->simple_local_avatars->assign_new_user_avatar( $avatar_attachment_id, $wp_user->ID );
+				}
 			}
-
-			// Save user metas.
-			foreach ( $wp_user_metas as $key => $value ) {
-				update_user_meta( $wp_user->ID, $key, $value );
-			}
-
-			// Redirect save meta user_url ???
 			
+			// Save user metas.
+			if ( ! $this->dry_run ) {
+				foreach ( $wp_user_metas as $key => $value ) {
+					update_user_meta( $wp_user->ID, $key, $value );
+				}
+			}
 		}
 
 		/**
@@ -1163,21 +1220,27 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$this->logger->error( sprintf( "ERROR assigning coauthors to entry ID %d, title '%s' : no coauthors found", $entry['id'], $entry['title'] ) );
 		} elseif ( count( $coauthors ) === 1 ) {
 			// There's just one author -- use `wp_users`.`author`.
-			$wp_user_id = $coauthors[0]->ID;
-			$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-				$wpdb->posts,
-				[ 'post_author' => $wp_user_id ],
-				[ 'ID' => $post_id ]
-			);
-			if ( false === $updated ) {
-				$this->logger->error( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
+			if ( ! $this->dry_run ) {
+				$wp_user_id = $coauthors[0]->ID;
+				$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+					$wpdb->posts,
+					[ 'post_author' => $wp_user_id ],
+					[ 'ID' => $post_id ]
+				);
+				if ( false === $updated ) {
+					$this->logger->error( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
+				}
 			}
 
 			// Unassign any coauthors.
-			$this->coauthors->unassign_all_guest_authors_from_post( $post_id, false );
-		} else {
+			if ( ! $this->dry_run ) {
+				$this->coauthors->unassign_all_guest_authors_from_post( $post_id, false );
+			}
+		} else { // phpcs:ignore -- Allow the single `if` inside this `else` instead of `elseif` for readability. Universal.ControlStructures.DisallowLonelyIf.Found.
 			// Multiple coauthors.
-			$this->coauthors->assign_authors_to_post( $coauthors, $post_id, false );
+			if ( ! $this->dry_run ) {
+				$this->coauthors->assign_authors_to_post( $coauthors, $post_id, false );
+			}
 		}
 	}
 
@@ -1232,7 +1295,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				$comment_data['comment_parent'] = $craft_comment_id_to_wp_id[ $comment['reply_to_comment_id'] ];
 			}
 
-			$comment_id = wp_insert_comment( $comment_data );
+			$comment_id = ! $this->dry_run ? wp_insert_comment( $comment_data ) : -1;
 			if ( false === $comment_id || 0 === $comment_id ) {
 				$this->logger->error( sprintf( 'ERROR inserting comment for post ID %s : %s', $post_id, $wpdb->last_error ) );
 				continue;
@@ -1250,8 +1313,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				'newspack_migration_author_user_id' => $comment['author_user_id'],
 				'newspack_migration_user_id'        => $comment['user_id'],
 			];
-			foreach ( $commentmetas as $key => $value ) {
-				add_comment_meta( $comment_id, $key, $value );
+			if ( ! $this->dry_run ) {
+				foreach ( $commentmetas as $key => $value ) {
+					add_comment_meta( $comment_id, $key, $value );
+				}
 			}
 		}
 	}
@@ -1292,19 +1357,21 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$caption = $asset_json_data['itemContent'];
 
 		// Import image.
-		$featured_image_id = $this->import_image_from_asset( $asset_json_data['id'], $post_id, $craft_db, $caption );
+		$featured_image_id = $this->import_image_from_asset( $asset_json_data['id'], $post_id, $entry['id'], $craft_db, $caption );
 		if ( is_wp_error( $featured_image_id ) ) {
-			$asset_db_data = $this->get_asset_image_data( $asset_json_data['id'], $craft_db );
-			$this->logger->error( sprintf( "ERROR inserting featured image URL '%s', title '%s', itemContent '%s', description '%s', post ID '%s', filename '%s' : %s", $asset_db_data['url'], $asset_db_data['title'], $asset_json_data['itemContent'], $asset_db_data['description'], $post_id, $asset_db_data['filename'], $featured_image_id->get_error_message() ) );
-			// TODO return WP_error.
+			$this->logger->error( sprintf( 'ERROR inserting featured image entry ID %d, asset ID %d : %s', $entry['id'], $asset_json_data['id'], $featured_image_id->get_error_message() ) );
 			return null;
 		}
 
 		// Set featured image as post thumbnail.
-		set_post_thumbnail( $post_id, $featured_image_id );
+		if ( ! $this->dry_run ) {
+			set_post_thumbnail( $post_id, $featured_image_id );
+		}
 
 		// Hide the featured image, because in Craft it's a part of Lede, which is always prepended to the post content.
-		update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+		if ( ! $this->dry_run ) {
+			update_post_meta( $post_id, 'newspack_featured_image_position', 'hidden' );
+		}
 
 		return $featured_image_id;
 	}
@@ -1318,6 +1385,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args The associative arguments.
 	 */
 	public function cmd_test( array $pos_args, array $assoc_args ): void {
+		$this->dry_run                      = isset( $assoc_args['dry-run'] ) ? true : false;
 		$craft_db_name                      = $assoc_args['craft-db-name'];
 		$craft_db_user                      = $assoc_args['craft-db-user'];
 		$craft_db_pass                      = $assoc_args['craft-db-pass'];
@@ -1786,7 +1854,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get neighborhood sections for an entry.
+	 * Getneighborhood sections for an entry.
 	 *
 	 * @param int   $entry_id The entry ID.
 	 * @param \wpdb $craft_db  The production database connection.
@@ -1986,8 +2054,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		foreach ( $entry['matrixLede'] as $block ) {
 			if ( 'blockImage' === $block['type'] ) {
 				
-				// TODO handle multiple itemAssets.
-				$asset_id     = $block['fields']['itemAsset'][0];
+				// Warn about multiple itemAssets.
+				if ( count( $block['fields']['itemAsset'] ) > 1 ) {
+					$this->logger->error( sprintf( "WARNING, multiple \$block['fields']['itemAsset'] for entry ID %d, block ID %d.", $entry['id'], $block['id'] ) );
+				}
+
+				// Get first itemAsset.
+				$asset_id = $block['fields']['itemAsset'][0] ?? null;
+				if ( is_null( $asset_id ) ) {
+					$this->logger->error( sprintf( "ERROR, featured image asset ID is not set in \$block['fields']['itemAsset'][0] for entry ID %d, block data: %s .", $entry['id'], wp_json_encode( $block ) ) );
+					return null;
+				}
+
 				$item_content = ( isset( $block['fields']['itemContent'] ) && ! empty( $block['fields']['itemContent'] ) )
 					? $block['fields']['itemContent']
 					: null;
@@ -2210,55 +2288,78 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * 
 	 * @param int     $asset_id The asset ID.
 	 * @param int     $post_id  The post ID.
+	 * @param int     $entry_id The entry ID.
 	 * @param \wpdb   $craft_db  The production database connection.
 	 * @param ?string $caption  The caption.
 	 * @return int|WP_Error Attachment image ID.
 	 */
-	public function import_image_from_asset( int $asset_id, int $post_id, \wpdb $craft_db, ?string $caption = null ): int|WP_Error {
+	public function import_image_from_asset( int $asset_id, int $post_id, int $entry_id, \wpdb $craft_db, ?string $caption = null ): int|WP_Error {
 		global $wpdb;
+
+		// Get asset data.
 		$asset_db_data = $this->get_asset_image_data( $asset_id, $craft_db );
 
+		// URL.
+		$url = $asset_db_data['url'] ?? null;
+		if ( ! isset( $url ) || empty( $url ) ) {
+			$this->logger->error( sprintf( "ERROR -- empty \$asset_db_data['url'] for entry ID %d, asset ID %d.", $entry_id, $asset_id ) );
+			return new \WP_Error( 'empty_asset_url', sprintf( "ERROR -- empty \$asset_db_data['url'] for entry ID %d, asset ID %d.", $entry_id, $asset_id ) );
+		}
+
+		// Other asset data.
+		$title       = isset( $asset_db_data['title'] ) && ! empty( $asset_db_data['title'] ) ? $asset_db_data['title'] : null;
+		$description = isset( $asset_db_data['description'] ) && ! empty( $asset_db_data['description'] ) ? $asset_db_data['description'] : null;
+		$credit      = isset( $asset_db_data['credit'] ) && ! empty( $asset_db_data['credit'] ) ? $asset_db_data['credit'] : null;
+		$filename    = isset( $asset_db_data['filename'] ) && ! empty( $asset_db_data['filename'] ) ? $asset_db_data['filename'] : null;
+		$width       = isset( $asset_db_data['width'] ) && ! empty( $asset_db_data['width'] ) ? $asset_db_data['width'] : null;
+		$height      = isset( $asset_db_data['height'] ) && ! empty( $asset_db_data['height'] ) ? $asset_db_data['height'] : null;
+		$uploader    = isset( $asset_db_data['uploader'] ) && ! empty( $asset_db_data['uploader'] ) ? $asset_db_data['uploader'] : null;
+
 		// Import image.
-		$attachment_id = $this->attachments->import_external_file(
-			$asset_db_data['url'],
-			$asset_db_data['title'],
+		$attachment_id = ! $this->dry_run ? $this->attachments->import_external_file(
+			$url,
+			$title,
 			$caption,
-			$asset_db_data['description'],
+			$description,
 			null,
 			$post_id,
 			[],
-			$asset_db_data['filename'],
+			$filename,
 			true
-		);
+		) : -1;
 		if ( is_wp_error( $attachment_id ) ) {
 			return $attachment_id;
 		}
 
 		// Save custom metas.
 		$featured_image_metas = [
-			'_media_credit'                     => $asset_db_data['credit'],
+			'_media_credit'                     => $credit,
 			'newspack_migration_legacy_id'      => $asset_id,
-			'newspack_migration_asset_url'      => $asset_db_data['url'],
-			'newspack_migration_asset_uploader' => $asset_db_data['uploader'],
-			'newspack_migration_asset_width'    => $asset_db_data['width'],
-			'newspack_migration_asset_height'   => $asset_db_data['height'],
+			'newspack_migration_asset_url'      => $url,
+			'newspack_migration_asset_uploader' => $uploader,
+			'newspack_migration_asset_width'    => $width,
+			'newspack_migration_asset_height'   => $height,
 		];
-		foreach ( $featured_image_metas as $key => $value ) {
-			update_post_meta( $attachment_id, $key, $value );
+		if ( ! $this->dry_run ) {
+			foreach ( $featured_image_metas as $key => $value ) {
+				update_post_meta( $attachment_id, $key, $value );
+			}
 		}
 		
 		// Update creation date (not a requirement, just an extra convenience).
 		$asset_date_created = $asset_db_data['date_created'];
-		$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-			$wpdb->posts,
-			[
-				'post_date'     => $asset_date_created,
-				'post_date_gmt' => $asset_date_created,
-			],
-			[ 'ID' => $attachment_id ]
-		);
-		if ( false === $updated ) {
-			$this->logger->error( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $attachment_id, $wpdb->last_error ) );
+		if ( ! $this->dry_run ) {
+			$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$wpdb->posts,
+				[
+					'post_date'     => $asset_date_created,
+					'post_date_gmt' => $asset_date_created,
+				],
+				[ 'ID' => $attachment_id ]
+			);
+			if ( false === $updated ) {
+				$this->logger->error( sprintf( "ERROR updating post_dates '%s' for featured image ID %s : %s", $asset_date_created, $attachment_id, $wpdb->last_error ) );
+			}
 		}
 
 		return $attachment_id;
