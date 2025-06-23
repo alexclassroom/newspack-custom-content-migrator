@@ -17,6 +17,28 @@ class NNECategoryMap {
 	 */
 	protected array $amherst_bulletin_map = [
 		[
+			'name'       => 'News',
+			'categories' => [
+				[
+					'name'     => 'News',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
+			'name'       => 'Sports',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
 			'name'       => 'Arts-Leisure',
 			'categories' => [
 				[
@@ -115,7 +137,14 @@ class NNECategoryMap {
 				[
 					'name'     => 'News',
 					'parent'   => null,
-					'children' => null,
+					'children' => [
+						[
+							'name' => 'Community Briefs',
+						],
+						[
+							'name' => 'Police-Fire-Courts',
+						],
+					],
 				],
 			],
 			'tags'       => null,
@@ -132,16 +161,12 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'News/Police & Courts',
+			'name'       => 'News/Police-Courts',
 			'categories' => [
 				[
-					'name'     => 'News',
-					'parent'   => null,
-					'children' => [
-						[
-							'name' => 'Police-Fire-Courts',
-						],
-					],
+					'name'     => 'Police-Fire-Courts',
+					'parent'   => 'News',
+					'children' => null,
 				],
 			],
 			'tags'       => null,
@@ -185,13 +210,9 @@ class NNECategoryMap {
 			'name'       => 'Seniors',
 			'categories' => [
 				[
-					'name'     => 'News',
-					'parent'   => null,
-					'children' => [
-						[
-							'name' => 'Community Briefs',
-						],
-					],
+					'name'     => 'Community Briefs',
+					'parent'   => 'News',
+					'children' => null,
 				],
 			],
 			'tags'       => null,
@@ -233,6 +254,9 @@ class NNECategoryMap {
 						],
 						[
 							'name' => 'Police-Fire-Courts',
+						],
+						[
+							'name' => 'Politics',
 						],
 					],
 				],
@@ -426,6 +450,17 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
+			'name'       => 'Opinion',
+			'categories' => [
+				[
+					'name'     => 'Opinion',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
+		],
+		[
 			'name'       => 'Opinion/Cartoons',
 			'categories' => [
 				[
@@ -537,6 +572,17 @@ class NNECategoryMap {
 				'Real Estate',
 				'Housing',
 			],
+		],
+		[
+			'name'       => 'Sports',
+			'categories' => [
+				[
+					'name'     => 'Sports',
+					'parent'   => null,
+					'children' => null,
+				],
+			],
+			'tags'       => null,
 		],
 		[
 			'name'       => 'Sports/College',
@@ -947,9 +993,6 @@ class NNECategoryMap {
 						[
 							'name' => 'Letters',
 						],
-						[
-							'name' => 'Columns',
-						],
 					],
 				],
 			],
@@ -1138,17 +1181,6 @@ class NNECategoryMap {
 			'tags'       => null,
 		],
 		[
-			'name'       => 'Opinion/Columns',
-			'categories' => [
-				[
-					'name'     => 'Columns',
-					'parent'   => 'Opinion',
-					'children' => null,
-				],
-			],
-			'tags'       => null,
-		],
-		[
 			'name'       => 'Opinion/Editorials',
 			'categories' => [
 				[
@@ -1174,8 +1206,8 @@ class NNECategoryMap {
 			'name'       => 'Richies-Top-40',
 			'categories' => [
 				[
-					'name'     => 'Sports',
-					'parent'   => null,
+					'name'     => 'Columns',
+					'parent'   => 'Opinion',
 					'children' => null,
 				],
 			],
@@ -1260,9 +1292,7 @@ class NNECategoryMap {
 					],
 				],
 			],
-			'tags'       => [
-				'Health',
-			],
+			'tags'       => null,
 		],
 		[
 			'name'       => 'News',
@@ -1283,9 +1313,7 @@ class NNECategoryMap {
 					],
 				],
 			],
-			'tags'       => [
-				'Environment',
-			],
+			'tags'       => null,
 		],
 		[
 			'name'       => 'Opinion',
@@ -1450,11 +1478,7 @@ class NNECategoryMap {
 					],
 				],
 			],
-			'tags'       => [
-				'Health',
-				'Science & Technology',
-				'Valley Visual',
-			],
+			'tags'       => null,
 		],
 		[
 			'name'       => 'Opinion',
