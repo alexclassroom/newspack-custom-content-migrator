@@ -694,6 +694,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						$caption = $this->formatting_strip_outer_p_tag( $craft_block['fields']['itemContent'] ?? null );
 					}
 
+					// Get image classes.
+					$image_classes = $this->get_craft_image_block_classes( $craft_block );
+
 					// Import image.
 					// Credit is contained in DB asset data.
 					$image_id = $this->import_image_from_asset( $asset_id, $post_id, $prod_db, $caption );
@@ -704,7 +707,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					$image = get_post( $image_id );
 
 					// Get block.
-					$image_block        = $this->gutenberg_blocks->get_image( $image );
+					$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
 					$gutenberg_blocks[] = $image_block;
 					break;
 
@@ -714,6 +717,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						WP_CLI::warning( sprintf( "ERROR entry ID %d matrixMainContent blockExternalImage: image URL '%s'.", $entry_id, $image_url ) );
 						break;
 					}
+
+					// Get image classes.
+					$image_classes = $this->get_craft_image_block_classes( $craft_block );
 
 					/**
 					 * If image is hosted on own hostnames, download it and use regular image block.
@@ -768,14 +774,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 						// Get image block.
 						$image              = get_post( $image_id );
-						$image_block        = $this->gutenberg_blocks->get_image( $image );
+						$image_block        = $this->gutenberg_blocks->get_image( $image, 'full', true, $image_classes );
 						$gutenberg_blocks[] = $image_block;
 					} else {
 						/**
 						 * If image is hosted on some external hostname, use external image block.
 						 */
 						$image_caption      = $craft_block['fields']['itemContent'] ?? null;
-						$image_block        = $this->gutenberg_blocks->get_external_image( $image_url, $image_caption );
+						$image_block        = $this->gutenberg_blocks->get_external_image( $image_url, $image_caption, null, 'full', true, $image_classes );
 						$gutenberg_blocks[] = $image_block;
 					}
 					break;
@@ -815,6 +821,28 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 
 		return $gutenberg_blocks;
+	}
+
+	/**
+	 * Get image block classes from Craft blockImage or blockExternalImage.
+	 * 
+	 * @param array $craft_block The Craft blockImage or blockExternalImage data from Expanded JSON export.
+	 * @return string|null       The image block classes.
+	 */
+	public function get_craft_image_block_classes( array $craft_block ): ?string {
+		// Get image classes.
+		$image_classes = null;
+		// Add position class.
+		if ( isset( $craft_block['fields']['itemPosition'] ) && ! empty( $craft_block['fields']['itemPosition'] ) ) {
+			$image_classes = 'legacy-' . $craft_block['fields']['itemPosition'];
+		}
+		// Add width class.
+		if ( isset( $craft_block['fields']['itemWidth'] ) && ! empty( $craft_block['fields']['itemWidth'] ) ) {
+			$image_classes .= ! empty( $image_classes ) ? ' ' : '';
+			$image_classes .= 'legacy-' . $craft_block['fields']['itemWidth'];
+		}
+
+		return $image_classes;
 	}
 
 	/**
@@ -1244,6 +1272,96 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$prod_db = $this->get_db_connection( $prod_db_name, $prod_db_user, $prod_db_pass, $prod_db_host, $prod_db_port );
 
 		// phpcs:disable -- temporary dev code.
+
+		WP_CLI::print_value( '--- GET IMAGE BLOCKs PARAMS  -----------------------------' );
+		// Extract all entry IDs available in JSONs.
+		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
+		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
+		$img_data = [];
+		foreach ( $entries_json_files as $entries_json_file ) {
+			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
+			if ( ! is_array( $entries_file_data ) ) {
+				continue;
+			}
+			foreach ( $entries_file_data as $entry ) {
+				// Loop matrxLede
+				$loop_blocks = [];
+				if ( isset( $entry['matrixLede'] ) ) {
+					$loop_blocks = $entry['matrixLede'];
+				}
+				if ( isset( $entry['matrixMainContent'] ) ) {
+					$loop_blocks = array_merge( $loop_blocks, $entry['matrixMainContent'] );
+				}
+				foreach ( $loop_blocks as $block ) {
+					if ( 'blockExternalImage' !== $block['type'] && 'blockImage' !== $block['type'] ) {
+						continue;
+					}
+
+					// If it's been catalogued (Lede and Content will overlap), skip.
+					if ( 'blockImage' === $block['type'] ) {
+						if ( isset( $img_data[ $entry['id'] ]['_blockImage_asset_id'] ) ) {
+							continue;
+						}
+					}
+					if ( 'blockExternalImage' === $block['type'] ) {
+						if ( isset( $img_data[ $entry['id'] ]['_blockExternalImage_url'] ) ) {
+							continue;
+						}
+					}
+
+					// Catalogue the image data.
+					$img_data[ $entry['id'] ] = [
+						// blockImage will have the asset ID, but blockExternalImage will not.
+						'_blockImage_asset_id'    => $block['fields']['itemAsset'] ?? null,
+						// blockExternalImage will have the URL, but blockImage will not.
+						'_blockExternalImage_url' => $block['fields']['itemURL']['url'] ?? null,
+						// Common.
+						'entry_id'                => $entry['id'],
+						'entry_title'             => $entry['title'],
+						'itemPosition'            => $block['fields']['itemPosition'],
+						'itemWidth'               => $block['fields']['itemWidth'],
+					];
+
+				}
+			}
+		}
+		// Great. Let's analyze the data now.
+		// Get unique itemPosition values with 15 example entry IDs.
+		$image_positions_to_entry_ids = [];
+		$image_widths_to_entry_ids    = [];
+		foreach ( $img_data as $entry_id => $img_data_entry ) {
+			$is_position_set              = isset( $image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ] );
+			$position_needs_more_examples = true;
+			$position_has_this_title      = false;
+			if ( $is_position_set ) {
+				$existing_titles              = array_column( $image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ], 1 );
+				$position_has_this_title      = in_array( $img_data_entry['entry_title'], $existing_titles );
+				$position_needs_more_examples = count( $existing_titles ) < 15;
+			}
+			if ( ! $is_position_set || ( $position_needs_more_examples && ! $position_has_this_title ) ) {
+				$image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ][] = [ $entry_id, $img_data_entry['entry_title'] ];
+			}
+
+			$is_width_set              = isset( $image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ] );
+			$width_needs_more_examples = true;
+			$width_has_this_title      = false;
+			if ( $is_width_set ) {
+				$existing_titles           = array_column( $image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ], 1 );
+				$width_has_this_title      = in_array( $img_data_entry['entry_title'], $existing_titles );
+				$width_needs_more_examples = count( $existing_titles ) < 15;
+			}
+			if ( ! $is_width_set || ( $width_needs_more_examples && ! $width_has_this_title ) ) {
+				$image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ][] = [ $entry_id, $img_data_entry['entry_title'] ];
+			}
+		}
+		WP_CLI::print_value( '--- UNIQUE ITEM POSITIONS  -----------------------------' );
+		// var_dump( $image_positions_to_entry_ids );
+		WP_CLI::print_value( '--- UNIQUE ITEM WIDTHS  -----------------------------' );
+		var_dump( $image_widths_to_entry_ids );
+		// var_dump( $image_widths_to_entry_ids );
+		
+		// WP_CLI::print_value( implode( "\n", $unique_item_positions ) );
+		exit;
 
 		WP_CLI::print_value( '--- GET EXTERNAL IMAGE BLOCK URLS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
