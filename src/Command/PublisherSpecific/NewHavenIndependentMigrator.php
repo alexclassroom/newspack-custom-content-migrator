@@ -1396,11 +1396,77 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$categories_news_expanded_json_file = $assoc_args['json-expanded-categories-news-sections'];
 		
 		$this->setup_logger( __FUNCTION__ );
-
 		$craft_db = $this->get_craft_db_connection( $craft_db_name, $craft_db_user, $craft_db_pass, $craft_db_host, $craft_db_port );
 
 		// phpcs:disable -- temporary dev code.
 
+		$this->logger->info( '--- PARSE IMPORT LOG FILE FOR SUCCESSES AND WARNINGS/ERRORS  -----------------------------' );
+		// Read lines from the log file.
+		$in_log_file      = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_test_read.out';
+		// Output files.
+		$out_success_file = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_success_ids.txt';
+		$out_warn_file    = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_warn_ids.txt';
+		
+		if ( ! file_exists(	$in_log_file) || !is_readable($in_log_file)) {
+			WP_CLI::line( "Error: Log file not found." );
+			exit;
+		}
+		$lines = file( $in_log_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
+		if ( false === $lines ) {
+			WP_CLI::line( "Error: Could not read the log file." );
+			exit;
+		}
+	
+		$success_ids = [];
+		$warn_ids = [];
+		$line_count = count($lines);
+		for ($i = 0; $i < $line_count; $i++) {
+			$current_line = $lines[$i];
+	
+			// Regex to identify the start of an entry's log block and capture its ID.
+			// e.g., "INFO (1)/(630) ; (6)/(100) Entry ID 10705254"
+			if (preg_match('/INFO \(\d+\)\/\(\d+\) ; \(\d+\)\/\(\d+\) Entry ID (\d+)/', $current_line, $matches)) {
+				$current_entry_id = $matches[1];
+				$is_clean_insert = false;
+	
+				// Check if the next line exists and is the expected "Inserted post" line.
+				$insert_line_index = $i + 1;
+				if ($insert_line_index < $line_count && strpos($lines[$insert_line_index], "INFO Inserted post") !== false) {
+					// Now, check the line *after* the "Inserted post" line.
+					$line_after_insert_index = $i + 2;
+					if ( $line_after_insert_index >= $line_count ) {
+						// This was the last entry in the file, and it had no errors following it. It's a success.
+						$is_clean_insert = true;
+					} else {
+						$line_after_insert = $lines[$line_after_insert_index];
+						// A clean insert is one where the next line is either a new entry ID or a new file marker.
+						if (
+							preg_match('/INFO \(\d+\)\/\(\d+\) ; \(\d+\)\/\(\d+\) Entry ID \d+/', $line_after_insert) ||
+							strpos($line_after_insert, 'INFO =====') !== false
+						) {
+							$is_clean_insert = true;
+						}
+					}
+				}
+	
+				// Based on the flag, add the ID to the correct list.
+				if ( $is_clean_insert ) {
+					$success_ids[] = $current_entry_id;
+				} else {
+					// If it wasn't a clean insert (e.g., an ERROR followed, or the "Inserted post" line was missing),
+					// it belongs in the warning list.
+					$warn_ids[] = $current_entry_id;
+				}
+			}
+		}
+	
+		file_put_contents( $out_success_file, implode( "\n", $success_ids ) );
+		file_put_contents( $out_warn_file, implode( "\n", $warn_ids ) );
+		WP_CLI::line( count( $success_ids ) . " successfully imported entries." );
+		WP_CLI::line( count( $warn_ids ) . " entry IDs with issues." );
+		exit;
+
+		
 		$this->logger->info( '--- GET IMAGE BLOCKs PARAMS  -----------------------------' );
 		// Extract all entry IDs available in JSONs.
 		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
