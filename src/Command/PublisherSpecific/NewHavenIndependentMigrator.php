@@ -306,6 +306,12 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						'optional' => true,
 					],
 					[
+						'description' => 'If set, will only import specific entry IDs provided in this CSV file (no headers, just entry IDs comma separated), and not all the entries found in the JSON files.',
+						'type'        => 'assoc',
+						'name'        => 'import-entry-ids-only-csv-file',
+						'optional'    => true,
+					],
+					[
 						'type'     => 'assoc',
 						'name'     => 'json-expanded-entries-folder',
 						'optional' => false,
@@ -417,7 +423,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @param array $assoc_args The associative arguments.
 	 */
 	public function cmd_import( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
 		$this->dry_run                      = isset( $assoc_args['dry-run'] ) ? true : false;
+		$import_entry_ids_csv_file          = $assoc_args['import-entry-ids-only-csv-file'] ?? null;
 		$craft_db_name                      = $assoc_args['craft-db-name'] ?? null;
 		$craft_db_user                      = $assoc_args['craft-db-user'] ?? null;
 		$craft_db_pass                      = $assoc_args['craft-db-pass'] ?? null;
@@ -444,6 +453,22 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			$this->logger->error( sprintf( 'ERROR reading JSON file %s : %s is not an array', $categories_news_expanded_json_file, $sections_data ) );
 		}
 
+		// Get just specific entry IDs to import.
+		$import_entry_ids = [];
+		if ( ! is_null( $import_entry_ids_csv_file ) ) {
+			// Read CSV file.
+			$import_entry_ids_csv = file_get_contents( $import_entry_ids_csv_file ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
+			if ( is_null( $import_entry_ids_csv ) ) {
+				$this->logger->error( 'ERROR reading --import-entry-ids-only-csv-file file.' );
+				exit;
+			}
+			$import_entry_ids = array_map( 'esc_attr', explode( ',', $import_entry_ids_csv ) );
+			if ( empty( $import_entry_ids ) ) {
+				$this->logger->error( 'ERROR reading --import-entry-ids-only-csv-file file.' );
+				exit;
+			}
+		}
+
 		// Get entry JSON files.
 		$entries_json_files = $this->get_json_entries_files_descending( $entries_jsons_folder );
 		foreach ( $entries_json_files as $key_entries_json_file => $entries_json_file ) {
@@ -453,8 +478,20 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 			// Get entries.
 			$entries = $this->get_entries_from_json_file_descending( $entries_json_file );
 			foreach ( $entries as $key_entry => $entry ) {
-				// Progress.                
+				// Skip if not in the list of specific entry IDs to import.
+				if ( ! empty( $import_entry_ids ) && ! in_array( $entry['id'], $import_entry_ids ) ) {
+					continue;
+				}
+				
+				// Progress.
 				$this->logger->info( sprintf( '(%d)/(%d) ; (%d)/(%d) Entry ID %s', $key_entries_json_file + 1, count( $entries_json_files ), $key_entry + 1, count( $entries ), $entry['id'] ) );
+
+				// If there is already a postmeta with key 'newspack_migration_legacy_id' and meta_value $entry['id'], then skip.
+				$existing_post_id = $wpdb->get_var( $wpdb->prepare( "SELECT post_id FROM $wpdb->postmeta WHERE meta_key = 'newspack_migration_legacy_id' AND meta_value = %s", $entry['id'] ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				if ( ! empty( $existing_post_id ) ) {
+					$this->logger->info( sprintf( 'Already imported entry ID %d as post ID %s, skipping.', $entry['id'], $existing_post_id ) );
+					continue;
+				}
 				
 				// Create post.
 				$post_data = $this->get_basic_post_data( $entry, $sections_data, $craft_db, $entries_json_file );
