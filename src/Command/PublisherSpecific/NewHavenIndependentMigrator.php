@@ -2575,6 +2575,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						$byline_name = $byline_item_fields['linkedUrl'];
 					}
 				}
+
+				// Byline name clean up.
+				$byline_name = trim( $byline_name, ' ,' );
 			}
 
 			// Add byline to array if name is not null.
