@@ -200,6 +200,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'update-content',
+						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -259,6 +266,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'update-content',
+						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -288,6 +302,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'name'        => 'image-json-file',
 						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'update-content',
+						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
 						'repeating'   => false,
 					],
 				],
@@ -555,12 +576,21 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$audio_json_file     = $assoc_args['audio-json-file'];
 		$pdf_json_file       = $assoc_args['pdf-json-file'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
+		$update_content      = $assoc_args['update-content'] ?? false;
 
-		$raw_posts = $this->json_iterator->items( $post_json_file );
+		$raw_posts               = $this->json_iterator->items( $post_json_file );
+		$all_migrated_posts_oids = array_keys( $this->load_posts() );
 
 		$migrated_posts = [];
+		$skipped_posts  = [];
 
 		foreach ( $raw_posts as $post ) {
+			if ( ! $update_content && in_array( $post->oid, $all_migrated_posts_oids ) ) {
+				$skipped_posts[] = $post->oid;
+				$logger->info( sprintf( 'Skipping post %d because it has already been migrated', $post->oid ) );
+				continue;
+			}
+
 			$mapped_authors    = $this->map_authors( $post->authors );
 			$mapped_categories = $this->map_categories( $post->categories );
 			$mapped_topics     = $this->map_categories( $post->topics );
@@ -674,9 +704,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$logger->info( sprintf( 'Migrated post %d with ID %d', $post->oid, $migrated_post_id ) );
 		}
 
-		$csv_writer->close();
+		$logger->info( sprintf( 'Skipped %d posts because they have already been migrated.', count( $skipped_posts ) ) );
+		$logger->info( sprintf( 'Migrated %d posts.', count( $migrated_posts ) ) );
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 		$logger->info( sprintf( 'Check the CSV file for migration details: %s', __FUNCTION__ . '.csv' ) );
+
+		$csv_writer->close();
 	}
 
 	/**
@@ -700,12 +733,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$audio_json_file     = $assoc_args['audio-json-file'];
 		$pdf_json_file       = $assoc_args['pdf-json-file'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
+		$update_content      = $assoc_args['update-content'] ?? false;
 
-		$raw_pages = $this->json_iterator->items( $page_json_file );
+		$raw_pages               = $this->json_iterator->items( $page_json_file );
+		$all_migrated_pages_oids = array_keys( $this->load_posts() );
 
 		$migrated_pages = [];
 
 		foreach ( $raw_pages as $page ) {
+			if ( ! $update_content && in_array( $page->oid, $all_migrated_pages_oids ) ) {
+				$logger->info( sprintf( 'Skipping page %d because it has already been migrated', $page->oid ) );
+				continue;
+			}
+
 			$last_modified = new \DateTime( $page->lastModified );
 
 			$post_data = [
@@ -780,12 +820,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$publisher_domain    = $assoc_args['publisher-domain'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
 		$image_json_file     = $assoc_args['image-json-file'];
+		$update_content      = $assoc_args['update-content'] ?? false;
 
-		$raw_slideshows = $this->json_iterator->items( $slideshow_json_file );
+		$raw_slideshows               = $this->json_iterator->items( $slideshow_json_file );
+		$all_migrated_slideshows_oids = array_keys( $this->load_posts() );
 
 		$migrated_slideshows = [];
 
 		foreach ( $raw_slideshows as $slideshow ) {
+			if ( ! $update_content && in_array( $slideshow->oid, $all_migrated_slideshows_oids ) ) {
+				$logger->info( sprintf( 'Skipping slideshow %d because it has already been migrated', $slideshow->oid ) );
+				continue;
+			}
+
 			$mapped_authors       = $this->map_authors( $slideshow->authors );
 			$mapped_categories    = $this->map_categories( $slideshow->categories );
 			$mapped_topics        = $this->map_categories( $slideshow->topics );
@@ -2009,7 +2056,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function load_posts(): array {
 		global $wpdb;
 
-		$posts = [];
+		$migrated_posts = [];
 
 		// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$posts = $wpdb->get_results(
@@ -2020,10 +2067,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		);
 
 		foreach ( $posts as $post ) {
-			$posts[ $post->meta_value ] = $post->post_id;
+			$migrated_posts[ $post->meta_value ] = $post->post_id;
 		}
 
-		return $posts;
+		return $migrated_posts;
 	}
 
 	/**
@@ -2085,6 +2132,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function load_comments(): array {
 		global $wpdb;
 
+		$migrated_comments = [];
 		// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
 		$comments = $wpdb->get_results(
 			$wpdb->prepare(
@@ -2094,10 +2142,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		);
 
 		foreach ( $comments as $comment ) {
-			$comments[ $comment->meta_value ] = $comment->comment_id;
+			$migrated_comments[ $comment->meta_value ] = $comment->comment_id;
 		}
 
-		return $comments;
+		return $migrated_comments;
 	}
 
 	/**
