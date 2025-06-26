@@ -1253,7 +1253,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function clean_content( string $content ): string {
 		$content = $this->strip_container_div_robust( $content );
-		// $content = $this->strip_style_tags( $content );
+		$content = $this->strip_style_tags( $content );
 		$content = $this->strip_line_breaks( $content );
 		$content = $this->strip_whitespace( $content );
 
@@ -2135,19 +2135,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string The processed HTML content.
 	 */
 	private function strip_style_tags( string $html ): string {
-		$allowed_tags               = wp_kses_allowed_html( 'post' );
-		$allowed_tags_without_style = array_map(
-			function ( $tag ) {
-				if ( array_key_exists( 'style', $tag ) ) {
-					unset( $tag['style'] );
-				}
+		$allowed_tags = wp_kses_allowed_html( 'post' );
 
-				return $tag;
-			},
-			$allowed_tags
-		);
+		// Remove style attribute from p tags only.
+		if ( isset( $allowed_tags['p'] ) && isset( $allowed_tags['p']['style'] ) ) {
+			unset( $allowed_tags['p']['style'] );
+		}
 
-		return wp_kses( $html, $allowed_tags_without_style );
+		return wp_kses( $html, $allowed_tags );
 	}
 
 	/**
