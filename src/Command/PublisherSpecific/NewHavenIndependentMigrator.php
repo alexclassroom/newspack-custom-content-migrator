@@ -1080,14 +1080,18 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 		/**
 		 * Post content.
+		 * 
+		 * The "Extra Extra" entries on siteNHI (siteId = 1) will all have empty/blank 'matrixMainContent'.
+		 * These "Extra Extra" entries have the following field value:
+		 *  - "fieldPreparsedEntryType": "typeSingleLink"
+		 * and they always get the same "type" and "section" values associated to them:
+		 *  - "typeId": 9    // "Extra Extra"
+		 *  - "sectionId": 6 // "Extra Extra"
 		 */
-		$post_content = null;
-		if ( empty( $entry['matrixMainContent'] ) ) {
-			$this->logger->error( sprintf( "ERROR, warning -- empty \$entry['matrixMainContent'] for entry ID %d.", $entry['id'] ) );
-		} else {
+		$post_content = $post_excerpt;
+		if ( ! empty( $entry['matrixMainContent'] ) ) {
 			$post_content_blocks = $this->convert_craft_content_blocks_to_gutenberg_blocks( $entry['id'], $entry['matrixMainContent'], $post_id, $craft_db );
 			// In Craft, the excerpt i.e. "Lede" is dynamically prepended to entity content, so it gets prepended to the post content.
-			$post_content = $post_excerpt;
 			foreach ( $post_content_blocks as $key_block => $block ) {
 				// serialize_blocks() will glue block strings without line breaks. Let's add a double line break after each block.
 				if ( $key_block > 0 || ! empty( $post_content ) ) {
