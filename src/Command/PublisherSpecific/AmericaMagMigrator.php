@@ -782,7 +782,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$post_content = trim( get_post_field( 'post_content', $post_id, 'raw' ) );
 
 		$placeholder = '[view:book_in_review]';		
-		$html = '<!-- [view:book_in_review] -->';
+		$html = '<!-- newspack-migration-hidden [view:book_in_review] -->';
 
 		// try to replace with surrounding p tags first.
 		$replacement_count = 0;
