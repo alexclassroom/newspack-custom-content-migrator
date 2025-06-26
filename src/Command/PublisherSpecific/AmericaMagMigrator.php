@@ -707,70 +707,104 @@ class AmericaMagMigrator implements RegisterCommandInterface {
      */
     private function clean_up_attachment( int $attachment_id, $logger_slug ): void {
 
-		$post_mime_type         = trim( get_post_field( 'post_mime_type', $attachment_id, 'raw' ) );
-		$this->logger->info( 'post_mime_type: ' . $post_mime_type );
-		
-		$fgd2wp_old_file        = trim( get_post_meta( $attachment_id, '_fgd2wp_old_file', true ) );
-		$this->logger->info( 'fgd2wp_old_file: ' . $fgd2wp_old_file );
-		
-		$wp_attached_file       = trim( get_post_meta( $attachment_id, '_wp_attached_file', true ) );
-		$this->logger->info( 'wp_attached_file: ' . $wp_attached_file );
-		
+		// Look for mismatches where the filename or the original_image name are capitized.
+		// Only required for images, where thumbnails ("sizes") exist, because this is there the mismatch happens.
+		if( ! wp_attachment_is_image( $attachment_id ) ) {
+			$this->logger->info( 'Not image.' );
+			return;
+		}
+
 		$wp_attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
 		
-		if( ! is_array( $wp_attachment_metadata ) ) {
-			$this->logger->notice( 'No metadata' );
+		// If there there are no sizes, then return, since their won't be a mis-match anyway.
+		// can an image not have sizes?
+		if( ! isset( $wp_attachment_metadata['sizes'] ) ) {
+			$this->logger->warning( 'No sizes key?' );	
 			return;
 		}
 
-		$keys_to_verify = [ 'width', 'height', 'file', 'filesize' ];
-		foreach( $keys_to_verify as $key ) {
-			if( ! isset( $wp_attachment_metadata[ $key ] ) ) {
-				$this->logger->notice( 'No key: ' . $key );
-				return;
+		// Sanity: verify file key exists.  Can an image not have a file key?
+		if( ! isset( $wp_attachment_metadata['file'] ) ) {
+			$this->logger->warning( 'No metadata file key?' );	
+			return;
+		}
+		
+		// Get attachment file.
+		$wp_attached_file = trim( get_post_meta( $attachment_id, '_wp_attached_file', true ) );
+		if( 0 === strlen( $wp_attached_file ) ) {
+			$this->logger->warning( 'No postmeta attachment file?' );
+			return;
+		}
+		
+		$this->logger->info( 'Attachment file: ' . $wp_attached_file );
+		
+		// Sanity check file entries match.
+		if( $wp_attachment_metadata['file'] !== $wp_attached_file ) {
+			$this->logger->warning( 'File mismatch?' );
+			return;
+		}
+
+		// We need to rename 3 places in the database.
+
+		// _wp_attached_file and $wp_attachment_metadata['file'] (same value)
+		// $wp_attachment_metadata['original_image']
+
+		// Check if we need to fix the main file image.
+		if( preg_match( '/\.([A-Z]+)$/', $wp_attached_file, $matches ) ) {
+			$this->logger->info( 'Fixing attached file.' );
+			// Clean up using the full disk path.
+			$this->clean_up_attachment_rename_file( get_attached_file( $attachment_id, true ), $matches[1] );
+		}
+
+
+		// Check if we need to fix the original image.
+		if( isset( $wp_attachment_metadata['original_image'] ) ) {
+			$this->logger->info( 'Original image file: ' . $wp_attachment_metadata['original_image'] );
+			if( preg_match( '/\.([A-Z]+)$/', $wp_attachment_metadata['original_image'], $matches ) ) {
+				$this->logger->info( 'Fixing original image file.' );
+				// Clean up using the full disk path.
+				$this->clean_up_attachment_rename_file( wp_get_original_image_path( $attachment_id, true ), $matches[1] );
 			}
 		}
-
-		$this->logger->info( 'file: ' . $wp_attachment_metadata['file'] );
-		$this->logger->info( 'filesize: ' . number_format( $wp_attachment_metadata['filesize'], 0, '.', ',' ) );
-		$this->logger->info( 'dimensions: ' . $wp_attachment_metadata['width'] . ' x ' . $wp_attachment_metadata['height'] );
-
-		if( $wp_attachment_metadata['file'] !== $wp_attached_file ) {
-			$this->logger->warning( 'File mismatch.' );
-			return;
-		}
-
-		if( isset( $wp_attachment_metadata['original_image'] ) ) {
-			$this->logger->info( 'original_image: ' . $wp_attachment_metadata['original_image'] );
-		}
 		
-		// Fetch thumbnail.
-		if( ! isset( $wp_attachment_metadata['sizes']['thumbnail']['file'] ) ) {
-			$this->logger->notice( 'No thumbnail file.' );
-			return;
+		// Replace anywhere the image could be used, post_content, term desc, author bio, etc.
+		// use a global search and replace?
+
+	}
+
+	private function clean_up_attachment_rename_file( $full_disk_path, $old_ext ) {
+
+		$this->logger->info( 'Full path: ' . $full_disk_path );
+		
+		if ( ! file_exists( $full_disk_path ) ) {
+			$this->logger->warning( 'Full file path not exits?' );
+			return false;
 		}
 
-		if( isset( $wp_attachment_metadata['sizes']['thumbnail']['virtual'] ) ) {
-			$this->logger->info( 'Virtual: ' . $wp_attachment_metadata['sizes']['thumbnail']['virtual'] );
+		// Replace the extension at the end of the path.
+		$new_path = preg_replace( '/\.[^.]+$/', strtolower( $old_ext ), $full_disk_path );
+		
+		$this->logger->info( 'New file: ' . $new_path );
+		if ( file_exists( $new_path ) ) {
+			$this->logger->warning( 'New file already exists?' );
+			return false;
 		}
 
-		$thumb_url = 'https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/';
-		$thumb_url .= str_replace( wp_basename( $wp_attached_file ), '', $wp_attached_file );
-		$thumb_url .= $wp_attachment_metadata['sizes']['thumbnail']['file'];
+		$this->logger->info( 'Attempting rename.' );
 
-		$this->logger->info( 'Thumb url: ' . $thumb_url );
-		
-		$remote_head = wp_remote_head( $thumb_url );
-		
-		$status = $remote_head['response']['code'] ?? 'error';
-
-		$this->logger->info( 'Status: ' .  $status );
-
-		// if( 200 !== $status ) {
-		// 	exit();
+		// Rename the file on the filesystem
+		// if ( ! rename( $full_disk_path, $new_path ) ) {
+		// 	$this->logger->warning( 'Rename failed?' );
+		// 	return false;
 		// }
 
-		sleep( 1 );
+		// save to DB:
+		// $file = _wp_relative_upload_path( $file );
+		// update_post_meta( $attachment_id, '_wp_attached_file', $file );
+	
+        
+
+		return true;
 
 	}
 
