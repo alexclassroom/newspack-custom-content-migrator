@@ -567,10 +567,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$post_categories   = array_values( array_merge( $mapped_categories, $mapped_topics ) );
 
 			// Check if the post has non migrated authors.
-			// TODO: Set a default author if this is empty.
 			if ( count( $mapped_authors ) !== count( array_unique( $post->authors ) ) ) {
 				$logger->error( sprintf( 'Skipping post %d because it has non migrated authors: %s', $post->oid, implode( ', ', array_diff( $post->authors, array_keys( $mapped_authors ) ) ) ) );
-				// continue;
+				continue;
 			}
 
 			// Check if the post has non migrated categories.
@@ -726,10 +725,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-			// Assign contributors.
-			// TODO: Assign default author.
-			// GuestContributorsHelper::assign_contributors_to_post( $migrated_page_id, array_values( $mapped_authors ) );
-
 			// Migrate images tray and featured image.
 			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_page_id, $page->imageLinks, $image_json_file, $page->images ?? [] );
 
@@ -797,10 +792,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$slideshow_categories = array_values( array_merge( $mapped_categories, $mapped_topics ) );
 
 			// Check if the slideshow has non migrated authors.
-			// TODO: Set a default author if this is empty.
 			if ( count( $mapped_authors ) !== count( array_unique( $slideshow->authors ) ) ) {
 				$logger->error( sprintf( 'Skipping slideshow %d because it has non migrated authors: %s', $slideshow->oid, implode( ', ', array_diff( $slideshow->authors, array_keys( $mapped_authors ) ) ) ) );
-				// continue;
+				continue;
 			}
 
 			// Check if the slideshow has non migrated categories.
