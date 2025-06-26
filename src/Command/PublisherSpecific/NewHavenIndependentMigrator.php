@@ -704,7 +704,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				case 'blockText':
 					$content = $craft_block['fields']['itemContent'] ?? null;
 					if ( is_null( $content ) ) {
-						$this->logger->error( sprintf( "ERROR entry ID %d matrixMainContent blockText: content '%s'.", $entry_id, $content ) );
+						// Block was inserted by the author/editor, but was left blank with no value.
 						break;
 					}
 					// $this->gutenberg_blocks->get_paragraph will add a <p> tag, so let's remove it if it exists.
@@ -726,7 +726,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				case 'blockVideo':
 					$video_url = $craft_block['fields']['itemVideoEmbed']['url'] ?? null;
 					if ( is_null( $video_url ) || empty( $video_url ) || empty( trim( $video_url ) ) ) {
-						$this->logger->error( sprintf( 'ERROR entry ID %d matrixMainContent blockVideo: video URL is empty.', $entry_id ) );
+						// Block was inserted by the author/editor, but was left blank with no value.
 						break;
 					}
 					if ( is_null( $video_url ) ) {
@@ -812,7 +812,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					// Get asset data.
 					$asset_id = $craft_block['fields']['itemAsset'][0] ?? null;
 					if ( is_null( $asset_id ) ) {
-						$this->logger->error( sprintf( 'ERROR entry ID %d matrixMainContent blockImage missing asset ID.', $entry_id ) );
+						// Block was inserted by the author/editor, but was left blank with no value.
 						break;
 					}
 					// Caption is contained in JSON data.
@@ -843,7 +843,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				case 'blockExternalImage':
 					$image_url = $craft_block['fields']['itemURL']['url'] ?? null;
 					if ( is_null( $image_url ) ) {
-						$this->logger->error( sprintf( "ERROR entry ID %d matrixMainContent blockExternalImage: image URL '%s'.", $entry_id, $image_url ) );
+						// Block was inserted by the author/editor, but was left blank with no value.
 						break;
 					}
 
@@ -2169,7 +2169,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				// Get first itemAsset.
 				$asset_id = $block['fields']['itemAsset'][0] ?? null;
 				if ( is_null( $asset_id ) ) {
-					$this->logger->error( sprintf( "ERROR, featured image asset ID is not set in \$block['fields']['itemAsset'][0] for entry ID %d, block data: %s .", $entry['id'], wp_json_encode( $block ) ) );
 					return null;
 				}
 
