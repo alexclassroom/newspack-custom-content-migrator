@@ -636,6 +636,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 				if ( isset( $content_blocks[0]['blockName'] ) && 'newspack-blocks/homepage-articles' === $content_blocks[0]['blockName'] && isset( $content_blocks[0]['attrs']['className'] ) && 'fdn-embedded-gallery-content-loop' === $content_blocks[0]['attrs']['className'] ) {
 					update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'hidden' );
 				}
+
+				// Or if the featured image is in the content.
+				$featured_image_id = get_post_thumbnail_id( $migrated_post_id );
+				if ( $featured_image_id ) {
+					$featured_image_url = wp_get_attachment_image_src( $featured_image_id, 'full' )[0];
+					// Get the featured image filename.
+					$featured_image_filename = basename( $featured_image_url );
+					if ( strpos( $updated_content, $featured_image_filename ) !== false ) {
+						update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'hidden' );
+					}
+				}
 			}
 
 			// Setting the post's primary category.
@@ -1191,21 +1202,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string Post content.
 	 */
 	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file ): string {
-		$logger                     = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
-		$content                    = $this->strip_container_div_robust( $post->body );
-		$allowed_tags               = wp_kses_allowed_html( 'post' );
-		$allowed_tags_without_style = array_map(
-			function ( $tag ) {
-				if ( array_key_exists( 'style', $tag ) ) {
-					unset( $tag['style'] );
-				}
-
-				return $tag;
-			},
-			$allowed_tags
-		);
-
-		$content = wp_kses( $content, $allowed_tags_without_style );
+		$logger  = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+		$content = $this->clean_content( $post->body );
 
 		// Migrate info box.
 		if ( ! empty( $post->infoBoxTitle ) && ! empty( $post->infoBoxText ) && ! empty( $post->infoBoxPosition ) ) {
@@ -1242,6 +1240,22 @@ class FoundationMigrator implements RegisterCommandInterface {
 		if ( ! empty( $post->slideshow ) ) {
 			$content = $this->migrate_slideshow_markers( $post->oid, $content, $post->slideshow, $slideshow_json_file );
 		}
+
+		return $content;
+	}
+
+	/**
+	 * Clean content.
+	 *
+	 * @param string $content Content.
+	 *
+	 * @return string Cleaned content.
+	 */
+	private function clean_content( string $content ): string {
+		$content = $this->strip_container_div_robust( $content );
+		// $content = $this->strip_style_tags( $content );
+		$content = $this->strip_line_breaks( $content );
+		$content = $this->strip_whitespace( $content );
 
 		return $content;
 	}
@@ -2112,6 +2126,66 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $html;
+	}
+
+	/**
+	 * Strips style tags.
+	 *
+	 * @param string $html The HTML content to process.
+	 * @return string The processed HTML content.
+	 */
+	private function strip_style_tags( string $html ): string {
+		$allowed_tags               = wp_kses_allowed_html( 'post' );
+		$allowed_tags_without_style = array_map(
+			function ( $tag ) {
+				if ( array_key_exists( 'style', $tag ) ) {
+					unset( $tag['style'] );
+				}
+
+				return $tag;
+			},
+			$allowed_tags
+		);
+
+		return wp_kses( $html, $allowed_tags_without_style );
+	}
+
+	/**
+	 * Strips unnecessary line break lines.
+	 *
+	 * @param string $html The HTML content to process.
+	 * @return string The processed HTML content.
+	 */
+	private function strip_line_breaks( string $html ): string {
+		// Remove <br> tags that appear between paragraphs.
+		// This pattern matches <br> tags (with optional whitespace) that are between </p> and <p> tags.
+		$html = preg_replace( '/<\/p>\s*<br\s*\/?>\s*<p/', "</p>\n<p", $html );
+
+		// Also remove standalone <br> tags that might be at the beginning or end of content.
+		$html = preg_replace( '/^\s*<br\s*\/?>\s*/', '', $html );
+		$html = preg_replace( '/\s*<br\s*\/?>\s*$/', '', $html );
+
+		// Remove multiple consecutive <br> tags.
+		$html = preg_replace( '/(<br\s*\/?>\s*)+/', "<br>\n", $html );
+
+		return $html;
+	}
+
+	/**
+	 * Strips unnecessary whitespace.
+	 *
+	 * @param string $html The HTML content to process.
+	 * @return string The processed HTML content.
+	 */
+	private function strip_whitespace( string $html ): string {
+		// Remove excessive whitespace between closing tag and the first character of its content.
+		$html = preg_replace( '/>\s+(\S)/', '>$1', $html );
+		// Remove excessive whitespace between tags.
+		$html = preg_replace( '/>\s+</', '> <', $html );
+		$html = preg_replace( '/\]\s+</', '] <', $html );
+		$html = preg_replace( '/>\s+\[/', '> [', $html );
+
+		return trim( $html );
 	}
 
 	/**
