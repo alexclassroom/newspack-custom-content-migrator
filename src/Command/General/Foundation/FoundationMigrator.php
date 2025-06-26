@@ -651,6 +651,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Setting post meta.
 			update_post_meta( $migrated_post_id, 'foundation_post_transfer', $post->transfer );
 			update_post_meta( $migrated_post_id, 'foundation_post_source', $post->source );
+			update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
 
 			// Since we regenerated the post content, we need to regenerate the post content for related posts.
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_POSTS_META_KEY );
@@ -1190,8 +1191,21 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string Post content.
 	 */
 	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file ): string {
-		$logger  = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
-		$content = $this->strip_container_div_robust( $post->body );
+		$logger                     = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+		$content                    = $this->strip_container_div_robust( $post->body );
+		$allowed_tags               = wp_kses_allowed_html( 'post' );
+		$allowed_tags_without_style = array_map(
+			function ( $tag ) {
+				if ( array_key_exists( 'style', $tag ) ) {
+					unset( $tag['style'] );
+				}
+
+				return $tag;
+			},
+			$allowed_tags
+		);
+
+		$content = wp_kses( $content, $allowed_tags_without_style );
 
 		// Migrate info box.
 		if ( ! empty( $post->infoBoxTitle ) && ! empty( $post->infoBoxText ) && ! empty( $post->infoBoxPosition ) ) {
