@@ -750,7 +750,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'page',
-				'post_title'        => $page->headline,
+				'post_title'        => wp_strip_all_tags( $page->headline ),
 				'post_name'         => $page->permalink,
 				'post_status'       => $this->map_post_status( $page->status ),
 				'post_modified'     => $last_modified->format( 'Y-m-d H:i:s' ),
@@ -859,7 +859,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'post',
-				'post_title'        => $slideshow->title,
+				'post_title'        => wp_strip_all_tags( $slideshow->title ),
 				'post_name'         => $slideshow->basename . '-' . $slideshow->oid,
 				'post_status'       => $this->map_post_status( $slideshow->status ),
 				'post_date'         => $release_date->format( 'Y-m-d H:i:s' ),
@@ -1243,8 +1243,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string Post content.
 	 */
 	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file ): string {
-		$logger  = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
-		$content = $this->clean_content( $post->body );
+			$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+		$content    = $this->clean_content( $post->body );
 
 		// Migrate info box.
 		if ( ! empty( $post->infoBoxTitle ) && ! empty( $post->infoBoxText ) && ! empty( $post->infoBoxPosition ) ) {
@@ -1747,52 +1747,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Handle CSP issues with iframes by adding necessary attributes.
-	 *
-	 * @param string $iframe_src The iframe source URL.
-	 * @return string Modified iframe HTML with CSP-friendly attributes.
-	 */
-	private function handle_iframe_csp( string $iframe_src ): string {
-		// For Second Street embeds, we might need to add specific attributes.
-		if ( strpos( $iframe_src, 'secondstreetapp.com' ) !== false ) {
-			// Add sandbox and other attributes to help with CSP.
-			$iframe_html = sprintf(
-				'<iframe src="%s" frameborder="0" scrolling="no" allowfullscreen style="width: 100%%; height: 600px;" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"></iframe>',
-				esc_url( $iframe_src )
-			);
-			return $iframe_html;
-		}
-
-		// Default iframe for other sources.
-		return sprintf(
-			'<iframe src="%s" frameborder="0" scrolling="no" allowfullscreen style="width: 100%%; height: 600px;"></iframe>',
-			esc_url( $iframe_src )
-		);
-	}
-
-	/**
-	 * Create a fallback embed for Second Street when CSP issues persist.
-	 *
-	 * @param string $iframe_src The original iframe source URL.
-	 * @return string Fallback embed HTML.
-	 */
-	private function create_secondstreet_fallback( string $iframe_src ): string {
-		// Create a fallback that shows a link to the original content.
-		$fallback_html = sprintf(
-			'<div class="secondstreet-fallback" style="border: 1px solid #ccc; padding: 20px; text-align: center; background: #f9f9f9;">
-				<h3>Interactive Content</h3>
-				<p>This content requires special permissions to display properly.</p>
-				<a href="%s" target="_blank" rel="noopener noreferrer" style="display: inline-block; padding: 10px 20px; background: #007cba; color: white; text-decoration: none; border-radius: 4px;">
-					View Content
-				</a>
-			</div>',
-			esc_url( $iframe_src )
-		);
-
-		return $fallback_html;
-	}
-
-	/**
 	 * Migrate raw embed.
 	 *
 	 * @param object $raw_embed Raw embed.
@@ -1810,30 +1764,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			return serialize_block( $this->gutenberg_block_generator->get_youtube( $raw_embed->embedURL ) );
-		}
-
-		// Handle Second Street embeds specifically.
-		if ( isset( $raw_embed->body ) && strpos( $raw_embed->body, 'secondstreetapp.com' ) !== false ) {
-			// Extract iframe src from the embed body.
-			if ( preg_match( '/src=["\']([^"\']+)["\']/', $raw_embed->body, $matches ) ) {
-				$iframe_src = $matches[1];
-
-				// Check if we should use fallback (you can add a condition here based on your needs).
-				$use_fallback = false; // Set to true if CSP issues persist.
-
-				if ( $use_fallback ) {
-					$fallback_html = $this->create_secondstreet_fallback( $iframe_src );
-					return serialize_block(
-						$this->gutenberg_block_generator->get_html( $fallback_html )
-					);
-				} else {
-					// Use HTML block with CSP-friendly iframe instead of iframe block.
-					$csp_friendly_iframe = $this->handle_iframe_csp( $iframe_src );
-					return serialize_block(
-						$this->gutenberg_block_generator->get_html( $csp_friendly_iframe )
-					);
-				}
-			}
 		}
 
 		if ( isset( $raw_embed->specialPlacement ) && in_array( 'Info Box', $raw_embed->specialPlacement, true ) ) {
@@ -2177,6 +2107,18 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string The processed HTML content.
 	 */
 	private function strip_style_tags( string $html ): string {
+		// Temporarily replace script tags to preserve them during wp_kses processing.
+		$script_placeholders = [];
+		$html                = preg_replace_callback(
+			'/<script[^>]*>.*?<\/script>/is',
+			function ( $matches ) use ( &$script_placeholders ) {
+				$placeholder                         = '<!--SCRIPT_PLACEHOLDER_' . count( $script_placeholders ) . '-->';
+				$script_placeholders[ $placeholder ] = $matches[0];
+				return $placeholder;
+			},
+			$html
+		);
+
 		$allowed_tags = wp_kses_allowed_html( 'post' );
 
 		// Remove style attribute from p tags only.
@@ -2184,7 +2126,15 @@ class FoundationMigrator implements RegisterCommandInterface {
 			unset( $allowed_tags['p']['style'] );
 		}
 
-		return wp_kses( $html, $allowed_tags );
+		// Process with wp_kses.
+		$html = wp_kses( $html, $allowed_tags );
+
+		// Restore script tags.
+		foreach ( $script_placeholders as $placeholder => $script_tag ) {
+			$html = str_replace( $placeholder, $script_tag, $html );
+		}
+
+		return $html;
 	}
 
 	/**
@@ -2262,40 +2212,5 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $html;
-	}
-
-	/**
-	 * Allow iframe attributes for CSP handling.
-	 *
-	 * @param array  $allowed_html Allowed HTML tags and attributes.
-	 * @param string $context      Context for which HTML is being filtered.
-	 * @return array Modified allowed HTML.
-	 */
-	public function allow_iframe_attributes( array $allowed_html, string $context ): array {
-		if ( 'post' === $context ) {
-			$allowed_html['iframe'] = [
-				'src'             => true,
-				'width'           => true,
-				'height'          => true,
-				'frameborder'     => true,
-				'scrolling'       => true,
-				'allowfullscreen' => true,
-				'sandbox'         => true,
-				'style'           => true,
-				'class'           => true,
-				'id'              => true,
-			];
-		}
-		return $allowed_html;
-	}
-
-	/**
-	 * Add CSP meta tag to allow iframe embedding.
-	 */
-	public function add_csp_meta_tag(): void {
-		// Only add CSP meta tag on pages that might have iframes.
-		if ( is_single() || is_page() ) {
-			echo '<meta http-equiv="Content-Security-Policy" content="frame-ancestors \'self\' https://*.secondstreetapp.com https://*.secondstreet.com;">' . "\n";
-		}
 	}
 }
