@@ -13,6 +13,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Logic\Taxonomy;
 use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\UsersHelper;
+use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Util\Log\CliLog;
@@ -219,6 +220,13 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 * @var Simple_Local_Avatars $simple_local_avatars The simple local avatars helper.
 	 */
 	private $simple_local_avatars;
+	
+	/**
+	 * Posts helper.
+	 *
+	 * @var Posts $posts The posts helper.
+	 */
+	private $posts;
 
 	/**
 	 * Constructor.
@@ -230,6 +238,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$this->coauthors            = new CoAuthorsPlusHelper();
 		$this->simple_local_avatars = new Simple_Local_Avatars();
 		$this->gutenberg_blocks     = new GutenbergBlockGenerator();
+		$this->posts                = new Posts();
 	}
 
 	/**
@@ -237,8 +246,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	 */
 	public static function register_commands(): void {
 		WP_CLI::add_command(
-			'newspack-content-migrator newhavenindependent test',
-			self::get_command_closure( 'cmd_test' ),
+			'newspack-content-migrator newhavenindependent consolidate-authors',
+			self::get_command_closure( 'cmd_consolidate_authors' ),
 			[
 				'synopsis' => [
 					[
@@ -247,51 +256,11 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 						'optional' => true,
 					],
 					[
-						'type'     => 'assoc',
-						'name'     => 'json-expanded-entries-folder',
-						'optional' => false,
-					],
-					[
-						'type'     => 'assoc',
-						'name'     => 'json-expanded-users',
-						'optional' => false,
-					],
-					[
-						'type'     => 'assoc',
-						'name'     => 'json-expanded-categories-news-sections',
-						'optional' => false,
-					],
-					[
-						'description' => 'If not all craft-db-* params are provided, will use the global $wpdb to locate tables in the local schema.',
+						'description' => 'Manually provide some specific bylines with their authors. Because not all bylines are perfectly formatted, you can provide some manually exploded bylines here -- JSON contains one object, keys are bylines, and values are arrays with author strings.',
 						'type'        => 'assoc',
-						'name'        => 'craft-db-name',
+						'name'        => 'exceptions-bylines-json',
 						'optional'    => true,
 					],
-					[
-						'description' => 'If not all craft-db-* params are provided, will use the global $wpdb to locate tables in the local schema.',
-						'type'        => 'assoc',
-						'name'        => 'craft-db-user',
-						'optional'    => true,
-					],
-					[
-						'description' => 'If not all craft-db-* params are provided, will use the global $wpdb to locate tables in the local schema.',
-						'type'        => 'assoc',
-						'name'        => 'craft-db-pass',
-						'optional'    => true,
-					],
-					[
-						'description' => 'If not all craft-db-* params are provided, will use the global $wpdb to locate tables in the local schema.',
-						'type'        => 'assoc',
-						'name'        => 'craft-db-host',
-						'optional'    => true,
-					],
-					[
-						'description' => 'If not all craft-db-* params are provided, will use the global $wpdb to locate tables in the local schema.',
-						'type'        => 'assoc',
-						'name'        => 'craft-db-port',
-						'optional'    => true,
-					],
-
 				],
 			]
 		);
@@ -1418,411 +1387,424 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Test command.
+	 * Parse bylines saved as meta more accurately in NHI's DB, and reassign authors for those specific bylines.
 	 * 
 	 * This is a test command to help with the migration.
 	 * 
 	 * @param array $pos_args The positional arguments.
 	 * @param array $assoc_args The associative arguments.
 	 */
-	public function cmd_test( array $pos_args, array $assoc_args ): void {
-		$this->dry_run                      = isset( $assoc_args['dry-run'] ) ? true : false;
-		$craft_db_name                      = $assoc_args['craft-db-name'];
-		$craft_db_user                      = $assoc_args['craft-db-user'];
-		$craft_db_pass                      = $assoc_args['craft-db-pass'];
-		$craft_db_host                      = $assoc_args['craft-db-host'];
-		$craft_db_port                      = $assoc_args['craft-db-port'];
-		$entries_jsons_folder               = $assoc_args['json-expanded-entries-folder'];
-		$users_json_file                    = $assoc_args['json-expanded-users'];
-		$categories_news_expanded_json_file = $assoc_args['json-expanded-categories-news-sections'];
-		
+	public function cmd_consolidate_authors( array $pos_args, array $assoc_args ): void {
+		$exceptions_bylines_json = isset( $assoc_args['exceptions-bylines-json'] ) ? $assoc_args['exceptions-bylines-json'] : null;
+		$exceptions_bylines      = [];
+		if ( ! is_null( $exceptions_bylines_json ) ) {
+			$exceptions_bylines = json_decode( file_get_contents( $exceptions_bylines_json ), true ); // phpcs:ignore -- WordPress.PHP.DiscouragedPHPFunctions.file_get_contents_file_get_contents.
+		}
+		$this->dry_run = isset( $assoc_args['dry-run'] ) ? true : false;
 		$this->setup_logger( __FUNCTION__ );
-		$craft_db = $this->get_craft_db_connection( $craft_db_name, $craft_db_user, $craft_db_pass, $craft_db_host, $craft_db_port );
 
-		// phpcs:disable -- temporary dev code.
+		global $wpdb;
 
-		$this->logger->info( '--- PARSE IMPORT LOG FILE FOR SUCCESSES AND WARNINGS/ERRORS  -----------------------------' );
-		// Read lines from the log file.
-		$in_log_file      = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_test_read.out';
-		// Output files.
-		$out_success_file = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_success_ids.txt';
-		$out_warn_file    = '/Users/ivanuravic/www/newhavenindependent/app/public/wp-content/plugins/newspack-custom-content-migrator/import_warn_ids.txt';
-		
-		if ( ! file_exists(	$in_log_file) || !is_readable($in_log_file)) {
-			WP_CLI::line( "Error: Log file not found." );
-			exit;
+
+		/**
+		 * Step 1/3.
+		 * Assign authors from bylines to posts.
+		 */
+		WP_CLI::log( '=== Step 1/3.' );
+		WP_CLI::log( 'Assigning authors from bylines to posts...' );
+
+		// Prepare log with assigned bylines authors.
+		$csv_postmeta_bylines_all = 'postmeta_bylines_all__custom_separator.csv';
+		if ( file_exists( $csv_postmeta_bylines_all ) ) {
+			unlink( $csv_postmeta_bylines_all ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
 		}
-		$lines = file( $in_log_file, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES );
-		if ( false === $lines ) {
-			WP_CLI::line( "Error: Could not read the log file." );
-			exit;
-		}
-	
-		$success_ids = [];
-		$warn_ids = [];
-		$line_count = count($lines);
-		for ($i = 0; $i < $line_count; $i++) {
-			$current_line = $lines[$i];
-	
-			// Regex to identify the start of an entry's log block and capture its ID.
-			// e.g., "INFO (1)/(630) ; (6)/(100) Entry ID 10705254"
-			if (preg_match('/INFO \(\d+\)\/\(\d+\) ; \(\d+\)\/\(\d+\) Entry ID (\d+)/', $current_line, $matches)) {
-				$current_entry_id = $matches[1];
-				$is_clean_insert = false;
-	
-				// Check if the next line exists and is the expected "Inserted post" line.
-				$insert_line_index = $i + 1;
-				if ($insert_line_index < $line_count && strpos($lines[$insert_line_index], "INFO Inserted post") !== false) {
-					// Now, check the line *after* the "Inserted post" line.
-					$line_after_insert_index = $i + 2;
-					if ( $line_after_insert_index >= $line_count ) {
-						// This was the last entry in the file, and it had no errors following it. It's a success.
-						$is_clean_insert = true;
-					} else {
-						$line_after_insert = $lines[$line_after_insert_index];
-						// A clean insert is one where the next line is either a new entry ID or a new file marker.
-						if (
-							preg_match('/INFO \(\d+\)\/\(\d+\) ; \(\d+\)\/\(\d+\) Entry ID \d+/', $line_after_insert) ||
-							strpos($line_after_insert, 'INFO =====') !== false
-						) {
-							$is_clean_insert = true;
-						}
+		$csv_custom_separator = '|||';
+		file_put_contents( $csv_postmeta_bylines_all, 'post_id' . $csv_custom_separator . 'byline' . $csv_custom_separator . 'names' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+
+		// Get bylines -- saved as postmetas, meta_key 'newspack_migration_legacy_byline'.
+		$postmeta_rows = $wpdb->get_results( $wpdb->prepare( 'SELECT post_id, meta_value FROM wp_postmeta WHERE meta_key = %s and meta_value <> %s', 'newspack_migration_legacy_byline', 'a:0:{}' ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		foreach ( $postmeta_rows as $key_postmeta_row => $postmeta_row ) {
+			WP_CLI::log( sprintf( '(%d)/(%d) postmeta', $key_postmeta_row, count( $postmeta_rows ) ) );
+			$post_id      = $postmeta_row->post_id;
+			$bylines_data = unserialize( $postmeta_row->meta_value ); // phpcs:ignore -- WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize.
+			foreach ( $bylines_data as $byline_data ) {
+				foreach ( $byline_data as $key => $byline ) {
+					// Byline data has several keys, skip if not 'name'.
+					if ( 'name' !== $key ) {
+						continue;
 					}
-				}
-	
-				// Based on the flag, add the ID to the correct list.
-				if ( $is_clean_insert ) {
-					$success_ids[] = $current_entry_id;
-				} else {
-					// If it wasn't a clean insert (e.g., an ERROR followed, or the "Inserted post" line was missing),
-					// it belongs in the warning list.
-					$warn_ids[] = $current_entry_id;
-				}
-			}
-		}
-	
-		file_put_contents( $out_success_file, implode( "\n", $success_ids ) );
-		file_put_contents( $out_warn_file, implode( "\n", $warn_ids ) );
-		WP_CLI::line( count( $success_ids ) . " successfully imported entries." );
-		WP_CLI::line( count( $warn_ids ) . " entry IDs with issues." );
-		exit;
-
-		
-		$this->logger->info( '--- GET IMAGE BLOCKs PARAMS  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$img_data = [];
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			foreach ( $entries_file_data as $entry ) {
-				// Loop matrxLede
-				$loop_blocks = [];
-				if ( isset( $entry['matrixLede'] ) ) {
-					$loop_blocks = $entry['matrixLede'];
-				}
-				if ( isset( $entry['matrixMainContent'] ) ) {
-					$loop_blocks = array_merge( $loop_blocks, $entry['matrixMainContent'] );
-				}
-				foreach ( $loop_blocks as $block ) {
-					if ( 'blockExternalImage' !== $block['type'] && 'blockImage' !== $block['type'] ) {
+					// Byline doesn't have to have a value (author objects could have been used for authorship).
+					if ( empty( $byline ) ) {
 						continue;
 					}
 
-					// If it's been catalogued (Lede and Content will overlap), skip.
-					if ( 'blockImage' === $block['type'] ) {
-						if ( isset( $img_data[ $entry['id'] ]['_blockImage_asset_id'] ) ) {
+					// Explode bylines into actual author names.
+					$exploded_bylines = [];
+
+					// Decode the bylines, requires two levels of decoding - first level decodes HTML entities, second level decodes UTF-8 characters like in Spanish names.
+					$byline_decoded = html_entity_decode( html_entity_decode( $byline, ENT_QUOTES, 'UTF-8' ), ENT_QUOTES, 'UTF-8' );
+
+					// Manually provided and resolved byline, or explode it programmatically.
+					if ( isset( $exceptions_bylines[ $byline_decoded ] ) ) {
+						$exploded_bylines = $exceptions_bylines[ $byline_decoded ];
+					} else {
+						$exploded_bylines = $this->byline_explode( $byline, [ '&', ',' ] );
+
+						// If it turned out to be just one exploded byline, and it's the same as the original byline string, then skip -- it's already all correctly assigned.
+						if ( 1 === count( $exploded_bylines ) && $exploded_bylines[0] === $byline ) {
 							continue;
 						}
 					}
-					if ( 'blockExternalImage' === $block['type'] ) {
-						if ( isset( $img_data[ $entry['id'] ]['_blockExternalImage_url'] ) ) {
+
+					// This should never happen, but handle just in case.
+					if ( empty( $exploded_bylines ) ) {
+						$this->logger->error( sprintf( 'ERROR post ID %d, empty exploded bylines for byline %s', $post_id, $byline ) );
+						continue;
+					}
+					
+					/**
+					 * Assign post authors from exploded bylines.
+					 * - for just one exploded byline: use wp_posts.author and remove any existing coauthors
+					 * - for more bylines: assign as coauthors
+					 */ 
+					if ( 1 === count( $exploded_bylines ) ) {
+						// Get or create user by display name. Bypassing unique ID migration system, because these usermetas were already assigned, but now need more granulation.
+						$wp_user_id = $this->get_or_create_user_by_display_name( $exploded_bylines[0] );
+						if ( is_wp_error( $wp_user_id ) ) {
+							$this->logger->error( sprintf( 'ERROR creating user in get_or_create_user_by_display_name for byline %s : %s', $exploded_bylines[0], $wp_user_id->get_error_message() ) );
 							continue;
 						}
-					}
 
-					// Catalogue the image data.
-					$img_data[ $entry['id'] ] = [
-						// blockImage will have the asset ID, but blockExternalImage will not.
-						'_blockImage_asset_id'    => $block['fields']['itemAsset'] ?? null,
-						// blockExternalImage will have the URL, but blockImage will not.
-						'_blockExternalImage_url' => $block['fields']['itemURL']['url'] ?? null,
-						// Common.
-						'entry_id'                => $entry['id'],
-						'entry_title'             => $entry['title'],
-						'itemPosition'            => $block['fields']['itemPosition'],
-						'itemWidth'               => $block['fields']['itemWidth'],
-					];
-
-				}
-			}
-		}
-		// Great. Let's analyze the data now.
-		// Get unique itemPosition values with 15 example entry IDs.
-		$image_positions_to_entry_ids = [];
-		$image_widths_to_entry_ids    = [];
-		foreach ( $img_data as $entry_id => $img_data_entry ) {
-			$is_position_set              = isset( $image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ] );
-			$position_needs_more_examples = true;
-			$position_has_this_title      = false;
-			if ( $is_position_set ) {
-				$existing_titles              = array_column( $image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ], 1 );
-				$position_has_this_title      = in_array( $img_data_entry['entry_title'], $existing_titles );
-				$position_needs_more_examples = count( $existing_titles ) < 15;
-			}
-			if ( ! $is_position_set || ( $position_needs_more_examples && ! $position_has_this_title ) ) {
-				$image_positions_to_entry_ids[ $img_data_entry['itemPosition'] ][] = [ $entry_id, $img_data_entry['entry_title'] ];
-			}
-
-			$is_width_set              = isset( $image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ] );
-			$width_needs_more_examples = true;
-			$width_has_this_title      = false;
-			if ( $is_width_set ) {
-				$existing_titles           = array_column( $image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ], 1 );
-				$width_has_this_title      = in_array( $img_data_entry['entry_title'], $existing_titles );
-				$width_needs_more_examples = count( $existing_titles ) < 15;
-			}
-			if ( ! $is_width_set || ( $width_needs_more_examples && ! $width_has_this_title ) ) {
-				$image_widths_to_entry_ids[ $img_data_entry['itemWidth'] ][] = [ $entry_id, $img_data_entry['entry_title'] ];
-			}
-		}
-		$this->logger->info( '--- UNIQUE ITEM POSITIONS  -----------------------------' );
-		// var_dump( $image_positions_to_entry_ids );
-		$this->logger->info( '--- UNIQUE ITEM WIDTHS  -----------------------------' );
-		var_dump( $image_widths_to_entry_ids );
-		// var_dump( $image_widths_to_entry_ids );
-		
-		// $this->logger->info( implode( "\n", $unique_item_positions ) );
-		exit;
-
-		$this->logger->info( '--- GET EXTERNAL IMAGE BLOCK URLS  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			$urls = [];
-			foreach ( $entries_file_data as $entry ) {
-				if ( isset( $entry['matrixLede'] ) ) {
-					foreach ( $entry['matrixLede'] as $block ) {
-						if ( 'blockExternalImage' === $block['type'] ) {
-							if ( ! in_array( $block['fields']['itemURL']['url'], $urls ) ) {
-								$urls[] = $block['fields']['itemURL']['url'];
-							}
+						// Update post_author.
+						$updated = $wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+							$wpdb->posts,
+							[ 'post_author' => $wp_user_id ],
+							[ 'ID' => $post_id ]
+						);
+						if ( false === $updated ) {
+							$this->logger->error( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $wp_user_id, $post_id, $wpdb->last_error ) );
 						}
-					}
-				}
-				if ( isset( $entry['matrixMainContent'] ) ) {
-					foreach ( $entry['matrixMainContent'] as $block ) {
-						if ( 'blockExternalImage' === $block['type'] ) {
-							if ( ! in_array( $block['fields']['itemURL']['url'], $urls ) ) {
-								$urls[] = $block['fields']['itemURL']['url'];
+
+						// Unassign any existing coauthors for single author posts.
+						$this->coauthors->unassign_all_guest_authors_from_post( $post_id );
+					} else {
+						// Get or create users by display names.
+						$wp_users = [];
+						foreach ( $exploded_bylines as $exploded_byline ) {
+							$wp_user_id = $this->get_or_create_user_by_display_name( $exploded_byline );
+							if ( is_wp_error( $wp_user_id ) ) {
+								$this->logger->error( sprintf( 'ERROR post ID %d, get_or_create_user_by_display_name for byline %s : %s', $post_id, $exploded_byline, $wp_user_id->get_error_message() ) );
+								continue;
 							}
+							$wp_users[] = get_user_by( 'ID', $wp_user_id );
 						}
+
+						// Assign coauthors.
+						$this->coauthors->assign_authors_to_post( $wp_users, $post_id, false );
 					}
-				}
-			}
-			$this->logger->info( implode( "\n", $urls ) );
-		}
-		exit;
 
-		// $this->logger->info( '--- TEST VARIOUS "BLOCK VIDEO" HOST EMBEDS  -----------------------------' );
-		$video_urls = [
-			'https://baba.com/c'
-		];
-		$post_content = '';
-		foreach ( $video_urls as $video_url ) {
-			$link        = sprintf( '<a href="%s" class="nhi-blockVideo-link" target="_blank">%s</a>', $video_url, $video_url );
-			$video_block = $this->gutenberg_blocks->get_paragraph( $link );
-
-			$paragraph_block          = $this->gutenberg_blocks->get_paragraph( $video_url );
-			$separator_block      = $this->gutenberg_blocks->get_separator();
-			$post_content .= ! empty( $post_content ) ? "\n\n" : '';
-			$post_content .= serialize_block( $paragraph_block );
-			$post_content .= serialize_block( $video_block );
-			$post_content .= serialize_block( $separator_block );
-		}
-		// SAVE DIRECTLY TO TEST POST CONTENT.
-		global $wpdb;
-		$wpdb->update(
-			$wpdb->posts,
-			[ 'post_content' => $post_content ],
-			[ 'ID' => 12 ]
-		);
-		exit;
-
-		// $this->logger->info( '--- TEST FB VIDEO EMBEDS  -----------------------------' );
-		$video_urls = [
-			'https://fb.watch/aWmrsqLA3N/',
-			'https://facebook.com/watch/live/?ref=watch_permalink&v=1162598517894556',
-			'https://www.facebook.com/100005396685702/videos/1583287642064956/',
-			'https://www.facebook.com/100063466693955/posts/pfbid0URDs4XYD2HT2MbDexGsUkgwDxfMwnE61XhjxeoDp2QuNvRXiEdKr5RsPCu6uAFm5l/?app=fbl',
-			'https://www.facebook.com/NewHavenIndependent/videos/1013196649872007',
-			'https://www.facebook.com/watch/?v=429471115872806',
-		];
-		$post_content = '';
-		foreach ( $video_urls as $video_url ) {
-			$parsed_url           = wp_parse_url( $video_url );
-			// $url_noparams         = sprintf( '%s://%s%s', $parsed_url['scheme'], $parsed_url['host'], $parsed_url['path'] );
-			$html_content_sprintf = sprintf(
-				"\n%s\n%s\n",
-				'<div id="fb-root"></div><script async defer crossorigin="anonymous" src="https://connect.facebook.net/en_US/sdk.js#xfbml=1&version=v22.0"></script>',
-				'<div class="fb-video" data-href="%s" data-width="500" data-show-text="false"></div>'
-			);
-			$embed_url = $this->get_final_redirect_url( $video_url );
-			$html_content         = sprintf( $html_content_sprintf, $embed_url );
-			$video_block          = $this->gutenberg_blocks->get_html( $html_content );
-			$separator_block      = $this->gutenberg_blocks->get_separator();
-			$post_content .= ! empty( $post_content ) ? "\n\n" : '';
-			$post_content .= serialize_block( $video_block );
-			$post_content .= serialize_block( $separator_block );
-		}
-		// SAVE DIRECTLY TO TEST POST CONTENT.
-		global $wpdb;
-		$wpdb->update(
-			$wpdb->posts,
-			[ 'post_content' => $post_content ],
-			[ 'ID' => 12 ]
-		);
-		exit;
-
-		$this->logger->info( '--- EXTRACT ENTRIES INTO SINGLE JSON FILE  -----------------------------' );
-		$entry_ids = [
-			// blockHeading
-			10001903, 10001995, 10002432, 10003360, 
-			// blockText.
-			10000517, 100007, 10000737, 10000951, 10001, 
-			// blockRawHTML.
-			10101356, 10107340, 10114756, 10128962, 10134667, 
-			// blockVideo.
-			10001903, 10002432, 10003945, 10004356, 10005872, 
-			// blockImage.
-			10000517, 10001370, 10001536, 10001880, 10001906, 
-			// blockExternalImage.
-			9976675, 9977934, 9985266, 9985270, 9990704, 
-			// blockPoll.
-			10001995, 10008484, 10053994, 10066330, 10088942, 
-			// blockSeparator.
-			// -- JUST 10 TOTAL CONTENT.
-			10106224, 10114756, 10229093, 10588553, 11645370, 
-			// blockQuote.
-			// -- JUST 4 TOTAL CONTENT:
-			10282510, 10707615, 11623071, 372059, 
-			// blockGraphic.
-			// -- used in just 2 entites in Content:
-			// -- and also in just 2 entites in Lede:
-			9812751, 9864293, 
-		];
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$path_single_json_entries = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/eg_content_and_lede_blocktypes_IDS/entries_p1.json';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$entries_file_data = [];
-		$entries_picked_data = [];
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			foreach ( $entries_file_data as $entry ) {
-				if ( in_array( $entry['id'], $entry_ids ) ) {
-					$entries_picked_data[] = $entry;
-					// $entries_picked_data[ $entry['id'] ][] = $entry;
+					// Log.
+					file_put_contents( $csv_postmeta_bylines_all, $post_id . $csv_custom_separator . $byline . $csv_custom_separator . implode( '; ', $exploded_bylines ) . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
 				}
 			}
 		}
-		$this->logger->info( '--- $entry_ids: ' . count($entry_ids) );
-		$this->logger->info( '--- $entries_picked_data: ' . count($entries_picked_data) );
-		if ( file_exists( $path_single_json_entries ) ) {
-			unlink( $path_single_json_entries );
+		WP_CLI::log( sprintf( 'See %s', $csv_postmeta_bylines_all ) );
+
+
+
+		/**
+		 * Step 2/3.
+		 * Consolidate multiple WP_Users with same display names into single ones. During imported multiple users with same display names got created because:
+		 * - old bylines have multiple user types, and we created them accordingly
+		 * - entries were imported chronologically, and author might have first existed as byline, and only then "promoted" to real author object
+		 * - actual duplicate authors exist in old system, this will consolidate them
+		 */
+		WP_CLI::log( '=== Step 2/3.' );
+		WP_CLI::log( 'Consolidating multiple WP_Users with same display names into single ones...' );
+
+		WP_CLI::log( '- getting list of consolidated and rejected users...' );
+		// Get multiple WP_Users with same display_name.
+		$users_by_display_name       = [];
+		$display_names_multiple_rows = $wpdb->get_results( 'SELECT display_name, count(display_name) total FROM wp_users group by display_name having total > 1;', ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		foreach ( $display_names_multiple_rows as $display_name_multiple_row ) {
+			$user_rows = $wpdb->get_results( $wpdb->prepare( 'SELECT ID, display_name FROM wp_users WHERE display_name = %s', $display_name_multiple_row['display_name'] ), ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			foreach ( $user_rows as $user_row ) {
+				$users_by_display_name[ $user_row['display_name'] ][] = $user_row['ID'];
+			}
 		}
-		file_put_contents( $path_single_json_entries, json_encode( $entries_picked_data, JSON_PRETTY_PRINT ) );
-		exit;
 
-		$this->logger->info( '--- TEST DELAURO ENTRY  -----------------------------' );
-		$entries_json_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/entries_delauroBringsBack_expanded.json';
-		$users_data = json_decode( file_get_contents( $users_json_file ), true );
-		$entry_data = json_decode( file_get_contents( $entries_json_file ), true );
-		$entry      = $entry_data[0];
-		exit;
+		// Create a list of consolidated users VS rejected ones -- key is the one user ID which is kept, and values are user IDs (with same display name) that are rejected.
+		$consolidated_users = [];
+		foreach ( $users_by_display_name as $display_name => $user_ids ) {
+			$consolidated_user_id = null;
+			foreach ( $user_ids as $user_id ) {
+				// We will keep/consolidate the one user which has an avatar, or a non-@example.com email domain.
+				$user_avatar = $wpdb->get_var( $wpdb->prepare( 'SELECT meta_value FROM wp_usermeta WHERE user_id = %d AND meta_key = %s', $user_id, 'simple_local_avatar' ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$user_email  = $wpdb->get_var( $wpdb->prepare( 'SELECT user_email FROM wp_users WHERE ID = %d', $user_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				if ( $user_avatar ) {
+					$consolidated_user_id = $user_id;
+					break;
+				}
+				if ( $user_email ) {
+					$consolidated_user_id = $user_id;
+					break;
+				}
+			}
 
-		$this->logger->info( '--- GET VIDEO BLOCK URLS  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
+			// Debug check if no consolidated user was found (meaning criteria were not met).
+			if ( is_null( $consolidated_user_id ) ) {
+				$this->logger->error( sprintf( 'ERROR no consolidated user found for display name %s', $display_name ) );
 				continue;
 			}
-			foreach ( $entries_file_data as $entry ) {
-				if ( ! isset( $entry['matrixMainContent'] ) ) {
+			
+			// Other users with same display name will be the rejected ones.
+			$rejected_user_ids                           = array_diff( $user_ids, [ $consolidated_user_id ] );
+			$consolidated_users[ $consolidated_user_id ] = $rejected_user_ids;
+		}
+
+		// Log consolidated users.
+		$log_consolidated_users = 'consolidated_users.csv';
+		if ( file_exists( $log_consolidated_users ) ) {
+			unlink( $log_consolidated_users ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		file_put_contents( $log_consolidated_users, 'display_name,kept_rejected,user_id' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+		foreach ( $consolidated_users as $selected_user_id => $rejected_user_ids ) {
+			$display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $selected_user_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			file_put_contents( $log_consolidated_users, $display_name . ',' . 'kept' . ',' . $selected_user_id . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+			foreach ( $rejected_user_ids as $rejected_user_id ) {
+				file_put_contents( $log_consolidated_users, $display_name . ',' . 'rejected' . ',' . $rejected_user_id . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+			}
+		}
+		WP_CLI::log( sprintf( 'See %s', $log_consolidated_users ) );
+
+
+		// Replace post authorship from rejected ones to the consolidated user.
+		WP_CLI::log( '- updating post authorship from rejected ones to the consolidated user...' );
+		// Prepare log updated post_author.
+		$log_post_authors_update = 'updated_post_authors.csv';
+		if ( file_exists( $log_post_authors_update ) ) {
+			unlink( $log_post_authors_update ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		file_put_contents( $log_post_authors_update, 'post_id,post_author_id,post_author_display_name,consolidated_post_author_id,consolidated_post_author_display_name' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+		// Prepare log updated coauthors.
+		$log_post_coauthors_update = 'updated_post_coauthors.csv';
+		if ( file_exists( $log_post_coauthors_update ) ) {
+			unlink( $log_post_coauthors_update ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		file_put_contents( $log_post_coauthors_update, 'post_id,post_authors_ids,post_authors_display_names,consolidated_post_authors_ids,consolidated_post_authors_display_names' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+
+		$posts_ids = $this->posts->get_all_posts_ids();
+		foreach ( $posts_ids as $post_id ) {
+
+			/**
+			 * Consolidate wp_posts.post_author.
+			 */
+			$post_author = $wpdb->get_var( $wpdb->prepare( 'SELECT post_author FROM wp_posts WHERE ID = %d', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			// Search if this $post_author is a rejected one, and should be replaced with the consolidated user ID.
+			$consolidated_post_author = null;
+			foreach ( $consolidated_users as $selected_user_id => $rejected_user_ids ) {
+				if ( in_array( $post_author, $rejected_user_ids ) ) {
+					$consolidated_post_author = $selected_user_id;
+					break;
+				}
+			}
+			// Update author if needed.
+			if ( ! is_null( $consolidated_post_author ) ) {
+				$updated = $wpdb->update( $wpdb->posts, [ 'post_author' => $selected_user_id ], [ 'ID' => $post_id ] ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				if ( false === $updated ) {
+					$this->logger->error( sprintf( 'ERROR updating post_author %s for post ID %s : %s', $selected_user_id, $post_id, $wpdb->last_error ) );
 					continue;
 				}
-				foreach ( $entry['matrixMainContent'] as $block ) {
-					if ( 'blockVideo' === $block['type'] ) {
-						$this->logger->info( $block['fields']['itemVideoEmbed']['url'] );
+				// Log.
+				$post_author_display_name              = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $post_author ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				$consolidated_post_author_display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $consolidated_post_author ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+				file_put_contents( $log_post_authors_update, $post_id . ',' . $post_author . ',' . $post_author_display_name . ',' . $consolidated_post_author . ',' . $consolidated_post_author_display_name . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+			}
+
+
+			/**
+			 * Consolidate post coauthorship.
+			 */
+			$coauthors = $this->coauthors->get_all_authors_for_post( $post_id );
+			if ( ! empty( $coauthors ) ) {
+				$coauthors_updated = $coauthors;
+				
+				// Loop through coauthors, and replace rejected ones with the consolidated ones.
+				foreach ( $coauthors as $key_coauthor => $coauthor ) {
+
+					// Search if this $coauthor->ID is rejected, and get its $consolidated_user replacement.
+					$consolidated_user = null;
+					foreach ( $consolidated_users as $selected_user_id => $rejected_user_ids ) {
+						if ( in_array( $coauthor->ID, $rejected_user_ids ) ) {
+							$consolidated_user                  = get_user_by( 'ID', $selected_user_id );
+							$coauthors_updated[ $key_coauthor ] = $consolidated_user;
+							break;
+						}
 					}
+				}
+				// Update coauthors if needed.
+				if ( $coauthors_updated !== $coauthors ) {
+					$this->coauthors->assign_authors_to_post( $coauthors_updated, $post_id, false );
+					
+					// Log.
+					$coauthors_before_ids           = [];
+					$coauthors_before_display_names = [];
+					foreach ( $coauthors as $coauthor_before ) {
+						$coauthors_before_ids[]           = $coauthor_before->ID;
+						$coauthors_before_display_names[] = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $coauthor_before->ID ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+					}
+					$coauthors_updated_ids           = [];
+					$coauthors_updated_display_names = [];
+					foreach ( $coauthors_updated as $coauthor_updated ) {
+						$coauthors_updated_ids[]           = $coauthor_updated->ID;
+						$coauthors_updated_display_names[] = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $coauthor_updated->ID ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+					}
+					file_put_contents( // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+						$log_post_coauthors_update,
+						$post_id
+						. ',' . implode( '; ', $coauthors_before_ids )
+						. ',' . implode( '; ', $coauthors_before_display_names )
+						. ',' . implode( '; ', $coauthors_updated_ids )
+						. ',' . implode( '; ', $coauthors_updated_display_names )
+						. PHP_EOL,
+						FILE_APPEND 
+					);
 				}
 			}
 		}
-		exit;
+		WP_CLI::log( sprintf( 'See %s', $log_post_authors_update ) );
+		WP_CLI::log( sprintf( 'See %s', $log_post_coauthors_update ) );
+	   
 
-		$this->logger->info( '--- GET REPEATING/DUPLICATE ENTRY IDs FROM JSONS  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$entry_ids_files = [];
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			foreach ( $entries_file_data as $entry ) {
-				$entry_ids_files[$entry['id']]['title'] = $entry['title'];
-				$entry_ids_files[$entry['id']]['files'][] = $entries_json_file;
-			}
-		}
-		// Save CSV entry IDs to /Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv
-		foreach ( $entry_ids_files as $entry_id => $arr ) {
-			$files = $arr['files'];
-			$title = $arr['title'];
-			if ( count( $files ) > 1 ) {
-				$this->logger->info( sprintf( "- ID '%d' title '%s' is repeating in %d files: \n- %s", $entry_id, $title, count( $files ), implode( "\n- ", $files ) ) );
-			}
-		}
-		exit;
+		/**
+		 * Step 3/3.
+		 * Get obsolete users which can be deleted.
+		 */
+		WP_CLI::log( '=== Step 3/3.' );
+		WP_CLI::log( 'Locating obsolete users -- WP_Users which are not authors of any posts...' );
 
-		$this->logger->info( '--- GET ALL ENTRY IDs FROM JSONS  -----------------------------' );
-		// Extract all entry IDs available in JSONs.
-		$folder_to_entries_jsons = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/downloaded_entities';
-		$entries_json_files = glob( $folder_to_entries_jsons . '/*.json' );
-		$entry_ids = [];
-		foreach ( $entries_json_files as $entries_json_file ) {
-			$entries_file_data = json_decode( file_get_contents( $entries_json_file ), true );
-			if ( ! is_array( $entries_file_data ) ) {
-				continue;
-			}
-			foreach ( $entries_file_data as $entry ) {
-				$entry_ids[] = $entry['id'];
-			}
-		}
-		// Save CSV entry IDs to /Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv
-		$csv_file = '/Users/ivanuravic/www/newhavenindependent/app/public/00_initialJsonBuiltinExport/automated_manual_exports/puppeteer-automation/entry_ids_p1-p672.csv';
-		$csv_file_handle = fopen( $csv_file, 'w' );
-		fputcsv( $csv_file_handle, [ 'entry_id' ] );
-		foreach ( $entry_ids as $entry_id ) {
-			fputcsv( $csv_file_handle, [ $entry_id ] );
-		}
-		fclose( $csv_file_handle );
-		exit;
+		// Get all posts authors.
+		$posts_ids        = $this->posts->get_all_posts_ids();
+		$authors_user_ids = [];
+		foreach ( $posts_ids as $post_id ) {
+			$coauthors = $this->coauthors->get_all_authors_for_post( $post_id );
+			if ( ! empty( $coauthors ) ) {
+				foreach ( $coauthors as $coauthor ) {
+					$class_name = get_class( $coauthor );
 
-		// phpcs:enable
+					// Should NOT happen, we're only using WP_User coauthors. Exit if it does. Though it won't.
+					if ( 'WP_User' !== $class_name ) {
+						$this->logger->error( sprintf( 'ERROR post ID %d, coauthor ID %d, class name %s is not a WP_User', $post_id, esc_attr( $coauthor->ID ), esc_attr( $class_name ) ) );
+						exit;
+					}
+					$authors_user_ids[ $coauthor->ID ] = true;
+				}
+			}
+			$author_id                      = $wpdb->get_var( $wpdb->prepare( 'SELECT post_author FROM wp_posts WHERE ID = %d', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			$authors_user_ids[ $author_id ] = true;
+		}
+
+		// Diff post author IDs against all users IDs.
+		$user_rows          = $wpdb->get_results( 'SELECT ID FROM wp_users', ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		$obsolete_users_ids = [];
+		foreach ( $user_rows as $user_row ) {
+			if ( ! isset( $authors_user_ids[ $user_row['ID'] ] ) ) {
+				$obsolete_users_ids[] = $user_row['ID'];
+			}
+		}
+
+		// Log obsolete users.
+		$log_users_obsolete = 'users_obsolete__not_authors.txt';
+		if ( file_exists( $log_users_obsolete ) ) {
+			unlink( $log_users_obsolete ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		file_put_contents( $log_users_obsolete, 'user_id,display_name' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+		foreach ( $obsolete_users_ids as $obsolete_user_id ) {
+			$display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $obsolete_user_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			file_put_contents( $log_users_obsolete, $obsolete_user_id . ',' . $display_name . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+		}
+		WP_CLI::log( sprintf( 'Found %d obsolete users. IDs saved to %s .', count( $obsolete_users_ids ), $log_users_obsolete ) );
+
+
+
+		/**
+		 * Bylines are also saved as usermetas.
+		 * => wp_usermeta, meta_key is \Newspack\MigrationTools\Logic\UsersHelper::UNIQUE_IDENTIFIER_META_KEY ('_nmt_user_uniqid')
+		 * a) $wp_user_unique_identifier = 'newspack_migration_byline ' . $byline['name'];
+		 *      - if there's a $byline['user_id'], save it as usermeta.
+		 *          update_user_meta( $wp_user->ID, 'newspack_migration_byline_user_id', $byline['user_id'] );
+		 * b) $wp_user_unique_identifier = 'newspack_migration_author_id ' . $author['id'];
+		 */
+	}
+
+	/**
+	 * Get user by display name, or create it. Skip unique ID metas.
+	 * 
+	 * @param string $display_name The display name.
+	 * @return ?int|WP_Error The user ID, or WP_Error if there was an error.
+	 */
+	private function get_or_create_user_by_display_name( string $display_name ): int|WP_Error {
+		global $wpdb;
+
+		// Get existing user by display name.
+		$user_id = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM wp_users WHERE display_name = %s', $display_name ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		
+		// Create user.
+		if ( ! $user_id ) {
+			// User creation according to \Newspack\MigrationTools\Logic\UsersHelper logic.
+			$user_data  = [
+				'display_name' => $display_name,
+				'user_login'   => $this->users->get_unused_username( sanitize_user( $display_name, true ) ),
+			];
+			$user_email = $this->users::get_short_sha_from_array( $user_data ) . '@' . apply_filters( 'nmt_user_email_default_domain', 'example.com' );
+			$user_email = $this->users::get_unused_fake_email( $user_email );
+			$user_data  = array_merge(
+				$user_data,
+				[
+					'user_pass'  => wp_generate_password(),
+					'user_email' => $user_email,
+					'role'       => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
+				] 
+			);
+
+			// Create user.
+			$user_id = wp_insert_user( $user_data );
+		}
+
+		return $user_id;
+	}
+
+	/**
+	 * Explode a byline string into individual names using multiple separators.
+	 * 
+	 * @param string $byline The byline string to explode.
+	 * @param array  $separators One or multiple separators characters to explode by.
+	 * @return array The exploded byline parts.
+	 */
+	public function byline_explode( string $byline, array $separators ): array {
+		$bylines = [];
+
+		// Decode HTML entities.
+		$byline = html_entity_decode( html_entity_decode( $byline, ENT_QUOTES, 'UTF-8' ), ENT_QUOTES, 'UTF-8' );
+
+		// Use temporary custom separators to simplify logic without recursion.
+		$custom_separator = '{{SEPARATOR}}';
+		if ( str_contains( $byline, $custom_separator ) ) {
+			$custom_separator .= uniqid();
+		}
+		
+		// Replace all separators with the custom separator.
+		foreach ( $separators as $separator ) {
+			$byline = str_replace( $separator, $custom_separator, $byline );
+		}
+
+		// Explode by the custom separator.
+		$byline_parts = explode( $custom_separator, $byline );
+		foreach ( $byline_parts as $byline_part ) {
+			$bylines[] = trim( $byline_part );
+		}
+
+		return $bylines;
 	}
 
 	/**
