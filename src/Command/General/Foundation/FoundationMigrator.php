@@ -2101,7 +2101,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Strips style tags.
+	 * Strips style attributes from all tags.
 	 *
 	 * @param string $html The HTML content to process.
 	 * @return string The processed HTML content.
@@ -2121,13 +2121,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$allowed_tags = wp_kses_allowed_html( 'post' );
 
-		// Remove style attribute from p tags only.
-		if ( isset( $allowed_tags['p'] ) && isset( $allowed_tags['p']['style'] ) ) {
-			unset( $allowed_tags['p']['style'] );
+		// Remove style attribute from all tags.
+		foreach ( $allowed_tags as $tag => $attributes ) {
+			unset( $allowed_tags[ $tag ]['style'] );
 		}
 
 		// Process with wp_kses.
-		$html = wp_kses( $html, $allowed_tags );
+		$html = wp_kses( $html, $allowed_tags, wp_allowed_protocols() );
 
 		// Restore script tags.
 		foreach ( $script_placeholders as $placeholder => $script_tag ) {
