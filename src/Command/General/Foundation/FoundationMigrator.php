@@ -201,6 +201,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'repeating'   => false,
 					],
 					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'update-content',
 						'description' => 'Update the post content regardless of the difference.',
@@ -598,6 +605,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$audio_json_file     = $assoc_args['audio-json-file'];
 		$pdf_json_file       = $assoc_args['pdf-json-file'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
+		$start_from          = $assoc_args['start-from'] ?? 0;
 		$update_content      = $assoc_args['update-content'] ?? false;
 
 		$raw_posts               = $this->json_iterator->items( $post_json_file );
@@ -607,9 +615,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$skipped_posts  = [];
 
 		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < $start_from ) {
+				continue;
+			}
+
 			if ( ! $update_content && in_array( $post->oid, $all_migrated_posts_oids ) ) {
 				$skipped_posts[] = $post->oid;
-				$logger->info( sprintf( 'Skipping post %d because it has already been migrated', $post->oid ) );
+				$logger->info( sprintf( '[%d] Skipping post %d because it has already been migrated', $index + 1, $post->oid ) );
 				continue;
 			}
 
