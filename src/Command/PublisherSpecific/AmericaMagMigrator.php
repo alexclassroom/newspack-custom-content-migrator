@@ -20,13 +20,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post_tag', 'user' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post_tag', 'user' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
 	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
 	const META_KEY_PROCESSED_CONTENT_TYPE  = '_np_migration_processed_content_type';
-	const META_KEY_CLEANED_ITEM            = '_np_migration_cleaned_item';
+	const META_KEY_CLEANED_ITEM_SLUG       = '_np_migration_cleaned_item';
+
+	const STAGING_UPLOADS_SEARCH_STRING    = 'newspackstaging.com/wp-content/uploads/';
 
 	/**
      * WP allowed mime types.
@@ -237,12 +239,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
         // Run command.
         $this->logger->info( 'Running command: ' . $logger_slug );
                 
+		// Unique key per clean up.
+		$meta_key_cleaned_item = self::META_KEY_CLEANED_ITEM_SLUG . '-' . $pos_args[0];
+
         do {
 
             // Has json item from import, but not cleaned up.
             $meta_query = [
                 [
-                    'key'     => self::META_KEY_CLEANED_ITEM,
+                    'key'     => $meta_key_cleaned_item,
                     'compare' => 'NOT EXISTS',
                 ],
             ];
@@ -263,6 +268,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				case 'post':
                     $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
                     break;
+				case 'post-assets-merged':
+					$db_items = get_posts( [ 
+						'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query,
+						's' => self::STAGING_UPLOADS_SEARCH_STRING,
+						'search_columns' => [ 'post_content' ],
+					] );
+					break;
                 case 'user':
                     $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
@@ -282,27 +294,31 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                 switch( $pos_args[0] ) {
 					case 'attachment':
                         $this->clean_up_attachment( $db_id, $logger_slug );
-                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
 					case 'book_review':
                         $this->clean_up_book_review( $db_id, $logger_slug );
-                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
 					case 'category':
 						$this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
-						update_term_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+						update_term_meta( $db_id, $meta_key_cleaned_item, 'yes' );
 						break;	
 					case 'post':
                         $this->clean_up_post( $db_id, $logger_slug );
-                        update_post_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+                        break;
+					case 'post-assets-merged':
+                        $this->clean_up_post_assets_merged( $db_id, $logger_slug );
+                        update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
                     case 'user':
                         $this->clean_up_user( $db_id, $logger_slug );
-                        update_user_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        update_user_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
                     case 'post_tag':
                         $this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
-                        update_term_meta( $db_id, self::META_KEY_CLEANED_ITEM, 'yes' );
+                        update_term_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
                 }
 
@@ -884,7 +900,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	}
 
-		/**
+	/**
      * Clean up one post.
      */
     private function clean_up_post( int $post_id, $logger_slug ): void {
@@ -968,6 +984,162 @@ wp newspack-post-image-downloader import-images
         }
 
     }
+
+	/**
+     * Clean up one post with assets merged in content.
+     */
+    private function clean_up_post_assets_merged( int $post_id, $logger_slug ): void {
+
+		/*
+		[caption id="attachment_92625" align="alignleft" width="1619"]
+			<img class=" alignleft size-full wp-image-92625" 
+				alt="Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)"
+				data-align="left" data-caption="Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)"
+				data-entity-type="file" data-entity-uuid="8ce0db13-f593-4f04-8660-f14674195c43"
+				src="https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/2025/05/stranger-things.jpg" width="1619" height="1080" />
+				Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)
+		[/caption]
+		*/
+
+		global $wpdb;
+
+		// get asset urls from in the content.
+		$post_content = get_post_field( 'post_content', $post_id, 'raw' );
+
+		// matches: newspackstaging.com/wp-content/uploads/(path/file.ext) followed by quote (' or ").
+		preg_match_all( '/' . preg_quote( self::STAGING_UPLOADS_SEARCH_STRING, '/' ) . '([^\'"]+)/', $post_content, $attached_file_matches );
+
+		if( ! isset( $attached_file_matches[1] ) || empty( $attached_file_matches[1] ) ) {
+			$this->logger->error( 'Empty attached_file_matches.' );
+			exit();
+		}
+		
+		$this->logger->info( 'attached_file_matches count: ' . count( $attached_file_matches[1] ) );
+
+		// Loop through each file match
+		foreach( $attached_file_matches[1] as $file_match ) {
+			
+			$this->clean_up_post_assets_merged_lookup( $file_match );
+
+		}
+
+		// echo $post_content;
+
+		// $old_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
+		// $this->logger->info( 'Old node id: ' . $old_node_id );
+		
+		// $old_node_body = $wpdb->get_results( $wpdb->prepare( "
+		// 	SELECT body_value FROM node__body WHERE deleted = 0 AND entity_id = %d
+		// ", $old_node_id ) );
+		
+		// if( 1 !== count( $old_node_body ) ) {
+		// 	$this->logger->error( 'Node body more than one row.' );
+		// 	exit();
+		// }
+		// $old_node_body = reset( $old_node_body );
+
+		// echo \xdiff_string_diff( $old_node_body->body_value, $post_content );
+		
+		// exit();
+
+	}
+
+	private function clean_up_post_assets_merged_lookup( $file_match ): void {
+
+		global $wpdb;
+
+		$this->logger->info( '-- Finding: ' . $file_match );
+
+		// could be thumbnail so use meta data lookup.
+		$attachment_meta_results = $wpdb->get_col( $wpdb->prepare( "
+			SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attachment_metadata' 
+			AND (
+				meta_value LIKE %s
+				OR
+				meta_value LIKE %s
+			)
+			",
+			'%"' . $file_match . '"%', // full file
+			'%"' . basename( $file_match ) . '"%', // maybe thumbnail
+		));
+
+		if( 1 !== count( $attachment_meta_results ) ) {
+			$this->logger->error( 'Meta data results not one.' );
+			exit();
+		}
+
+		$attachment_id = reset( $attachment_meta_results );
+
+		$this->logger->info( 'Attachment id: ' . $attachment_id );
+
+		// Get attachment meta only if sanity check attached_file is same as meta file.
+		$attachment_metadata = $wpdb->get_var( $wpdb->prepare( "
+			select pm2.meta_value
+			from wp_postmeta pm
+			join wp_postmeta pm2 on pm2.post_id = pm.post_id and pm2.meta_key = '_wp_attachment_metadata' and pm2.meta_value like concat( '%\"', pm.meta_value, '\"%')
+			where pm.meta_key = '_wp_attached_file' and pm.post_id = %d
+			", $attachment_id
+		));
+
+		$attachment_metadata = unserialize( $attachment_metadata );
+
+		if( empty( $attachment_metadata ) ) {
+			$this->logger->error( 'File not match file for attachment.' );
+			exit();
+		}
+
+		// Extract the filesize
+		$wp_filesize = $attachment_metadata['filesize'] ?? 0;
+		
+		if( ! ( $wp_filesize > 0 ) ) {
+			$this->logger->error( 'Filesize not gt 0.' );
+			exit();
+		}
+
+		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
+
+		// Compare to drupal files managed.
+		$old_file = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+
+		if( empty( $old_file ) ) {
+			$this->logger->error( 'No old file.' );
+			exit();
+		}
+
+		$this->logger->info( 'Old file: ' . $old_file );
+
+		$old_uri      = parse_url( $old_file, PHP_URL_PATH );
+		$old_basename = basename( $old_uri );
+		
+		$old_uri = ltrim( $old_uri, '/' ); // some urls have double // in beginning.
+		$old_uri = str_replace( 'sites/default/files/', 'public://', $old_uri );
+
+		$this->logger->info( 'Old uri: ' . $old_uri );
+		$this->logger->info( 'Old basename: ' . $old_basename );
+
+		// get the file_managed from Drupal and compage the filesize
+		$file_managed_results = $wpdb->get_results( $wpdb->prepare( "
+			select fid, uuid
+			from file_managed
+			where status = 1
+			and filename = %s
+			and uri = %s
+			and filesize = %d
+			",
+			$old_basename,
+			$old_uri,
+			$wp_filesize
+		));
+		
+		// todo: verify fid in file_usage? and uuid in node__body.body_value?
+		if( 1 !== count( $file_managed_results ) ) {
+			$this->logger->error( 'File managed results not 1.' );
+			exit();
+		}
+
+		$this->logger->info( 'File managed matched --' );
+
+	}
 
     /**
      * Clean up one term using verified (checksum) json_item.
