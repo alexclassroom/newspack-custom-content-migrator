@@ -1718,7 +1718,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$obsolete_users_ids = [];
 		foreach ( $user_rows as $user_row ) {
 			// Skip adminnewspack user.
-			if ( $adminnewspack_user_id == $coauthor->ID ) {
+			if ( $adminnewspack_user_id == $user_row['ID'] ) {
 				continue;
 			}
 
