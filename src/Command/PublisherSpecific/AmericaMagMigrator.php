@@ -705,12 +705,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/**
      * Clean up one attachment
      */
-    private function clean_up_attachment( int $attachment_id, $logger_slug ): void {
+	private function clean_up_attachment( int $attachment_id, $logger_slug ): void {
+
+		// $this->clean_up_attachment_capitalized_exts( $attachment_id, $logger_slug );
+		
+		$this->clean_up_attachment_merged_images( $attachment_id, $logger_slug );
+
+	}
+    
+	private function clean_up_attachment_capitalized_exts( int $attachment_id, $logger_slug ): void {
 
 		// Look for mismatches where the filename or the original_image name are capitized.
 		// Only required for images, where thumbnails ("sizes") exist, because this is there the mismatch happens.
 		if( ! wp_attachment_is_image( $attachment_id ) ) {
-			$this->logger->info( 'Not image.' );
+			$this->logger->info( 'CapExt: Not image.' );
 			return;
 		}
 
@@ -719,20 +727,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// If there there are no sizes, then return, since their won't be a mis-match anyway.
 		// can an image not have sizes?
 		if( ! isset( $wp_attachment_metadata['sizes'] ) ) {
-			$this->logger->warning( 'No sizes key?' );	
+			$this->logger->warning( 'CapExt: No sizes key?' );	
 			return;
 		}
 
 		// Sanity: verify file key exists.  Can an image not have a file key?
 		if( ! isset( $wp_attachment_metadata['file'] ) ) {
-			$this->logger->warning( 'No metadata file key?' );	
+			$this->logger->warning( 'CapExt: No metadata file key?' );	
 			return;
 		}
 		
 		// Get attachment file.
 		$wp_attached_file = trim( get_post_meta( $attachment_id, '_wp_attached_file', true ) );
 		if( 0 === strlen( $wp_attached_file ) ) {
-			$this->logger->warning( 'No postmeta attachment file?' );
+			$this->logger->warning( 'CapExt: No postmeta attachment file?' );
 			return;
 		}
 		
@@ -740,7 +748,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		
 		// Sanity check file entries match.
 		if( $wp_attachment_metadata['file'] !== $wp_attached_file ) {
-			$this->logger->warning( 'File mismatch?' );
+			$this->logger->warning( 'CapExt: File mismatch?' );
 			return;
 		}
 
@@ -751,7 +759,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// Check if we need to fix the main file image.
 		if( preg_match( '/\.([A-Z]+)$/', $wp_attached_file, $matches ) ) {
-			$this->logger->info( 'Fixing attached file.' );
+			$this->logger->info( 'CapExt: Fixing attached file.' );
 			// Clean up using the full disk path.
 			$this->clean_up_attachment_rename_file( get_attached_file( $attachment_id, true ), $matches[1] );
 		}
@@ -759,9 +767,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// Check if we need to fix the original image.
 		if( isset( $wp_attachment_metadata['original_image'] ) ) {
-			$this->logger->info( 'Original image file: ' . $wp_attachment_metadata['original_image'] );
+			$this->logger->info( 'CapExt: Original image file: ' . $wp_attachment_metadata['original_image'] );
 			if( preg_match( '/\.([A-Z]+)$/', $wp_attachment_metadata['original_image'], $matches ) ) {
-				$this->logger->info( 'Fixing original image file.' );
+				$this->logger->info( 'CapExt: Fixing original image file.' );
 				// Clean up using the full disk path.
 				$this->clean_up_attachment_rename_file( wp_get_original_image_path( $attachment_id, true ), $matches[1] );
 			}
@@ -772,25 +780,42 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	}
 
+	private function clean_up_attachment_merged_images( int $attachment_id, $logger_slug ): void {
+
+		$related_podcast = get_post_meta( $attachment_id, 'related_podcast', true );
+		$related_video = get_post_meta( $attachment_id, 'related_video', true );
+		
+		if( empty( $related_podcast ) && empty( $related_video ) ) return;
+
+		var_dump( $related_podcast );
+		var_dump( $related_video );
+		
+		exit();
+		
+
+
+
+	}
+
 	private function clean_up_attachment_rename_file( $full_disk_path, $old_ext ) {
 
-		$this->logger->info( 'Full path: ' . $full_disk_path );
+		$this->logger->info( 'RenameFile: Full path: ' . $full_disk_path );
 		
 		if ( ! file_exists( $full_disk_path ) ) {
-			$this->logger->warning( 'Full file path not exits?' );
+			$this->logger->warning( 'RenameFile: Full file path not exits?' );
 			return false;
 		}
 
 		// Replace the extension at the end of the path.
 		$new_path = preg_replace( '/\.[^.]+$/', strtolower( $old_ext ), $full_disk_path );
 		
-		$this->logger->info( 'New file: ' . $new_path );
+		$this->logger->info( 'RenameFile: New file: ' . $new_path );
 		if ( file_exists( $new_path ) ) {
-			$this->logger->warning( 'New file already exists?' );
+			$this->logger->warning( 'RenameFile: New file already exists?' );
 			return false;
 		}
 
-		$this->logger->info( 'Attempting rename.' );
+		$this->logger->info( 'RenameFile: Attempting rename.' );
 
 		// Rename the file on the filesystem
 		// if ( ! rename( $full_disk_path, $new_path ) ) {
@@ -863,6 +888,30 @@ class AmericaMagMigrator implements RegisterCommandInterface {
      * Clean up one post.
      */
     private function clean_up_post( int $post_id, $logger_slug ): void {
+
+
+		// in content assets that were merged?
+		
+
+
+
+
+
+		// Move `image_caption` to featured image caption (post_excerpt).
+		
+
+// images were combined into one filename!!!
+// remove all media!
+// remove references in:
+	// usermeta key simple_local_avatars
+	// postmeta key podcast_description - reset from Node content??
+	// post: post_excerpt (a few have "src"), 
+// what about PDFs too?  AVI, mp3, mov? etc....
+
+
+
+
+
 
 /* 
 wp newspack-post-image-downloader import-images
