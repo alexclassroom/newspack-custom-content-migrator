@@ -1387,6 +1387,14 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Remove the newspack-plugin's delete_user action.
+	 * newspack-plugin presently throws a fatal during user deletion in case where \WC_Customer class is not present, and this removes the fatal.
+	 */
+	public function remove_newspack_plugin_delete_user_action() {
+		remove_action( 'delete_user', [ 'Newspack\Data_Events\Connectors\ESP_Connector', 'store_user_data_before_deletion' ], 5 );
+	}
+	
+	/**
 	 * Parse bylines saved as meta more accurately in NHI's DB, and reassign authors for those specific bylines.
 	 * 
 	 * This is a test command to help with the migration.
@@ -1404,15 +1412,19 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		$this->setup_logger( __FUNCTION__ );
 
 		global $wpdb;
+		
+		// Adminnewspack user is used just for debugging purposes, a double check: when dupe obsolete users are deleted, we will assign any of their content to this user; the tally should be 0 new objects on adminnewspack, if obsolte users were correctly consolidated and deleted.
+		$adminnewspack_user_id = $wpdb->get_var( $wpdb->prepare( 'SELECT ID FROM wp_users WHERE user_login = %s', 'adminnewspack' ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		if ( is_null( $adminnewspack_user_id ) ) {
+			$this->logger->error( 'ERROR adminnewspack user not found.' );
+			exit;
+		}
 
 
 		/**
-		 * Step 1/3.
+		 * Step 1.
 		 * Assign authors from bylines to posts.
 		 */
-		WP_CLI::log( '=== Step 1/3.' );
-		WP_CLI::log( 'Assigning authors from bylines to posts...' );
-
 		// Prepare log with assigned bylines authors.
 		$csv_postmeta_bylines_all = 'postmeta_bylines_all__custom_separator.csv';
 		if ( file_exists( $csv_postmeta_bylines_all ) ) {
@@ -1420,11 +1432,12 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 		$csv_custom_separator = '|||';
 		file_put_contents( $csv_postmeta_bylines_all, 'post_id' . $csv_custom_separator . 'byline' . $csv_custom_separator . 'names' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
-
+		
 		// Get bylines -- saved as postmetas, meta_key 'newspack_migration_legacy_byline'.
 		$postmeta_rows = $wpdb->get_results( $wpdb->prepare( 'SELECT post_id, meta_value FROM wp_postmeta WHERE meta_key = %s and meta_value <> %s', 'newspack_migration_legacy_byline', 'a:0:{}' ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+		WP_CLI::log( '=== Step 1.' );
+		WP_CLI::log( sprintf( 'Exploding bylines and assigning authors and coauthors to posts, total %d postmetas...', count( $postmeta_rows ) ) );
 		foreach ( $postmeta_rows as $key_postmeta_row => $postmeta_row ) {
-			WP_CLI::log( sprintf( '(%d)/(%d) postmeta', $key_postmeta_row, count( $postmeta_rows ) ) );
 			$post_id      = $postmeta_row->post_id;
 			$bylines_data = unserialize( $postmeta_row->meta_value ); // phpcs:ignore -- WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize.
 			foreach ( $bylines_data as $byline_data ) {
@@ -1511,7 +1524,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		WP_CLI::log( sprintf( 'See %s', $csv_postmeta_bylines_all ) );
 
 
-
 		/**
 		 * Step 2/3.
 		 * Consolidate multiple WP_Users with same display names into single ones. During imported multiple users with same display names got created because:
@@ -1519,10 +1531,10 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 * - entries were imported chronologically, and author might have first existed as byline, and only then "promoted" to real author object
 		 * - actual duplicate authors exist in old system, this will consolidate them
 		 */
-		WP_CLI::log( '=== Step 2/3.' );
+		WP_CLI::log( '=== Step 2.' );
 		WP_CLI::log( 'Consolidating multiple WP_Users with same display names into single ones...' );
 
-		WP_CLI::log( '- getting list of consolidated and rejected users...' );
+		WP_CLI::log( '- getting list of consolidated and duplicate users...' );
 		// Get multiple WP_Users with same display_name.
 		$users_by_display_name       = [];
 		$display_names_multiple_rows = $wpdb->get_results( 'SELECT display_name, count(display_name) total FROM wp_users group by display_name having total > 1;', ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
@@ -1579,7 +1591,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 
 
 		// Replace post authorship from rejected ones to the consolidated user.
-		WP_CLI::log( '- updating post authorship from rejected ones to the consolidated user...' );
 		// Prepare log updated post_author.
 		$log_post_authors_update = 'updated_post_authors.csv';
 		if ( file_exists( $log_post_authors_update ) ) {
@@ -1594,6 +1605,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		file_put_contents( $log_post_coauthors_update, 'post_id,post_authors_ids,post_authors_display_names,consolidated_post_authors_ids,consolidated_post_authors_display_names' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
 
 		$posts_ids = $this->posts->get_all_posts_ids();
+		WP_CLI::log( sprintf( '- consolidating post authorship for %d posts...', count( $posts_ids ) ) );
 		foreach ( $posts_ids as $post_id ) {
 
 			/**
@@ -1620,7 +1632,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 				$consolidated_post_author_display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $consolidated_post_author ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 				file_put_contents( $log_post_authors_update, $post_id . ',' . $post_author . ',' . $post_author_display_name . ',' . $consolidated_post_author . ',' . $consolidated_post_author_display_name . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
 			}
-
 
 			/**
 			 * Consolidate post coauthorship.
@@ -1677,22 +1688,24 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	   
 
 		/**
-		 * Step 3/3.
-		 * Get obsolete users which can be deleted.
+		 * Step 3.
+		 * Get and delete duplicate obsolete users which can be deleted.
 		 */
-		WP_CLI::log( '=== Step 3/3.' );
-		WP_CLI::log( 'Locating obsolete users -- WP_Users which are not authors of any posts...' );
-
 		// Get all posts authors.
-		$posts_ids        = $this->posts->get_all_posts_ids();
 		$authors_user_ids = [];
+		$posts_ids        = $this->posts->get_all_posts_ids();
+		WP_CLI::log( '=== Step 3.' );
+		WP_CLI::log( sprintf( 'Deleting duplicate users (WP_Users which are not authors of any posts), total %d posts...', count( $posts_ids ) ) );
 		foreach ( $posts_ids as $post_id ) {
 			$coauthors = $this->coauthors->get_all_authors_for_post( $post_id );
 			if ( ! empty( $coauthors ) ) {
 				foreach ( $coauthors as $coauthor ) {
-					$class_name = get_class( $coauthor );
-
+					if ( $adminnewspack_user_id == $coauthor->ID ) {
+						continue;
+					}
+					
 					// Should NOT happen, we're only using WP_User coauthors. Exit if it does. Though it won't.
+					$class_name = get_class( $coauthor );
 					if ( 'WP_User' !== $class_name ) {
 						$this->logger->error( sprintf( 'ERROR post ID %d, coauthor ID %d, class name %s is not a WP_User', $post_id, esc_attr( $coauthor->ID ), esc_attr( $class_name ) ) );
 						exit;
@@ -1714,17 +1727,25 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		}
 
 		// Log obsolete users.
+		WP_CLI::log( sprintf( 'Deleting %d obsolete users (may take a while)...', count( $obsolete_users_ids ) ) );
+		// Prepare log.
 		$log_users_obsolete = 'users_obsolete__not_authors.txt';
 		if ( file_exists( $log_users_obsolete ) ) {
 			unlink( $log_users_obsolete ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
 		}
 		file_put_contents( $log_users_obsolete, 'user_id,display_name' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+		// Remove plugin newspack-plugin's delete_user action to allow successful user deletion.
+		$this->remove_newspack_plugin_delete_user_action();
 		foreach ( $obsolete_users_ids as $obsolete_user_id ) {
 			$display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $obsolete_user_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 			file_put_contents( $log_users_obsolete, $obsolete_user_id . ',' . $display_name . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
+			$deleted = wp_delete_user( $obsolete_user_id, $adminnewspack_user_id );
+			if ( false === $deleted ) {
+				$this->logger->error( sprintf( 'ERROR deleting user ID %d: %s', $obsolete_user_id, $wpdb->last_error ) );
+				continue;
+			}
 		}
 		WP_CLI::log( sprintf( 'Found %d obsolete users. IDs saved to %s .', count( $obsolete_users_ids ), $log_users_obsolete ) );
-
 
 
 		/**
