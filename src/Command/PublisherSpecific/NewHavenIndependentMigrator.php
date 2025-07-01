@@ -1692,42 +1692,43 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		 * Get and delete duplicate obsolete users which can be deleted.
 		 */
 		// Get all posts authors.
-		$authors_user_ids = [];
-		$posts_ids        = $this->posts->get_all_posts_ids();
+		$all_authors_user_ids = [];
+		$posts_ids            = $this->posts->get_all_posts_ids();
 		WP_CLI::log( '=== Step 3.' );
 		WP_CLI::log( sprintf( 'Deleting duplicate users (WP_Users which are not authors of any posts), total %d posts...', count( $posts_ids ) ) );
 		foreach ( $posts_ids as $post_id ) {
 			$coauthors = $this->coauthors->get_all_authors_for_post( $post_id );
 			if ( ! empty( $coauthors ) ) {
 				foreach ( $coauthors as $coauthor ) {
-					if ( $adminnewspack_user_id == $coauthor->ID ) {
-						continue;
-					}
-					
-					// Should NOT happen, we're only using WP_User coauthors. Exit if it does. Though it won't.
+					// Should NOT happen as we're only using WP_User coauthors. Exit if it does. Though it won't.
 					$class_name = get_class( $coauthor );
 					if ( 'WP_User' !== $class_name ) {
 						$this->logger->error( sprintf( 'ERROR post ID %d, coauthor ID %d, class name %s is not a WP_User', $post_id, esc_attr( $coauthor->ID ), esc_attr( $class_name ) ) );
 						exit;
 					}
-					$authors_user_ids[ $coauthor->ID ] = true;
+					$all_authors_user_ids[ $coauthor->ID ] = true;
 				}
 			}
-			$author_id                      = $wpdb->get_var( $wpdb->prepare( 'SELECT post_author FROM wp_posts WHERE ID = %d', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
-			$authors_user_ids[ $author_id ] = true;
+			$author_id                          = $wpdb->get_var( $wpdb->prepare( 'SELECT post_author FROM wp_posts WHERE ID = %d', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
+			$all_authors_user_ids[ $author_id ] = true;
 		}
 
-		// Diff post author IDs against all users IDs.
+		// Diff post author IDs against all users IDs to get obsolete ones.
 		$user_rows          = $wpdb->get_results( 'SELECT ID FROM wp_users', ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 		$obsolete_users_ids = [];
 		foreach ( $user_rows as $user_row ) {
-			if ( ! isset( $authors_user_ids[ $user_row['ID'] ] ) ) {
+			// Skip adminnewspack user.
+			if ( $adminnewspack_user_id == $coauthor->ID ) {
+				continue;
+			}
+
+			if ( ! isset( $all_authors_user_ids[ $user_row['ID'] ] ) ) {
 				$obsolete_users_ids[] = $user_row['ID'];
 			}
 		}
 
 		// Log obsolete users.
-		WP_CLI::log( sprintf( 'Deleting %d obsolete users (may take a while)...', count( $obsolete_users_ids ) ) );
+		WP_CLI::log( sprintf( 'Deleting %d obsolete users...', count( $obsolete_users_ids ) ) );
 		// Prepare log.
 		$log_users_obsolete = 'users_obsolete__not_authors.txt';
 		if ( file_exists( $log_users_obsolete ) ) {
@@ -1736,16 +1737,19 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		file_put_contents( $log_users_obsolete, 'user_id,display_name' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
 		// Remove plugin newspack-plugin's delete_user action to allow successful user deletion.
 		$this->remove_newspack_plugin_delete_user_action();
+		$number_users_before_deletion = count( get_users() );
 		foreach ( $obsolete_users_ids as $obsolete_user_id ) {
 			$display_name = $wpdb->get_var( $wpdb->prepare( 'SELECT display_name FROM wp_users WHERE ID = %d', $obsolete_user_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.
 			file_put_contents( $log_users_obsolete, $obsolete_user_id . ',' . $display_name . PHP_EOL, FILE_APPEND ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_file_put_contents.
-			$deleted = wp_delete_user( $obsolete_user_id, $adminnewspack_user_id );
-			if ( false === $deleted ) {
-				$this->logger->error( sprintf( 'ERROR deleting user ID %d: %s', $obsolete_user_id, $wpdb->last_error ) );
-				continue;
-			}
+			@wp_delete_user( $obsolete_user_id, $adminnewspack_user_id ); // phpcs:ignore -- though disabling output is never recommended, in this case CAP doesn't handle its term deletion safely and pollutes output with warnings. Though handling the return from wp_delete_user() would normally be the standard and prefered way to validate success, we're instead counting users before and after deletion to confirm success.
 		}
-		WP_CLI::log( sprintf( 'Found %d obsolete users. IDs saved to %s .', count( $obsolete_users_ids ), $log_users_obsolete ) );
+		$number_users_after_deletion          = count( get_users() );
+		$expected_number_users_after_deletion = $number_users_before_deletion - count( $obsolete_users_ids );
+		if ( $number_users_after_deletion == $expected_number_users_after_deletion ) {
+			WP_CLI::log( sprintf( 'Total %d obsolete users were deleted. Though they should have no content, just in case their content was attributed to adminnewspack -- check this user for count of authored content. Deleted user IDs saved to %s .', count( $obsolete_users_ids ), $log_users_obsolete ) );
+		} else {
+			WP_CLI::log( sprintf( 'ERROR Not all of the %d obsolete users were successfully deleted! Users before deletion %d, users after deletion %d. Check log %s for obsolete user IDs .', count( $obsolete_users_ids ), $number_users_before_deletion, $number_users_after_deletion, $log_users_obsolete ) );
+		}
 
 
 		/**
