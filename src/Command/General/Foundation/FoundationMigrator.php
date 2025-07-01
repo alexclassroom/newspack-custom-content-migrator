@@ -389,8 +389,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Migrates Foundation taxonomies received from their export.
-	 * Callable for 'newspack-content-migrator foundation-migrate-taxonomies' command.
+	 * Migrates Foundation categories received from their export.
+	 * Callable for 'newspack-content-migrator foundation-migrate-categories' command.
 	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
@@ -400,16 +400,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$category_json_file = $assoc_args['category-json-file'];
 
-		$logger->info( sprintf( 'Migrating taxonomies from %s', $category_json_file ) );
+		$logger->info( sprintf( 'Migrating categories from %s', $category_json_file ) );
 
 		$raw_sections   = $this->json_iterator->filtered_items( $category_json_file, 'class', 'Section' );
 		$raw_categories = $this->json_iterator->filtered_items( $category_json_file, 'class', 'Category' );
+		$raw_topics     = $this->json_iterator->filtered_items( $category_json_file, 'class', 'Topic' );
 
 		$migrated_sections   = [];
 		$migrated_categories = [];
+		$migrated_topics     = [];
 
 		// Migrate sections (main categories).
 		foreach ( $raw_sections as $section ) {
+			// TODO: Migrate section image as part of the section description.
 			$migrated_section = $this->taxonomy_logic->get_or_create_category(
 				[
 					'cat_name'             => $section->name,
@@ -427,6 +430,28 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$migrated_sections[ $section->oid ] = $migrated_section;
 			$logger->info( sprintf( 'Migrated section %s with ID %d', $section->name, $migrated_section ) );
+		}
+
+		// Migrate topics.
+		foreach ( $raw_topics as $topic ) {
+			// TODO: Migrate topic image as part of the topic description.
+			$migrated_topic = $this->taxonomy_logic->get_or_create_category(
+				[
+					'cat_name'             => $topic->name,
+					'category_description' => $topic->description,
+					'category_nicename'    => $topic->id,
+					'category_parent'      => 0,
+				],
+				$topic->oid
+			);
+
+			if ( is_wp_error( $migrated_topic ) ) {
+				$logger->error( sprintf( 'Error migrating topic %s: %s', $topic->name, $migrated_topic->get_error_message() ) );
+				continue;
+			}
+
+			$migrated_topics[ $topic->oid ] = $migrated_topic;
+			$logger->info( sprintf( 'Migrated topic %s with ID %d', $topic->name, $migrated_topic ) );
 		}
 
 		// Migrate categories.
@@ -461,7 +486,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$logger->info( sprintf( 'Migrated category %s with ID %d', $category->name, $migrated_category ) );
 		}
 
-		$logger->info( sprintf( 'Migrated %d sections and %d categories', count( $migrated_sections ), count( $migrated_categories ) ) );
+		$logger->info( sprintf( 'Migrated %d sections, %d topics and %d categories', count( $migrated_sections ), count( $migrated_topics ), count( $migrated_categories ) ) );
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 	}
 

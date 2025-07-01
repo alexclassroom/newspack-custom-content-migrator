@@ -153,10 +153,12 @@ class FoundationDataValidation implements RegisterCommandInterface {
 		$tags_count       = 0;
 
 		foreach ( $categories as $category ) {
-			if ( in_array( $category->class, [ 'Category', 'Section' ], true ) ) {
+			if ( in_array( $category->class, [ 'Category', 'Section', 'Topic' ], true ) ) {
 				++$categories_count;
-			} elseif ( 'Tag' === $category['class'] ) {
+			} elseif ( 'Tag' === $category->class ) {
 				++$tags_count;
+			} else {
+				$this->logger->warning( sprintf( 'Found category with unknown class: %s', $category->class ) );
 			}
 		}
 
