@@ -412,7 +412,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate sections (main categories).
 		foreach ( $raw_sections as $section ) {
-			// TODO: Migrate section image as part of the section description.
 			$migrated_section = $this->taxonomy_logic->get_or_create_category(
 				[
 					'cat_name'             => $section->name,
@@ -434,7 +433,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate topics.
 		foreach ( $raw_topics as $topic ) {
-			// TODO: Migrate topic image as part of the topic description.
 			$migrated_topic = $this->taxonomy_logic->get_or_create_category(
 				[
 					'cat_name'             => $topic->name,
@@ -466,7 +464,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 				}
 			}
 
-			// TODO: Migrate category image as part of the category description.
 			$migrated_category = $this->taxonomy_logic->get_or_create_category(
 				[
 					'cat_name'             => $category->name,
@@ -609,7 +606,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$migrated_posts = [];
 		$skipped_posts  = [];
 
-		foreach ( $raw_posts as $post ) {
+		foreach ( $raw_posts as $index => $post ) {
 			if ( ! $update_content && in_array( $post->oid, $all_migrated_posts_oids ) ) {
 				$skipped_posts[] = $post->oid;
 				$logger->info( sprintf( 'Skipping post %d because it has already been migrated', $post->oid ) );
@@ -623,7 +620,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Check if the post has non migrated authors.
 			if ( count( $mapped_authors ) !== count( array_unique( $post->authors ) ) ) {
-				$logger->error( sprintf( 'Skipping post %d because it has non migrated authors: %s', $post->oid, implode( ', ', array_diff( $post->authors, array_keys( $mapped_authors ) ) ) ) );
+				$logger->error( sprintf( '[%d] Skipping post %d because it has non migrated authors: %s', $index + 1, $post->oid, implode( ', ', array_diff( $post->authors, array_keys( $mapped_authors ) ) ) ) );
 				continue;
 			}
 
@@ -726,7 +723,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$csv_writer->put( [ $post->oid, $migrated_post_id, 'https://' . $publisher_domain . $post->permalink, get_permalink( $migrated_post_id ) ] );
 
-			$logger->info( sprintf( 'Migrated post %d with ID %d', $post->oid, $migrated_post_id ) );
+			$logger->info( sprintf( '[%d] Migrated post %d with ID %d', $index + 1, $post->oid, $migrated_post_id ) );
 		}
 
 		$logger->info( sprintf( 'Skipped %d posts because they have already been migrated.', count( $skipped_posts ) ) );
