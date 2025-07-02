@@ -28,8 +28,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	const META_KEY_PROCESSED_CONTENT_TYPE  = '_np_migration_processed_content_type';
 	const META_KEY_CLEANED_ITEM_SLUG       = '_np_migration_cleaned_item';
 
-	const STAGING_UPLOADS_SEARCH_STRING    = 'newspackstaging.com/wp-content/uploads/';
-
+	const STAGING_UPLOADS_URL              = 'https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/';
+	
 	/**
      * WP allowed mime types.
      *
@@ -271,7 +271,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				case 'post-assets-merged':
 					$db_items = get_posts( [ 
 						'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query,
-						's' => self::STAGING_UPLOADS_SEARCH_STRING,
+						's' => self::STAGING_UPLOADS_URL,
 						'search_columns' => [ 'post_content' ],
 					] );
 					break;
@@ -1006,8 +1006,8 @@ wp newspack-post-image-downloader import-images
 		// get asset urls from in the content.
 		$post_content = get_post_field( 'post_content', $post_id, 'raw' );
 
-		// matches: newspackstaging.com/wp-content/uploads/(path/file.ext) followed by quote (' or ").
-		preg_match_all( '/' . preg_quote( self::STAGING_UPLOADS_SEARCH_STRING, '/' ) . '([^\'"]+)/', $post_content, $attached_file_matches );
+		// matches: ...newspackstaging.com/wp-content/uploads/(path/file.ext) followed by quote (' or ").
+		preg_match_all( '/' . preg_quote( self::STAGING_UPLOADS_URL, '/' ) . '([^\'"]+)/', $post_content, $attached_file_matches );
 
 		if( ! isset( $attached_file_matches[1] ) || empty( $attached_file_matches[1] ) ) {
 			$this->logger->error( 'Empty attached_file_matches.' );
@@ -1090,12 +1090,12 @@ wp newspack-post-image-downloader import-images
 
 			$attachment_id = reset( $results );
 
-			// Sanity checks.
+			// Sanity checks, thumbnail path must start with attached file path.  2025/12/ <=> 2025/12/
 			$results = $wpdb->get_var( $wpdb->prepare( "
 				SELECT 'yes' FROM $wpdb->postmeta WHERE post_id = %d and meta_key = '_wp_attached_file' and meta_value LIKE %s
 				",
 				$attachment_id,
-				dirname( $lookup_file_with_path ) . '%', // path portion.
+				dirname( $lookup_file_with_path ) . '/%', // path portion with trailing slash.
 			));
 
 			if( 'yes' !== $results ) {
@@ -1123,16 +1123,6 @@ wp newspack-post-image-downloader import-images
 				return;
 			}
 
-			// Extract the filesize
-			$wp_filesize = $attachment_metadata['filesize'] ?? 0;
-			
-			if( ! ( $wp_filesize > 0 ) ) {
-				$this->logger->error( 'Filesize not gt 0.' );
-				exit();
-			}
-
-			$this->logger->info( 'wp_filesize: ' . $wp_filesize );
-
 		}
 
 		// Compare to drupal files managed.
@@ -1155,6 +1145,8 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'Old basename: ' . $old_basename );
 
 		// get the file_managed from Drupal and compage the filesize
+		$wpdb->charset = 'utf8mb4';
+		$wpdb->collate = 'utf8mb4_general_ci';
 		$results = $wpdb->get_results( $wpdb->prepare( "
 			select fid, uuid, filesize
 			from file_managed
@@ -1178,10 +1170,32 @@ wp newspack-post-image-downloader import-images
 
 		$file_managed = reset( $results );
 
-		var_dump( $file_managed );
-
 		// compare filesize too.
-		if( isset( $wp_filesize ) && $wp_filesize !== (int) $file_managed->filesize ) {
+		$wp_filesize = 0;
+
+		// Use original image since this will match to drupal.
+		if( isset( $attachment_metadata['original_image'] ) ) {
+			// On local dev, we dont have physical files, so fetch from staging.
+			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . dirname( $lookup_file_with_path ) . '/' . $attachment_metadata['original_image'] );
+		}
+		// there is no original image so just use the attached file size if exits.
+		else if( isset( $attachment_metadata['filesize'] ) ) {
+			$wp_filesize = $attachment_metadata['filesize'];
+		}
+		// directly fetch the file size, for pdfs, etc...
+		else {
+			// On local dev, we dont have physical files, so fetch from staging.
+			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . '/' . $lookup_file_with_path );
+		}
+
+		if( ! ( $wp_filesize > 0 ) ) {
+			$this->logger->error( 'Filesize not gt 0.' );
+			exit();
+		}
+
+		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
+		
+		if( $wp_filesize !== (int) $file_managed->filesize ) {
 			$this->logger->error( 'File size mismatch.' );
 			exit();
 		}
@@ -2021,6 +2035,23 @@ wp newspack-post-image-downloader import-images
 	}
 
 	/************************************
+	  UTILS
+	************************************/
+
+	function util_get_remote_image_filesize( $url ) {
+		echo $url;
+		$response = wp_remote_head( $url );
+		if ( is_wp_error( $response ) ) {
+			return 0;
+		}
+		$headers = wp_remote_retrieve_headers( $response );
+		if ( isset( $headers['content-length'] ) ) {
+			return (int) $headers['content-length']; // size in bytes
+		}
+		return 0;
+	}
+
+	/************************************
 	  VALIDATIONS
 	************************************/
 
@@ -2075,6 +2106,5 @@ wp newspack-post-image-downloader import-images
             WP_CLI::error( 'Positional argument must be one of: ' . implode( ', ', self::ITEM_TYPES ), true );
         }
     }
-
 
 }
