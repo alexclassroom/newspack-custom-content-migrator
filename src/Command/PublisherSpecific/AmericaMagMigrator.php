@@ -1017,9 +1017,9 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'attached_file_matches count: ' . count( $attached_file_matches[1] ) );
 
 		// Loop through each file match
-		foreach( $attached_file_matches[1] as $file_match ) {
+		foreach( $attached_file_matches[1] as $lookup_file_with_path ) {
 			
-			$this->clean_up_post_assets_merged_lookup( $file_match );
+			$this->clean_up_post_assets_merged_lookup( $lookup_file_with_path );
 
 		}
 
@@ -1044,59 +1044,96 @@ wp newspack-post-image-downloader import-images
 
 	}
 
-	private function clean_up_post_assets_merged_lookup( $file_match ): void {
+	private function clean_up_post_assets_merged_lookup( $lookup_file_with_path ) {
 
 		global $wpdb;
 
-		$this->logger->info( '-- Finding: ' . $file_match );
+		$this->logger->info( '-- Finding: ' . $lookup_file_with_path );
 
-		// could be thumbnail so use meta data lookup.
-		$attachment_meta_results = $wpdb->get_col( $wpdb->prepare( "
-			SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attachment_metadata' 
-			AND (
-				meta_value LIKE %s
-				OR
-				meta_value LIKE %s
-			)
+		$attachment_id = null;
+
+		// Try attached_file
+		$results = $wpdb->get_col( $wpdb->prepare( "
+			SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value = %s 
 			",
-			'%"' . $file_match . '"%', // full file
-			'%"' . basename( $file_match ) . '"%', // maybe thumbnail
+			$lookup_file_with_path
 		));
 
-		if( 1 !== count( $attachment_meta_results ) ) {
-			$this->logger->error( 'Meta data results not one.' );
+		if( count( $results ) > 1 ) {
+			$this->logger->error( 'More than one attached_file found.' );
 			exit();
 		}
+		else if( 1 === count( $results ) ) {
+			$this->logger->info( 'Found exact _wp_attached_file.' );
+			$attachment_id = reset( $results );
+		}
+		else {
+			
+			$this->logger->info( 'trying thumbnail...' );
+			
+			// Try thumbnail
+			$results = $wpdb->get_col( $wpdb->prepare( "
+				SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attachment_metadata' AND meta_value LIKE %s
+				",
+				'%"' . basename( $lookup_file_with_path ) . '"%', // thumbnail
+			));
 
-		$attachment_id = reset( $attachment_meta_results );
+			if( count( $results ) > 1 ) {
+				$this->logger->error( 'More than one thumbnail match.' );
+				exit();
+			}
+			
+			if( 1 !== count( $results ) ) {
+				$this->logger->error( 'Not found.' );
+				exit();
+			}
+
+			$attachment_id = reset( $results );
+
+			// Sanity checks.
+			$results = $wpdb->get_var( $wpdb->prepare( "
+				SELECT 'yes' FROM $wpdb->postmeta WHERE post_id = %d and meta_key = '_wp_attached_file' and meta_value LIKE %s
+				",
+				$attachment_id,
+				dirname( $lookup_file_with_path ) . '%', // path portion.
+			));
+
+			if( 'yes' !== $results ) {
+				$this->logger->error( 'sanity check attached_file dirname failed.' );
+				exit();
+			}
+		}
 
 		$this->logger->info( 'Attachment id: ' . $attachment_id );
 
-		// Get attachment meta only if sanity check attached_file is same as meta file.
-		$attachment_metadata = $wpdb->get_var( $wpdb->prepare( "
-			select pm2.meta_value
-			from wp_postmeta pm
-			join wp_postmeta pm2 on pm2.post_id = pm.post_id and pm2.meta_key = '_wp_attachment_metadata' and pm2.meta_value like concat( '%\"', pm.meta_value, '\"%')
-			where pm.meta_key = '_wp_attached_file' and pm.post_id = %d
-			", $attachment_id
-		));
+		$post_mime_type = get_post_field( 'post_mime_type', $attachment_id, 'raw' );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		$attached_file = get_post_meta( $attachment_id, '_wp_attached_file', true );
 
-		$attachment_metadata = unserialize( $attachment_metadata );
+		if( 'application/pdf' !== $post_mime_type ) {
 
-		if( empty( $attachment_metadata ) ) {
-			$this->logger->error( 'File not match file for attachment.' );
-			exit();
+			if( empty( $attachment_metadata) ) {
+				$this->logger->error( 'No attachment metadata in db.' );
+				exit();
+			}
+
+			// Sanity check for file === wp_attached_file
+			if( $attachment_metadata['file'] !== $attached_file ) {
+				$this->logger->warning( 'TODO: File does not match file.' );
+				return;
+			}
+
+			// Extract the filesize
+			$wp_filesize = $attachment_metadata['filesize'] ?? 0;
+			
+			if( ! ( $wp_filesize > 0 ) ) {
+				$this->logger->error( 'Filesize not gt 0.' );
+				exit();
+			}
+
+			$this->logger->info( 'wp_filesize: ' . $wp_filesize );
+
 		}
-
-		// Extract the filesize
-		$wp_filesize = $attachment_metadata['filesize'] ?? 0;
-		
-		if( ! ( $wp_filesize > 0 ) ) {
-			$this->logger->error( 'Filesize not gt 0.' );
-			exit();
-		}
-
-		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
 
 		// Compare to drupal files managed.
 		$old_file = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
@@ -1118,26 +1155,40 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'Old basename: ' . $old_basename );
 
 		// get the file_managed from Drupal and compage the filesize
-		$file_managed_results = $wpdb->get_results( $wpdb->prepare( "
-			select fid, uuid
+		$results = $wpdb->get_results( $wpdb->prepare( "
+			select fid, uuid, filesize
 			from file_managed
 			where status = 1
 			and filename = %s
 			and uri = %s
-			and filesize = %d
 			",
 			$old_basename,
 			$old_uri,
-			$wp_filesize
 		));
 		
-		// todo: verify fid in file_usage? and uuid in node__body.body_value?
-		if( 1 !== count( $file_managed_results ) ) {
+		if( count( $results ) > 1 ) {
+			$this->logger->error( 'File managed has multiple results.' );
+			exit();
+		}
+		
+		if( 1 !== count( $results ) ) {
 			$this->logger->error( 'File managed results not 1.' );
 			exit();
 		}
 
+		$file_managed = reset( $results );
+
+		var_dump( $file_managed );
+
+		// compare filesize too.
+		if( isset( $wp_filesize ) && $wp_filesize !== (int) $file_managed->filesize ) {
+			$this->logger->error( 'File size mismatch.' );
+			exit();
+		}
+		
 		$this->logger->info( 'File managed matched --' );
+
+		// todo: verify fid in file_usage? and uuid in node__body.body_value?
 
 	}
 
