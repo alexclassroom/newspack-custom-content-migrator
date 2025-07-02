@@ -21,6 +21,7 @@ use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use Newspack\MigrationTools\Util\CsvWriter;
+use Newspack\MigrationTools\Util\CustomRedirectGenerator;
 use WP_CLI;
 
 class FoundationMigrator implements RegisterCommandInterface {
@@ -77,6 +78,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private SimpleLocalAvatars $simple_local_avatars;
 
 	/**
+	 * Instance of CustomRedirectGenerator.
+	 *
+	 * @var null|CustomRedirectGenerator
+	 */
+	private CustomRedirectGenerator $custom_redirect_generator;
+
+	/**
+	 * Local path to the media files.
+	 *
+	 * @var string
+	 */
+	private string $media_local_path = '';
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -84,6 +99,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->simple_local_avatars      = new SimpleLocalAvatars();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
+		$this->custom_redirect_generator = new CustomRedirectGenerator();
 	}
 
 	/**
@@ -211,6 +227,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'type'        => 'flag',
 						'name'        => 'update-content',
 						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-local-path',
+						'description' => 'Local path to the media files (The folder usually have a `mediaserver` folder).',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -393,6 +416,30 @@ class FoundationMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-migrate-legacy-redirects',
+			self::get_command_closure( 'cmd_migrate_legacy_redirects' ),
+			[
+				'shortdesc' => 'Migrates Foundation legacy redirects for both posts and slideshows received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'publisher-domain',
+						'description' => 'The domain of the publisher (e.g. `www.okgazette.com`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json` or `Slideshow.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -523,14 +570,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate comment authors.
 		foreach ( $raw_comment_authors as $comment_author ) {
-			$migrated_comment_author_id = $this->migrate_to_wp_user( $comment_author, 'subscriber', $logger );
-
+			$migrated_comment_author_id                       = $this->migrate_to_wp_user( $comment_author, 'subscriber', $logger );
 			$migrated_comment_authors[ $comment_author->oid ] = $migrated_comment_author_id;
 			$logger->info( sprintf( 'Migrated comment author %s with ID %d', $comment_author->oid, $migrated_comment_author_id ) );
 		}
 
 		// Migrate authors.
 		foreach ( $raw_authors as $author ) {
+			echo 1;
 			// TODO: Once we have an sample of this data.
 		}
 
@@ -598,15 +645,16 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
 		$csv_writer->set_header( [ 'oid', 'post_id', 'old_url', 'new_url' ] );
 
-		$publisher_domain    = $assoc_args['publisher-domain'];
-		$post_json_file      = $assoc_args['post-json-file'];
-		$image_json_file     = $assoc_args['image-json-file'];
-		$embed_json_file     = $assoc_args['embed-json-file'];
-		$audio_json_file     = $assoc_args['audio-json-file'];
-		$pdf_json_file       = $assoc_args['pdf-json-file'];
-		$slideshow_json_file = $assoc_args['slideshow-json-file'];
-		$start_from          = $assoc_args['start-from'] ?? 0;
-		$update_content      = $assoc_args['update-content'] ?? false;
+		$publisher_domain       = $assoc_args['publisher-domain'];
+		$post_json_file         = $assoc_args['post-json-file'];
+		$image_json_file        = $assoc_args['image-json-file'];
+		$embed_json_file        = $assoc_args['embed-json-file'];
+		$audio_json_file        = $assoc_args['audio-json-file'];
+		$pdf_json_file          = $assoc_args['pdf-json-file'];
+		$slideshow_json_file    = $assoc_args['slideshow-json-file'];
+		$start_from             = $assoc_args['start-from'] ?? 0;
+		$update_content         = $assoc_args['update-content'] ?? false;
+		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
 		$raw_posts               = $this->json_iterator->items( $post_json_file );
 		$all_migrated_posts_oids = array_keys( $this->load_posts() );
@@ -1216,6 +1264,50 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Migrates Foundation legacy redirects for both posts and slideshows received from their export.
+	 * Callable for 'newspack-content-migrator foundation-migrate-legacy-redirects' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_migrate_legacy_redirects( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file   = $assoc_args['post-json-file'];
+		$publisher_domain = $assoc_args['publisher-domain'];
+
+		$raw_posts      = $this->json_iterator->items( $post_json_file );
+		$migrated_posts = $this->load_posts();
+
+		foreach ( $raw_posts as $post ) {
+			if ( ! array_key_exists( $post->oid, $migrated_posts ) ) {
+				$logger->error( sprintf( 'Post %s not found', $post->oid ) );
+				continue;
+			}
+
+			$migrated_post_id = $migrated_posts[ $post->oid ];
+
+			if ( isset( $post->legacyURL ) && ! empty( $post->legacyURL ) ) {
+				$logger->info( sprintf( 'Migrating legacy redirect for post %s', $post->oid ) );
+				$post_relative_permalink = rtrim( wp_make_link_relative( get_permalink( $migrated_post_id ) ), '/' );
+
+				foreach ( $post->legacyURL as $legacy_url ) {
+					// remove domain from the legacy URL.
+					$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $legacy_url ), '/' );
+
+					if ( $post_relative_permalink !== $legacy_url ) {
+						$logger->info( sprintf( 'Migrating legacy redirect for post %s (%s => %s)', $post->oid, $legacy_url, $post_relative_permalink ) );
+						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
+					}
+				}
+			}
+		}
+
+		$this->custom_redirect_generator->save_redirects();
+		$logger->info( sprintf( 'Saved legacy redirects. Please check the `custom-redirects.php` file.' ) );
+	}
+
+	/**
 	 * Migrate Foundation user to WP user.
 	 *
 	 * @param object $foundation_user Foundation user.
@@ -1777,7 +1869,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			],
 		];
 
-		return Attachments::import_external_file( $raw_attachment->url, null, $raw_attachment->caption ?? null, null, $raw_attachment->alt ?? null, $post_id, $meta_input );
+		$local_media_path = isset( $raw_attachment->path ) ? rtrim( $this->media_local_path, '/' ) . '/' . ltrim( $raw_attachment->path, '/' ) : '';
+		$media_path       = is_file( $local_media_path ) ? $local_media_path : $raw_attachment->url;
+
+		return Attachments::import_external_file( $media_path, null, $raw_attachment->caption ?? null, null, $raw_attachment->alt ?? null, $post_id, $meta_input );
 	}
 
 	/**
