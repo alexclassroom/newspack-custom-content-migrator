@@ -997,7 +997,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			GuestContributorsHelper::assign_contributors_to_post( $migrated_slideshow_id, array_values( $mapped_authors ) );
 
 			// Migrate images tray and featured image.
-			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_slideshow_id, $slideshow->imageLinks, $image_json_file, $slideshow->images );
+			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_slideshow_id, $slideshow->imageLinks, $image_json_file, $slideshow->images ?? [] );
 
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
