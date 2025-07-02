@@ -335,6 +335,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'repeating'   => false,
 					],
 					[
+						'type'        => 'assoc',
+						'name'        => 'media-local-path',
+						'description' => 'Local path to the media files (The folder usually have a `mediaserver` folder).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'update-content',
 						'description' => 'Update the post content regardless of the difference.',
@@ -723,6 +730,25 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Assign contributors.
 			GuestContributorsHelper::assign_contributors_to_post( $migrated_post_id, array_values( $mapped_authors ) );
 
+			// Set custom byline if the credit type is different than 'by'.
+			if ( 'by' !== trim( strtolower( $post->creditType ) ) ) {
+				$authors_byline_parts = array_values(
+					array_filter(
+						array_map(
+							function ( $author_id ) {
+								$wp_user = get_user_by( 'ID', $author_id );
+								return $wp_user ? "[Author id=$author_id]{$wp_user->display_name}[/Author]" : '';
+							},
+							array_values( $mapped_authors )
+						)
+					)
+				);
+
+				$byline_authors = $post->creditType . ' ' . join( ', ', $authors_byline_parts );
+				update_post_meta( $migrated_post_id, '_newspack_byline_active', true );
+				update_post_meta( $migrated_post_id, '_newspack_byline', $byline_authors );
+			}
+
 			// Migrate images tray and featured image.
 			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_post_id, $post->imageLinks, $image_json_file, $post->images ?? [] );
 
@@ -774,6 +800,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 			update_post_meta( $migrated_post_id, 'foundation_post_transfer', $post->transfer );
 			update_post_meta( $migrated_post_id, 'foundation_post_source', $post->source );
 			update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
+
+			// Setting the post's template.
+			if ( isset( $post->layout ) && 'Content - Full Width' === $post->layout ) {
+				update_post_meta( $migrated_post_id, '_wp_page_template', 'single-feature.php' );
+				update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'above' );
+			}
 
 			// Since we regenerated the post content, we need to regenerate the post content for related posts.
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_POSTS_META_KEY );
@@ -899,10 +931,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
 		$csv_writer->set_header( [ 'oid', 'post_id', 'old_url', 'new_url' ] );
 
-		$publisher_domain    = $assoc_args['publisher-domain'];
-		$slideshow_json_file = $assoc_args['slideshow-json-file'];
-		$image_json_file     = $assoc_args['image-json-file'];
-		$update_content      = $assoc_args['update-content'] ?? false;
+		$publisher_domain       = $assoc_args['publisher-domain'];
+		$slideshow_json_file    = $assoc_args['slideshow-json-file'];
+		$image_json_file        = $assoc_args['image-json-file'];
+		$update_content         = $assoc_args['update-content'] ?? false;
+		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
 		$raw_slideshows               = $this->json_iterator->items( $slideshow_json_file );
 		$all_migrated_slideshows_oids = array_keys( $this->load_posts() );
@@ -1198,6 +1231,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		foreach ( $raw_comments as $comment ) {
 			if ( isset( $migrated_comments[ $comment->oid ] ) ) {
+				continue;
+			}
+
+			if ( 'Content' !== $comment->type ) {
+				$logger->error( sprintf( 'Skipping comment %s because it is not a content comment: %s', $comment->oid, $comment->type ) );
 				continue;
 			}
 
