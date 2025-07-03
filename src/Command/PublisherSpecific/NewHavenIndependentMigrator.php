@@ -332,32 +332,22 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Get the Craft database connection.
-	 * If not all params are provided, returns the global $wpdb.
-	 * This lets you connect to Craft tables in a separate schema, or in the local schema.
+	 * Get a custom database connection.
 	 *
-	 * @param ?string $db_name The database name.
-	 * @param ?string $db_user The database user.
-	 * @param ?string $db_pass The database password.
-	 * @param ?string $db_host The database host.
-	 * @param ?string $db_port The database port.
-	 * @return \wpdb|null The database connection or null if the connection fails.
+	 * @param string $db_name The database name.
+	 * @param string $db_user The database user.
+	 * @param string $db_pass The database password.
+	 * @param string $db_host The database host.
+	 * @param string $db_port The database port.
+	 * @return \wpdb|null The database connection or null if not all params are provided or the connection fails.
 	 */
-	private function get_craft_db_connection( ?string $db_name, ?string $db_user, ?string $db_pass, ?string $db_host, ?string $db_port ) { 
-		global $wpdb;
-
-		// If not all params are provided, return the global $wpdb.
-		if ( is_null( $db_name ) || is_null( $db_user ) || is_null( $db_pass ) || is_null( $db_host ) || is_null( $db_port ) ) {
-			return $wpdb;
-		}
-
-		// Get a custom database connection.
-		$new_db = new \wpdb( $db_user, $db_pass, $db_name, $db_host, $db_port );
-		if ( ! empty( $new_db->last_error ) ) {
+	private function get_db_connection( string $db_name, string $db_user, string $db_pass, string $db_host, string $db_port ) { 
+		$connection = new \wpdb( $db_user, $db_pass, $db_name, $db_host, $db_port );
+		if ( ! empty( $connection->last_error ) ) {
 			return null;
 		}
 
-		return $new_db;
+		return $connection;
 	}
 
 	/**
@@ -408,8 +398,16 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		// Set logger.
 		$this->setup_logger( __FUNCTION__ );
 
-		// If not all connection params are provided, this will return the local WP DB connection and try and work with Craft tables in the WP schema.
-		$craft_db = $this->get_craft_db_connection( $craft_db_name, $craft_db_user, $craft_db_pass, $craft_db_host, $craft_db_port );
+		// For dev purposes, you can access Craft DB tables in a separate schema. On Atomic sites, you can import Craft tables into the local WP schema.
+		$craft_db = null;
+		// If provided, use the custom database connection.
+		if ( ! empty( $craft_db_name ) && ! empty( $craft_db_user ) && ! empty( $craft_db_pass ) && ! empty( $craft_db_host ) && ! empty( $craft_db_port ) ) {
+			$craft_db = $this->get_db_connection( $craft_db_name, $craft_db_user, $craft_db_pass, $craft_db_host, $craft_db_port );
+		}
+		// If not provided, use the local WP DB connection to find Craft tables.
+		if ( is_null( $craft_db ) ) {
+			$craft_db = $wpdb;
+		}
 
 		// Get Craft users data.
 		$users_data = json_decode( file_get_contents( $users_json_file ), true ); // phpcs:ignore -- WordPressVIPMinimum.Performance.FetchingRemoteData.FileGetContentsUnknown.
@@ -797,7 +795,8 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					// Credit is contained in DB asset data.
 					$image_id = ! $this->dry_run ? $this->import_image_from_asset( $asset_id, $post_id, $entry_id, $craft_db, $caption ) : -1;
 					if ( is_wp_error( $image_id ) ) {
-						$this->logger->error( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset '%d' : '%s'.", $entry_id, $asset_id, $image_id->get_error_message() ) );
+						$asset_db_data = $this->get_asset_image_data( $asset_id, $craft_db );
+						$this->logger->error( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset ID '%d' URL '%s' : '%s'.", $entry_id, $asset_id, $asset_db_data['url'], $image_id->get_error_message() ) );
 						break;
 					}
 					
@@ -1750,16 +1749,6 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 		} else {
 			WP_CLI::log( sprintf( 'ERROR Not all of the %d obsolete users were successfully deleted! Users before deletion %d, users after deletion %d. Check log %s for obsolete user IDs .', count( $obsolete_users_ids ), $number_users_before_deletion, $number_users_after_deletion, $log_users_obsolete ) );
 		}
-
-
-		/**
-		 * Bylines are also saved as usermetas.
-		 * => wp_usermeta, meta_key is \Newspack\MigrationTools\Logic\UsersHelper::UNIQUE_IDENTIFIER_META_KEY ('_nmt_user_uniqid')
-		 * a) $wp_user_unique_identifier = 'newspack_migration_byline ' . $byline['name'];
-		 *      - if there's a $byline['user_id'], save it as usermeta.
-		 *          update_user_meta( $wp_user->ID, 'newspack_migration_byline_user_id', $byline['user_id'] );
-		 * b) $wp_user_unique_identifier = 'newspack_migration_author_id ' . $author['id'];
-		 */
 	}
 
 	/**
