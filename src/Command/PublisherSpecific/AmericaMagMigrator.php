@@ -1088,7 +1088,7 @@ wp newspack-post-image-downloader import-images
 			}
 			
 			if( 1 !== count( $results ) ) {
-				$this->logger->warning( 'By-hand: No meta data image found or mismatch with file year/mon.' );
+				$this->logger->warning( 'SKIP: No meta data image found or mismatch with file year/mon.' );
 				return;
 			}
 
@@ -1128,8 +1128,8 @@ wp newspack-post-image-downloader import-images
 			// don't test $lookup_file_with_path here, since that value could have been a thumbnail
 			// or maybe "original_image" so the file might contain "-scaled" or "-rotated"
 			if( $attachment_metadata['file'] !== $attached_file ) {
-				$this->logger->error( 'File meta does not match attached file.' );
-				exit;
+				$this->logger->warning( 'SKIP: File meta does not match attached file.' );
+				return;
 			}
 
 		}
@@ -1175,9 +1175,8 @@ wp newspack-post-image-downloader import-images
 			exit();
 		}
 		else if( 1 !== count( $results ) ) {
-			$this->logger->error( 'File managed results not found.' );
-			print_r($wpdb->queries);
-			exit();
+			$this->logger->warning( 'File managed results not found.' );
+			return;
 		}
 
 		$file_managed = reset( $results );
@@ -1259,7 +1258,7 @@ wp newspack-post-image-downloader import-images
 		} 
 		// No usage.
 		else {
-			$this->logger->warning( 'File usage not found.' );
+			$this->logger->warning( 'File usage not found...MAKE SURE in-content IS YES!' );
 		}	
 
 		// Check content body.
@@ -1287,6 +1286,7 @@ wp newspack-post-image-downloader import-images
 			}
 			else {
 				// todo: change this to a warning only? maybe....
+				// if change, need to alert if both 'File usage not found.' and 'no body match'.  This would mean just filesize match.
 				$this->logger->error( 'Old node body no match old uri.' );
 				exit();
 			}
