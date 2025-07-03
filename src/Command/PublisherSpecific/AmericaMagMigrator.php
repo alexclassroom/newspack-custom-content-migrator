@@ -1243,10 +1243,13 @@ wp newspack-post-image-downloader import-images
 			}
 		}
 		
+		$file_warning_count = 0;
+
 		// skip some file usage checks...maybe this is just Podcasts?
 		// file_managed->filemime = audio/mpeg => 51563
 		if( in_array( (int) $file_managed->fid, [ 51563 ], true ) ) {
-			$this->logger->info( 'File usage skip for podcasts...?' );
+			$this->logger->warning( 'File usage not needed for podcasts...?' );
+			++$file_warning_count;
 		}
 		// Did Book node have the usage?
 		else if( $related_book_node_usage_found ) {
@@ -1259,6 +1262,7 @@ wp newspack-post-image-downloader import-images
 		// No usage.
 		else {
 			$this->logger->warning( 'File usage not found...MAKE SURE in-content IS YES!' );
+			++$file_warning_count;
 		}	
 
 		// Check content body.
@@ -1287,13 +1291,13 @@ wp newspack-post-image-downloader import-images
 			else {
 				// todo: change this to a warning only? maybe....
 				// if change, need to alert if both 'File usage not found.' and 'no body match'.  This would mean just filesize match.
-				$this->logger->error( 'Old node body no match old uri.' );
-				exit();
+				$this->logger->warning( 'No match old uri in body...MAKE SURE file usage WAS FOUND!' );
+				++$file_warning_count;
 			}
 
 		}
 
-		$this->logger->info( 'File is OK --' );
+		$this->logger->info( 'File is ' . ( ( 0 === $file_warning_count ) ? 'OK' : $file_warning_count ) . ' --' );
 
 	}
 
