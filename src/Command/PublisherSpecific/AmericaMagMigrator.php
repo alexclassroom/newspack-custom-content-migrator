@@ -1157,15 +1157,16 @@ wp newspack-post-image-downloader import-images
 		// $wpdb->charset = 'utf8mb4'; // needed for unicode?
 		// $wpdb->collate = 'utf8mb4_general_ci';  // needed for unicode?
 		// did this have to do with uuid????
-		// todo: reimport db charset/collation...see not in README.
+		// todo: reimport db to initial charset/collation...see not in README.
+		// todo: replace with mysqli see below ??
+		// removed " and filename = %s " ($old_basename) since these can diverge from uri in drupal.
+		// possibly need to select filename and print alert that filename <> $old_basename?
 		$results = $wpdb->get_results( $wpdb->prepare( "
 			select fid, filesize
 			from file_managed
 			where status = 1
-			and filename = %s
 			and uri = %s
 			",
-			$old_basename,
 			str_replace( 'sites/default/files/', 'public://', $old_uri ) // db has different format...
 		));
 		
@@ -1173,9 +1174,9 @@ wp newspack-post-image-downloader import-images
 			$this->logger->error( 'File managed has multiple results.' );
 			exit();
 		}
-		
-		if( 1 !== count( $results ) ) {
-			$this->logger->error( 'File managed results not 1.' );
+		else if( 1 !== count( $results ) ) {
+			$this->logger->error( 'File managed results not found.' );
+			print_r($wpdb->queries);
 			exit();
 		}
 
@@ -1212,7 +1213,9 @@ wp newspack-post-image-downloader import-images
 			$this->logger->error( 'File size mismatch.' );
 			exit();
 		}
-		
+
+		$this->logger->info( 'File size matched.' );
+
 		// -- Check the content
 
 		// function to check the actual file used in the original drupal post content
@@ -1256,34 +1259,35 @@ wp newspack-post-image-downloader import-images
 		} 
 		// No usage.
 		else {
-			$this->logger->error( 'File usage not found.' );
-			exit();
+			$this->logger->warning( 'File usage not found.' );
 		}	
 
 		// Check content body.
 
 		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
-		if( false === $related_book_node_usage_found ) {
+		if( $related_book_node_usage_found ) {
+			$this->logger->info( 'Node content body skip for found related book node.' );
+		}
+		else {
 
-			// todo: possibly check uuid instead of basename?  do MP3 and pdf have uuid in content?
-			$maybe_node_body = $wpdb->get_var( $wpdb->prepare( "
-				SELECT 'yes' FROM node__body WHERE deleted = 0
-				AND entity_id = %d 
+			// don't use wpdb as it will convert unicode to ascii based on table definitions.
+			$mysqli = $this->util_get_mysqli();
+			$result = $mysqli->query( "
+				SELECT 1 FROM node__body WHERE deleted = 0
+				AND entity_id = " . $mysqli->real_escape_string( (int) $old_content_node_id ) . "
 				and (
-					body_value LIKE %s
+					body_value LIKE '%" . $mysqli->real_escape_string( $old_uri ) . "%'
 					OR
-					body_value LIKE %s
+					body_value LIKE '%" . $mysqli->real_escape_string( str_replace( $old_basename, rawurlencode( $old_basename ), $old_uri ) ) . "%'
 				)
-				", 
-				$old_content_node_id,
-				'%' . $old_uri . '%', // normal
-				'%' . str_replace( $old_basename, rawurlencode( $old_basename ), $old_uri ) . '%' // url encoded
-			));
+			");
 			
-			print_r( $wpdb->queries );
-
-			if( 'yes' !== $maybe_node_body ) {
-				$this->logger->error( 'Old node body did not match old uri.' );
+			if( $result && $result->num_rows > 0 ) {
+				$this->logger->info( 'Old node body matched the old uri.' );
+			}
+			else {
+				// todo: change this to a warning only? maybe....
+				$this->logger->error( 'Old node body no match old uri.' );
 				exit();
 			}
 
@@ -2137,6 +2141,22 @@ wp newspack-post-image-downloader import-images
 		return 0;
 	}
 
+	function util_get_mysqli( ) {
+
+		$mysqli = new \mysqli(
+			DB_HOST,
+			DB_USER,
+			DB_PASSWORD,
+			DB_NAME
+		);
+		
+		// Optional: Set charset explicitly to avoid unwanted conversions
+		$mysqli->set_charset('utf8mb4');
+
+		return $mysqli;
+
+	}		
+	
 	/************************************
 	  VALIDATIONS
 	************************************/
