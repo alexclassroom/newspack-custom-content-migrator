@@ -584,8 +584,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate authors.
 		foreach ( $raw_authors as $author ) {
-			echo 1;
-			// TODO: Once we have an sample of this data.
+			$migrated_author_id = $this->migrate_to_wp_user( $author, 'author', $logger );
+
+			$migrated_authors[ $author->oid ] = $migrated_author_id;
+			$logger->info( sprintf( 'Migrated author %s with ID %d', $author->oid, $migrated_author_id ) );
 		}
 
 		// Migrate contributors.
@@ -593,7 +595,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$contributor_data     = [
 				'user_login'   => $contributor->username,
 				'user_email'   => $contributor->email,
-				'display_name' => $contributor->displayName,
+				'display_name' => $this->clean_display_name( $contributor->displayName ),
 				'user_url'     => $contributor->website,
 				'meta_input'   => [
 					'description' => $contributor->bio,
@@ -1255,7 +1257,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$comment_data = [
 				'comment_post_ID'      => $existing_post_id,
-				'comment_content'      => $comment->content,
+				'comment_content'      => $comment->comment,
 				'comment_approved'     => 'Live' === $comment->status,
 				'user_id'              => $comment_author ? $comment_author->ID : '',
 				'comment_author'       => $comment_author ? $comment_author->user_nicename : $comment->name,
@@ -1359,7 +1361,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			'role'          => $role,
 			'user_login'    => $foundation_user->username,
 			'user_email'    => $foundation_user->email,
-			'display_name'  => $foundation_user->name,
+			'display_name'  => $this->clean_display_name( $foundation_user->name ),
 			'user_nicename' => $foundation_user->basename ?? '',
 			'user_url'      => $foundation_user->website ?? '',
 			'meta_input'    => [
@@ -1391,6 +1393,21 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $migrated_user->ID;
+	}
+
+	/**
+	 * Clean display name.
+	 *
+	 * @param string $display_name Display name.
+	 *
+	 * @return string Cleaned display name.
+	 */
+	private function clean_display_name( string $display_name ): string {
+		if ( str_starts_with( strtolower( $display_name ), 'by ' ) ) {
+			return substr( $display_name, 3 );
+		}
+
+		return $display_name;
 	}
 
 	/**
