@@ -1009,42 +1009,36 @@ wp newspack-post-image-downloader import-images
 		// matches: ...newspackstaging.com/wp-content/uploads/(path/file.ext) followed by quote (' or ").
 		preg_match_all( '/' . preg_quote( self::STAGING_UPLOADS_URL, '/' ) . '([^\'"]+)/', $post_content, $attached_file_matches );
 
+		// should have matches since we search this same url in get_posts().
 		if( ! isset( $attached_file_matches[1] ) || empty( $attached_file_matches[1] ) ) {
-			$this->logger->error( 'Empty attached_file_matches.' );
+			$this->logger->error( 'Post content is missing attached_file_matches.' );
 			exit();
 		}
-		
 		$this->logger->info( 'attached_file_matches count: ' . count( $attached_file_matches[1] ) );
 
+		// get the drupal node id.  This should exist since FG was the one that did the url replacements.
+		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
+		if( ! ( $old_content_node_id > 0 ) ) {
+			$this->logger->error( 'Post is missing old content node id.' );
+			exit();
+		}
+		$this->logger->info( 'Old post content node id: ' . $old_content_node_id );
+		
 		// Loop through each file match
 		foreach( $attached_file_matches[1] as $lookup_file_with_path ) {
 			
-			$this->clean_up_post_assets_merged_lookup( $lookup_file_with_path );
+			// Look up each image.
+			$this->clean_up_post_assets_merged_lookup( $lookup_file_with_path, $old_content_node_id );
 
-		}
-
-		// echo $post_content;
-
-		// $old_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
-		// $this->logger->info( 'Old node id: ' . $old_node_id );
+		}		
 		
-		// $old_node_body = $wpdb->get_results( $wpdb->prepare( "
-		// 	SELECT body_value FROM node__body WHERE deleted = 0 AND entity_id = %d
-		// ", $old_node_id ) );
-		
-		// if( 1 !== count( $old_node_body ) ) {
-		// 	$this->logger->error( 'Node body more than one row.' );
-		// 	exit();
-		// }
-		// $old_node_body = reset( $old_node_body );
-
-		// echo \xdiff_string_diff( $old_node_body->body_value, $post_content );
-		
-		// exit();
-
 	}
 
-	private function clean_up_post_assets_merged_lookup( $lookup_file_with_path ) {
+	/**
+	 * $lookup_file_with_path    2025/05/file.jpg (could be thumbnail, mp3, pdf, etc)
+	 * $old_content_node_id              the related Drupal node id for the post that had this url in it's content.
+	 */
+	private function clean_up_post_assets_merged_lookup( $lookup_file_with_path, $old_content_node_id ) {
 
 		global $wpdb;
 
@@ -1052,110 +1046,127 @@ wp newspack-post-image-downloader import-images
 
 		$attachment_id = null;
 
-		// Try attached_file
+		// Try exact match on db attached_file
 		$results = $wpdb->get_col( $wpdb->prepare( "
 			SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attached_file' AND meta_value = %s 
 			",
 			$lookup_file_with_path
 		));
 
+		// More than 1 found??
 		if( count( $results ) > 1 ) {
 			$this->logger->error( 'More than one attached_file found.' );
 			exit();
 		}
+		// Yes, one found.
 		else if( 1 === count( $results ) ) {
 			$this->logger->info( 'Found exact _wp_attached_file.' );
 			$attachment_id = reset( $results );
 		}
+		// Nothing was found with exact attached_file match...
 		else {
 			
-			$this->logger->info( 'trying thumbnail...' );
+			$this->logger->info( 'searching meta data...' );
 			
-			// Try thumbnail
+			// This could be a thumbnail (possibly "original_image" field...)
+			// must match directory ("file" field) AND one of the sizes or original_image.
 			$results = $wpdb->get_col( $wpdb->prepare( "
-				SELECT post_id FROM $wpdb->postmeta WHERE meta_key = '_wp_attachment_metadata' AND meta_value LIKE %s
+				SELECT post_id
+				FROM $wpdb->postmeta 
+				WHERE meta_key = '_wp_attachment_metadata'
+				AND meta_value LIKE %s
+				AND meta_value LIKE %s
 				",
-				'%"' . basename( $lookup_file_with_path ) . '"%', // thumbnail
+				'%"' . dirname( $lookup_file_with_path ) . '/%', // path portion starting with " and ending with trailing slash
+				'%"' . basename( $lookup_file_with_path ) . '"%', // no directory and surrounded by " "
 			));
 
+			// Sanity should only be one image.
 			if( count( $results ) > 1 ) {
-				$this->logger->error( 'More than one thumbnail match.' );
+				$this->logger->error( 'More than one meta data image match.' );
 				exit();
 			}
 			
 			if( 1 !== count( $results ) ) {
-				$this->logger->error( 'Not found.' );
-				exit();
+				$this->logger->warning( 'By-hand: No meta data image found or mismatch with file year/mon.' );
+				return;
 			}
 
 			$attachment_id = reset( $results );
 
-			// Sanity checks, thumbnail path must start with attached file path.  2025/12/ <=> 2025/12/
-			$results = $wpdb->get_var( $wpdb->prepare( "
-				SELECT 'yes' FROM $wpdb->postmeta WHERE post_id = %d and meta_key = '_wp_attached_file' and meta_value LIKE %s
-				",
-				$attachment_id,
-				dirname( $lookup_file_with_path ) . '/%', // path portion with trailing slash.
-			));
-
-			if( 'yes' !== $results ) {
-				$this->logger->error( 'sanity check attached_file dirname failed.' );
-				exit();
-			}
 		}
 
+		// We found an attachment, so make sure the attachment info makes sense.
 		$this->logger->info( 'Attachment id: ' . $attachment_id );
 
-		$post_mime_type = get_post_field( 'post_mime_type', $attachment_id, 'raw' );
+		// Attachment fields.
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
 		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		$attached_file = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$old_file_url        = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
 
-		if( 'application/pdf' !== $post_mime_type ) {
+		// Mime info.
+		$mimes_without_meta_file  = array( 'application/pdf', 'audio/mpeg' ); // these don't have metadata in db.
+		$post_mime_type           = get_post_field( 'post_mime_type', $attachment_id, 'raw' );
+
+		$this->logger->info( 'Mime type is: ' . $post_mime_type );
+
+		// Do a sanity check for mimes that have meta data with the 'file' key.
+		if( ! in_array( $post_mime_type, $mimes_without_meta_file, true ) ) {
 
 			if( empty( $attachment_metadata) ) {
-				$this->logger->error( 'No attachment metadata in db.' );
+				$this->logger->error( 'Missing attachment metadata in db.' );
 				exit();
 			}
 
-			// Sanity check for file === wp_attached_file
+			// Sanity check, 'file' field should exist.
+			if( ! isset( $attachment_metadata['file'] ) ) {
+				$this->logger->error( 'File key does not exist.' );
+				exit();
+			}
+
+			// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
+			// don't test $lookup_file_with_path here, since that value could have been a thumbnail
+			// or maybe "original_image" so the file might contain "-scaled" or "-rotated"
 			if( $attachment_metadata['file'] !== $attached_file ) {
-				$this->logger->warning( 'TODO: File does not match file.' );
-				return;
+				$this->logger->error( 'File meta does not match attached file.' );
+				exit;
 			}
 
 		}
 
-		// Compare to drupal files managed.
-		$old_file = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		$this->logger->info( 'DB attached_file: ' . $attached_file );
 
-		if( empty( $old_file ) ) {
-			$this->logger->error( 'No old file.' );
+		// Sanity.  Since in-content images $lookup_file_with_path were set by FG, then they should all
+		// have the old file url.
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
 			exit();
 		}
 
-		$this->logger->info( 'Old file: ' . $old_file );
+		$this->logger->info( 'Old file url: ' . $old_file_url );
 
-		$old_uri      = parse_url( $old_file, PHP_URL_PATH );
-		$old_basename = basename( $old_uri );
-		
+		// Look up the old file in the Drupal table.
+		$old_uri = parse_url( $old_file_url, PHP_URL_PATH );		
 		$old_uri = ltrim( $old_uri, '/' ); // some urls have double // in beginning.
-		$old_uri = str_replace( 'sites/default/files/', 'public://', $old_uri );
-
 		$this->logger->info( 'Old uri: ' . $old_uri );
+
+		$old_basename = basename( $old_file_url );
 		$this->logger->info( 'Old basename: ' . $old_basename );
 
 		// get the file_managed from Drupal and compage the filesize
-		$wpdb->charset = 'utf8mb4';
-		$wpdb->collate = 'utf8mb4_general_ci';
+		// $wpdb->charset = 'utf8mb4'; // needed for unicode?
+		// $wpdb->collate = 'utf8mb4_general_ci';  // needed for unicode?
+		// did this have to do with uuid????
+		// todo: reimport db charset/collation...see not in README.
 		$results = $wpdb->get_results( $wpdb->prepare( "
-			select fid, uuid, filesize
+			select fid, filesize
 			from file_managed
 			where status = 1
 			and filename = %s
 			and uri = %s
 			",
 			$old_basename,
-			$old_uri,
+			str_replace( 'sites/default/files/', 'public://', $old_uri ) // db has different format...
 		));
 		
 		if( count( $results ) > 1 ) {
@@ -1170,7 +1181,9 @@ wp newspack-post-image-downloader import-images
 
 		$file_managed = reset( $results );
 
-		// compare filesize too.
+		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
+
+		// compare filesize.
 		$wp_filesize = 0;
 
 		// Use original image since this will match to drupal.
@@ -1200,9 +1213,83 @@ wp newspack-post-image-downloader import-images
 			exit();
 		}
 		
-		$this->logger->info( 'File managed matched --' );
+		// -- Check the content
 
-		// todo: verify fid in file_usage? and uuid in node__body.body_value?
+		// function to check the actual file used in the original drupal post content
+		$check_file_usage = function( $fid, $old_content_node_id ) use ( $wpdb ) { 
+			return $wpdb->get_var( $wpdb->prepare( "
+				select 'yes' from file_usage where fid = %d and type = 'node' and id = %d
+				",
+				$fid,
+				$old_content_node_id
+			));
+		};
+		
+		// For books, the Book node will have the usage, these are used on the Book node, not the book review (post)
+		$related_book_nodes = $wpdb->get_col( $wpdb->prepare( "
+			select field_book_node_target_id from node__field_book_node where entity_id = %d and deleted = 0
+			",
+			$old_content_node_id
+		));
+	
+		// Check books first just to make the logic easier...
+		$related_book_node_usage_found = false;
+		foreach( $related_book_nodes as $book_node_id ) {
+			if( 'yes' === $check_file_usage( $file_managed->fid, $book_node_id ) ) {
+				$related_book_node_usage_found = true;
+				break;
+			}
+		}
+		
+		// skip some file usage checks...maybe this is just Podcasts?
+		// file_managed->filemime = audio/mpeg => 51563
+		if( in_array( (int) $file_managed->fid, [ 51563 ], true ) ) {
+			$this->logger->info( 'File usage skip for podcasts...?' );
+		}
+		// Did Book node have the usage?
+		else if( $related_book_node_usage_found ) {
+			$this->logger->info( 'File usage found on related book node.' );
+		} 
+		// Just try the normal usage
+		else if( 'yes' === $check_file_usage( $file_managed->fid, $old_content_node_id ) ) {
+			$this->logger->info( 'File usage found on node.' );
+		} 
+		// No usage.
+		else {
+			$this->logger->error( 'File usage not found.' );
+			exit();
+		}	
+
+		// Check content body.
+
+		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
+		if( false === $related_book_node_usage_found ) {
+
+			// todo: possibly check uuid instead of basename?  do MP3 and pdf have uuid in content?
+			$maybe_node_body = $wpdb->get_var( $wpdb->prepare( "
+				SELECT 'yes' FROM node__body WHERE deleted = 0
+				AND entity_id = %d 
+				and (
+					body_value LIKE %s
+					OR
+					body_value LIKE %s
+				)
+				", 
+				$old_content_node_id,
+				'%' . $old_uri . '%', // normal
+				'%' . str_replace( $old_basename, rawurlencode( $old_basename ), $old_uri ) . '%' // url encoded
+			));
+			
+			print_r( $wpdb->queries );
+
+			if( 'yes' !== $maybe_node_body ) {
+				$this->logger->error( 'Old node body did not match old uri.' );
+				exit();
+			}
+
+		}
+
+		$this->logger->info( 'File is OK --' );
 
 	}
 
@@ -2039,7 +2126,6 @@ wp newspack-post-image-downloader import-images
 	************************************/
 
 	function util_get_remote_image_filesize( $url ) {
-		echo $url;
 		$response = wp_remote_head( $url );
 		if ( is_wp_error( $response ) ) {
 			return 0;
