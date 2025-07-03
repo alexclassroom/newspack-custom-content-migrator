@@ -1120,6 +1120,12 @@ wp newspack-post-image-downloader import-images
 
 			// Sanity check, 'file' field should exist.
 			if( ! isset( $attachment_metadata['file'] ) ) {
+				// for images, skip this as it's probably a merge issue to be fixed.
+				if( str_starts_with( $post_mime_type, 'image/' ) ) {
+					$this->logger->warning( 'SKIP: File key does not exist.' );
+					return;
+				}
+				// for other mimes, exit for now...
 				$this->logger->error( 'File key does not exist.' );
 				exit();
 			}
