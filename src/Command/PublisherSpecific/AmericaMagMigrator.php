@@ -1114,6 +1114,12 @@ wp newspack-post-image-downloader import-images
 		if( ! in_array( $post_mime_type, $mimes_without_meta_file, true ) ) {
 
 			if( empty( $attachment_metadata) ) {
+				// for images, skip this as it's probably a merge issue to be fixed.
+				if( str_starts_with( $post_mime_type, 'image/' ) ) {
+					$this->logger->warning( 'SKIP: Missing attachment metadata in db.' );
+					return;
+				}
+				// for other mimes, exit for now...
 				$this->logger->error( 'Missing attachment metadata in db.' );
 				exit();
 			}
