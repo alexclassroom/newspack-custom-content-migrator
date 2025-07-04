@@ -92,6 +92,35 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private string $media_local_path = '';
 
 	/**
+	 * Array of loaded posts.
+	 *
+	 * @var array
+	 */
+	private array $loaded_posts = [];
+
+	/**
+	 * Array of loaded authors.
+	 *
+	 * @var array
+	 */
+	private array $loaded_authors = [];
+
+	/**
+	 * Array of loaded taxonomies.
+	 *
+	 * @var array
+	 */
+	private array $loaded_taxonomies = [];
+
+	/**
+	 * Array of loaded comments.
+	 *
+	 * @var array
+	 */
+	private array $loaded_comments = [];
+
+
+	/**
 	 * Constructor.
 	 */
 	public function __construct() {
@@ -224,6 +253,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'repeating'   => false,
 					],
 					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
 						'type'        => 'flag',
 						'name'        => 'update-content',
 						'description' => 'Update the post content regardless of the difference.',
@@ -343,8 +379,29 @@ class FoundationMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'flag',
+						'name'        => 'gallery-mode',
+						'description' => 'Use gallery mode for the slideshow.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
 						'name'        => 'update-content',
 						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the slideshow with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the slideshow with the index specified.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -662,6 +719,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$pdf_json_file          = $assoc_args['pdf-json-file'];
 		$slideshow_json_file    = $assoc_args['slideshow-json-file'];
 		$start_from             = $assoc_args['start-from'] ?? 0;
+		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
@@ -672,7 +730,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$skipped_posts  = [];
 
 		foreach ( $raw_posts as $index => $post ) {
-			if ( $index < $start_from ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
 
@@ -936,7 +994,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$publisher_domain       = $assoc_args['publisher-domain'];
 		$slideshow_json_file    = $assoc_args['slideshow-json-file'];
 		$image_json_file        = $assoc_args['image-json-file'];
+		$start_from             = $assoc_args['start-from'] ?? 0;
+		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
+		$gallery_mode           = $assoc_args['gallery-mode'] ?? false;
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
 		$raw_slideshows               = $this->json_iterator->items( $slideshow_json_file );
@@ -944,7 +1005,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$migrated_slideshows = [];
 
-		foreach ( $raw_slideshows as $slideshow ) {
+		foreach ( $raw_slideshows as $index => $slideshow ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
 			if ( ! $update_content && in_array( $slideshow->oid, $all_migrated_slideshows_oids ) ) {
 				$logger->info( sprintf( 'Skipping slideshow %d because it has already been migrated', $slideshow->oid ) );
 				continue;
@@ -1003,7 +1067,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
-				$updated_content = $slideshow->description . serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
+				$gallery_block = $gallery_mode
+					? $this->gutenberg_block_generator->get_gallery( array_column( $migrated_images, 'attachment_id' ), 1 )
+					: $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) );
+
+				$updated_content = $slideshow->description . serialize_block( $gallery_block );
 
 				if ( $updated_content !== $slideshow->description ) {
 					// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -2170,6 +2238,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function load_posts(): array {
 		global $wpdb;
 
+		if ( ! empty( $this->loaded_posts ) ) {
+			return $this->loaded_posts;
+		}
+
 		$migrated_posts = [];
 
 		// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -2184,6 +2256,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$migrated_posts[ $post->meta_value ] = $post->post_id;
 		}
 
+		$this->loaded_posts = $migrated_posts;
+
 		return $migrated_posts;
 	}
 
@@ -2194,6 +2268,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function load_authors(): array {
 		global $wpdb;
+
+		if ( ! empty( $this->loaded_authors ) ) {
+			return $this->loaded_authors;
+		}
 
 		$authors = [];
 
@@ -2209,6 +2287,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$authors[ $user_meta_item->meta_value ] = $user_meta_item->user_id;
 		}
 
+		$this->loaded_authors = $authors;
+
 		return $authors;
 	}
 
@@ -2220,6 +2300,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function load_taxonomies( string $taxonomy_identifier_meta_key ): array {
 		global $wpdb;
+
+		if ( ! empty( $this->loaded_taxonomies ) ) {
+			return $this->loaded_taxonomies;
+		}
 
 		$categories = [];
 
@@ -2235,6 +2319,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$categories[ $term_meta_item->meta_value ] = $term_meta_item->term_id;
 		}
 
+		$this->loaded_taxonomies = $categories;
+
 		return $categories;
 	}
 
@@ -2245,6 +2331,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function load_comments(): array {
 		global $wpdb;
+
+		if ( ! empty( $this->loaded_comments ) ) {
+			return $this->loaded_comments;
+		}
 
 		$migrated_comments = [];
 		// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -2258,6 +2348,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 		foreach ( $comments as $comment ) {
 			$migrated_comments[ $comment->meta_value ] = $comment->comment_id;
 		}
+
+		$this->loaded_comments = $migrated_comments;
 
 		return $migrated_comments;
 	}
