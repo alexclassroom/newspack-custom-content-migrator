@@ -1210,9 +1210,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			// Replace the [content-N] markers with the related posts.
-			$content = preg_replace_callback(
+			$migrated_related_posts = 0;
+			$content                = preg_replace_callback(
 				'/\[content-(\d+)\]/',
-				function ( $matches ) use ( $post, $logger, $related_posts, $mapped_related_posts ) {
+				function ( $matches ) use ( $post, $logger, $related_posts, $mapped_related_posts, $migrated_related_posts ) {
 					$related_story_index = (int) $matches[1] - 1; // Convert to 0-based index.
 					if ( ! isset( $related_posts[ $related_story_index ] ) || ! isset( $mapped_related_posts[ $related_posts[ $related_story_index ] ] ) ) {
 						$logger->warning( sprintf( 'Related story %d not found in post related stories for post %s', (int) $matches[1], $post->oid ) );
@@ -1224,14 +1225,18 @@ class FoundationMigrator implements RegisterCommandInterface {
 					// Related posts have different styling depending if they are inline or not.
 					$is_inline = ! str_ends_with( trim( wp_strip_all_tags( $post->body ) ), $matches[0] );
 
+					++$migrated_related_posts;
+
 					return $this->generate_related_posts_block( [ $related_post_id ], $is_inline );
 				},
 				$wp_post->post_content
 			);
 
-			if ( $content === $wp_post->post_content ) {
-				// The markers are not present in the post content, so we'll add the related posts to the end of the post content.
-				$content = $wp_post->post_content . $this->generate_related_posts_block( array_values( $mapped_related_posts ) );
+			// If we didn't migrate all the related posts, we'll add the related posts to the end of the post content.
+			if ( $content === $wp_post->post_content || count( $mapped_related_posts ) !== $migrated_related_posts ) {
+				// Not all the markers are present in the post content, so we'll add the related posts to the end of the post content.
+				$unique_related_posts = array_values( array_unique( array_values( $mapped_related_posts ) ) );
+				$content              = $content . $this->generate_related_posts_block( $unique_related_posts );
 			}
 
 			if ( $content !== $wp_post->post_content ) {
