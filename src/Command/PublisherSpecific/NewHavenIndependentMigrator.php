@@ -796,7 +796,7 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					$image_id = ! $this->dry_run ? $this->import_image_from_asset( $asset_id, $post_id, $entry_id, $craft_db, $caption ) : -1;
 					if ( is_wp_error( $image_id ) ) {
 						$asset_db_data = $this->get_asset_image_data( $asset_id, $craft_db );
-						$this->logger->error( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset ID '%d' URL '%s' : '%s'.", $entry_id, $asset_id, $asset_db_data['url'], $image_id->get_error_message() ) );
+						$this->logger->error( sprintf( "ERROR downloading image for entry ID %d -- matrixMainContent blockImage itemAsset ID '%d' URL '%s' : '%s'.", $entry_id, $asset_id, $asset_db_data['url'] ?? '?? n/a', $image_id->get_error_message() ) );
 						break;
 					}
 					
@@ -909,6 +909,9 @@ class NewHavenIndependentMigrator implements RegisterCommandInterface {
 					
 				case 'blockPoll':
 					$this->logger->error( sprintf( 'ERROR, warning -- skipping blockPoll content in entry ID %d.', $entry_id ) );
+					$text_block         = $this->gutenberg_blocks->get_paragraph( 'POLL_PLACEMENT' );
+					$gutenberg_blocks[] = $text_block;
+					$this->logger->error( sprintf( 'ERROR, warning -- inserting POLL_PLACEMENT paragraph in entry ID %d.', $entry_id ) );
 					break;
 					
 				case 'blockGraphic':
