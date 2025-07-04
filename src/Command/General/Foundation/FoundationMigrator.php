@@ -50,6 +50,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 	const MIGRATED_COMMENT_META_KEY = 'foundation_migrated_comment';
 
 	/**
+	 * List of wide layouts.
+	 *
+	 * @var array
+	 */
+	const WIDE_LAYOUTS_LIST = [ 'Content - Full Width', 'Content - Manual Full Width', 'Content Full Width', 'Content - Sponsor Full Width', 'Content - Full Margin Width' ];
+
+	/**
 	 * JSON iterator.
 	 *
 	 * @var null|SJsonIterator
@@ -825,7 +832,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				// If the first block is an image, hide the featured image.
 				$content_blocks = parse_blocks( $updated_content );
-				if ( isset( $content_blocks[0]['blockName'] ) && in_array( $content_blocks[0]['blockName'], [ 'core/image', 'core/gallery', 'jetpack/slideshow' ], true ) ) {
+				if ( isset( $content_blocks[0]['blockName'] ) && in_array( $content_blocks[0]['blockName'], [ 'core/image', 'core/gallery', 'core/embed', 'jetpack/slideshow' ], true ) ) {
 					update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'hidden' );
 				}
 
@@ -859,10 +866,16 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Setting post meta.
 			update_post_meta( $migrated_post_id, 'foundation_post_transfer', $post->transfer );
 			update_post_meta( $migrated_post_id, 'foundation_post_source', $post->source );
-			update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
+
+			// Seven Days have their subtitles in the description field.
+			if ( str_contains( $publisher_domain, 'sevendaysvt.com' ) ) {
+				update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->description ?? '' );
+			} else {
+				update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
+			}
 
 			// Setting the post's template.
-			if ( isset( $post->layout ) && in_array( $post->layout, [ 'Content - Full Width', 'Content - Manual Full Width' ] ) ) {
+			if ( isset( $post->layout ) && in_array( $post->layout, self::WIDE_LAYOUTS_LIST, true ) ) {
 				update_post_meta( $migrated_post_id, '_wp_page_template', 'single-feature.php' );
 				update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'above' );
 			}
@@ -894,6 +907,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$migrated_posts[ $post->oid ] = $migrated_post_id;
 
 			$csv_writer->put( [ $post->oid, $migrated_post_id, 'https://' . $publisher_domain . $post->permalink, get_permalink( $migrated_post_id ) ] );
+
+			// Make sure the update date didn't change.
+			// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->update(
+				$wpdb->posts,
+				[
+					'post_modified'     => $updated_date->format( 'Y-m-d H:i:s' ),
+					'post_modified_gmt' => $updated_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
+				],
+				[ 'ID' => $migrated_post_id ]
+			);
 
 			$logger->info( sprintf( '[%d] Migrated post %d with ID %d', $index + 1, $post->oid, $migrated_post_id ) );
 		}
