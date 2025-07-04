@@ -862,7 +862,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
 
 			// Setting the post's template.
-			if ( isset( $post->layout ) && 'Content - Full Width' === $post->layout ) {
+			if ( isset( $post->layout ) && in_array( $post->layout, [ 'Content - Full Width', 'Content - Manual Full Width' ] ) ) {
 				update_post_meta( $migrated_post_id, '_wp_page_template', 'single-feature.php' );
 				update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'above' );
 			}
@@ -870,6 +870,26 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Since we regenerated the post content, we need to regenerate the post content for related posts.
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_POSTS_META_KEY );
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_SLIDESHOWS_META_KEY );
+
+			// Migrate brand.
+			if ( isset( $post->brand ) && ! empty( $post->brand ) ) {
+				// Check if the brand term exists, if not create it.
+				$brand_term = get_term_by( 'name', $post->brand, 'brand' );
+				if ( ! $brand_term ) {
+					$brand_term_result = wp_insert_term( $post->brand, 'brand' );
+					if ( is_wp_error( $brand_term_result ) ) {
+						$logger->error( sprintf( 'Error creating brand "%s": %s', $post->brand, $brand_term_result->get_error_message() ) );
+					} else {
+						$brand_term = get_term( $brand_term_result['term_id'], 'brand' );
+						$logger->info( sprintf( 'Created brand "%s" with ID %d', $post->brand, $brand_term->term_id ) );
+					}
+				}
+
+				// Set the brand term as a post meta.
+				if ( $brand_term ) {
+					wp_set_object_terms( $migrated_post_id, [ $brand_term->term_id ], 'brand' );
+				}
+			}
 
 			$migrated_posts[ $post->oid ] = $migrated_post_id;
 

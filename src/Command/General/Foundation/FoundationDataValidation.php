@@ -61,6 +61,23 @@ class FoundationDataValidation implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator foundation-validate-brands',
+			self::get_command_closure( 'cmd_validate_brands' ),
+			[
+				'shortdesc' => 'Validates Foundation brands received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator foundation-validate-users',
 			self::get_command_closure( 'cmd_validate_users' ),
 			[
@@ -163,6 +180,32 @@ class FoundationDataValidation implements RegisterCommandInterface {
 		}
 
 		$this->logger->info( sprintf( 'Found %d categories and %d tags.', $categories_count, $tags_count ) );
+	}
+
+	/**
+	 * Validates Foundation brands received from their export.
+	 * Callable for 'newspack-content-migrator foundation-validate-brands' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_validate_brands( array $args, array $assoc_args ): void {
+		$post_json_file = $assoc_args['post-json-file'];
+
+		$brands = [];
+		$posts  = $this->json_iterator->items( $post_json_file );
+
+		foreach ( $posts as $post ) {
+			if ( isset( $post->brand ) && ! empty( $post->brand ) && ! in_array( $post->brand, $brands, true ) ) {
+				$brands[] = $post->brand;
+			}
+		}
+
+		$this->logger->info( sprintf( 'Found %d brands.', count( $brands ) ) );
+
+		if ( 0 < count( $brands ) && ! taxonomy_exists( 'brand' ) ) {
+			$this->logger->warning( 'Brands found, please ensure that the Newspack Multibranded plugin is installed and activated.' );
+		}
 	}
 
 	/**
