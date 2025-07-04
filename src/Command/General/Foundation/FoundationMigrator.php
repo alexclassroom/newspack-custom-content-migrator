@@ -1067,11 +1067,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
-				$gallery_block = $gallery_mode
-					? $this->gutenberg_block_generator->get_gallery( array_column( $migrated_images, 'attachment_id' ), 1 )
-					: $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) );
+				if ( $gallery_mode ) {
+					$image_blocks = [];
+					foreach ( $migrated_images as $image ) {
+						$image_blocks[] = $this->gutenberg_block_generator->get_image( get_post( $image['attachment_id'] ) );
+					}
 
-				$updated_content = $slideshow->description . serialize_block( $gallery_block );
+					$gallery_block = serialize_blocks( $image_blocks );
+				} else {
+					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
+				}
+
+
+				$updated_content = $slideshow->description . $gallery_block;
 
 				if ( $updated_content !== $slideshow->description ) {
 					// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
