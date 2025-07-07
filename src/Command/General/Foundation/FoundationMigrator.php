@@ -417,6 +417,72 @@ class FoundationMigrator implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator foundation-migrate-collections',
+			self::get_command_closure( 'cmd_migrate_collections' ),
+			[
+				'shortdesc' => 'Migrates Foundation collections received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'publisher-domain',
+						'description' => 'The domain of the publisher (e.g. `www.okgazette.com`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'issue-json-file',
+						'description' => 'Path to the JSON file containing the issues (e.g. `Issue.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'image-json-file',
+						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'media-local-path',
+						'description' => 'Local path to the media files (The folder usually have a `mediaserver` folder).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'gallery-mode',
+						'description' => 'Use gallery mode for the slideshow.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'update-content',
+						'description' => 'Update the post content regardless of the difference.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the slideshow with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the slideshow with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator foundation-migrate-related-posts',
 			self::get_command_closure( 'cmd_migrate_related_posts' ),
 			[
@@ -817,7 +883,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			// Migrate images tray and featured image.
+			$time            = microtime( true );
 			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_post_id, $post->imageLinks, $image_json_file, $post->images ?? [] );
+			$logger->info( sprintf( 'Migrated images tray and featured image in %s.02 seconds', microtime( true ) - $time ) );
 
 			// Migrate post content.
 			$updated_content = $this->generate_post_content( $migrated_post_id, $post, $migrated_images, $embed_json_file, $audio_json_file, $pdf_json_file, $slideshow_json_file );
@@ -2052,7 +2120,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$local_media_path = isset( $raw_attachment->path ) ? rtrim( $this->media_local_path, '/' ) . '/' . ltrim( $raw_attachment->path, '/' ) : '';
 		$media_path       = is_file( $local_media_path ) ? $local_media_path : $raw_attachment->url;
 
-		return Attachments::import_external_file( $media_path, null, $raw_attachment->caption ?? null, null, $raw_attachment->alt ?? null, $post_id, $meta_input );
+		return Attachments::import_external_file( $media_path, null, $raw_attachment->caption ?? null, null, $raw_attachment->alt ?? null, $post_id, $meta_input, '', true, $raw_attachment->oid );
 	}
 
 	/**
