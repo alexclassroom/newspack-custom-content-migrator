@@ -877,7 +877,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 					)
 				);
 
-				$byline_authors = $post->creditType . ' ' . join( ', ', $authors_byline_parts );
+				$byline_authors = $post->creditType . ' ' . $this->format_natural_language_list( $authors_byline_parts );
 				update_post_meta( $migrated_post_id, '_newspack_byline_active', true );
 				update_post_meta( $migrated_post_id, '_newspack_byline', $byline_authors );
 			}
@@ -1601,6 +1601,32 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $display_name;
+	}
+
+	/**
+	 * Format a list of items with natural language formatting (comma-separated with "and" before the last item).
+	 *
+	 * @param array $items Array of items to format.
+	 * @return string Formatted list.
+	 */
+	private function format_natural_language_list( array $items ): string {
+		$count = count( $items );
+
+		if ( 0 === $count ) {
+			return '';
+		}
+
+		if ( 1 === $count ) {
+			return $items[0];
+		}
+
+		if ( 2 === $count ) {
+			return $items[0] . ' and ' . $items[1];
+		}
+
+		// For 3 or more items: "item1, item2, and item3".
+		$last_item = array_pop( $items );
+		return implode( ', ', $items ) . ', and ' . $last_item;
 	}
 
 	/**
