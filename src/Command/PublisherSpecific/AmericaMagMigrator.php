@@ -1015,8 +1015,6 @@ wp newspack-post-image-downloader import-images
 		[/caption]
 		*/
 
-		global $wpdb;
-
 		// get asset urls from in the content.
 		$post_content = get_post_field( 'post_content', $post_id, 'raw' );
 
@@ -1039,10 +1037,10 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'Old post content node id: ' . $old_content_node_id );
 		
 		// Loop through each file match
-		foreach( $attached_file_matches[1] as $lookup_file_with_path ) {
+		foreach( $attached_file_matches[1] as $wp_path ) {
 			
 			// Look up each image.
-			$this->clean_up_assets___compare_path_to_content_node( $lookup_file_with_path, $old_content_node_id );
+			$this->clean_up_assets___compare_path_to_content_node( $wp_path, $old_content_node_id );
 
 		}		
 		
@@ -1317,15 +1315,13 @@ wp newspack-post-image-downloader import-images
 	}
 
 	/**
-	 * $lookup_file_with_path    2025/05/file.jpg (could be thumbnail, mp3, pdf, etc)
+	 * $wp_path    2025/05/file.jpg (could be thumbnail, mp3, pdf, etc)
 	 * $old_content_node_id      The related Drupal node id for the post that had this url in it's content.
 	 */
-	private function clean_up_assets___compare_path_to_content_node( $lookup_file_with_path, $old_content_node_id ) {
+	private function clean_up_assets___compare_path_to_content_node( $wp_path, $old_content_node_id ) {
 
-		global $wpdb;
-
-		// Attempt to get an attachment id
-		$attachment_id = $this->clean_up_assets___get_attachment_id_by_path( $lookup_file_with_path );
+		// Attempt to get an attachment id from url path.
+		$attachment_id = $this->clean_up_assets___get_attachment_id_by_path( $wp_path );
 		if( ! ( $attachment_id > 0 ) ) {
 			return;
 		}
@@ -1341,9 +1337,10 @@ wp newspack-post-image-downloader import-images
 		// Attachment fields.
 		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
 		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+
 		$this->logger->info( 'DB attached_file: ' . $attached_file );
 
-		// Sanity.  Since in-content images $lookup_file_with_path were set by FG, then they should all
+		// Sanity.  Since in-content images $wp_path were set by FG, then they should all
 		// have the old file url.
 		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
 		if( empty( $old_file_url ) ) {
@@ -1360,7 +1357,7 @@ wp newspack-post-image-downloader import-images
 		}
 
 		// compare filesize.
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $lookup_file_with_path, $attachment_metadata );
+		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $wp_path, $attachment_metadata );
 		
 		if( $wp_filesize !== (int) $file_managed->filesize ) {
 			$this->logger->error( 'File size mismatch.' );
@@ -1375,13 +1372,8 @@ wp newspack-post-image-downloader import-images
 		
 		$file_warning_count = 0;
 		
-
-die('change this to no reference...create its own function.');
-
 		$file_warning_count += $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
 		
-		// Check content body.
-
 		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
 		if( $related_book_node_usage_found ) {
 			$this->logger->info( 'Node content body skip for found related book node.' );
