@@ -2030,6 +2030,9 @@ class NNECategoryMap {
 			);
 		}
 
+		$maybe_term_data['name']     = $name;
+		$maybe_term_data['taxonomy'] = $taxonomy;
+
 		return new WP_Term( (object) $maybe_term_data );
 	}
 }
