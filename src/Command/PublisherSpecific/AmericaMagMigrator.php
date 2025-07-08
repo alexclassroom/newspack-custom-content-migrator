@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post_tag', 'user' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post_tag', 'user-assets-merged' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -242,6 +242,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Unique key per clean up.
 		$meta_key_cleaned_item = self::META_KEY_CLEANED_ITEM_SLUG . '-' . $pos_args[0];
 
+		$total_cleaned = 0;
+
         do {
 
             // Has json item from import, but not cleaned up.
@@ -276,6 +278,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					] );
 					break;
                 case 'user':
+                    $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+				case 'user-assets-merged':
+					$meta_query[] = [ 'key' => '_np_migration_profile_post_id', 'compare' => 'EXISTS' ];
+					$meta_query[] = [ 'key' => 'simple_local_avatar',           'compare' => 'EXISTS' ];
                     $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
 				case 'post_tag':
@@ -316,19 +323,26 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                         $this->clean_up_user( $db_id, $logger_slug );
                         update_user_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
-                    case 'post_tag':
+					case 'user-assets-merged':
+						$this->clean_up_user_assets_merged( $db_id, $logger_slug );
+						update_user_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+						break;
+					case 'post_tag':
                         $this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
                         update_term_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
                 }
 
-                $this->logger->info( '-- done with item' );
+				++$total_cleaned;
+
+                $this->logger->info( '-- done with item ( count: ' . $total_cleaned . ' )' );
+
 
             } // foreach item.
             
         } while( ! empty( $db_items ) );
 
-		$this->logger->info( 'Done.' ); 
+		$this->logger->info( 'Done with ' . $total_cleaned . ' items.' ); 
 	}
 
 	/**
@@ -1393,6 +1407,95 @@ wp newspack-post-image-downloader import-images
         }
 
     }
+
+	private function clean_up_user_assets_merged( int $user_id, $logger_slug ): void {
+
+		global $wpdb;
+
+		// old profile photo in Drupal.
+		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+			FROM node__field_profile_photo nfpp
+			JOIN file_managed fm on fm.fid = nfpp.field_profile_photo_target_id and fm.status = 1
+			WHERE nfpp.deleted = 0 AND nfpp.entity_id = %d
+			",
+			get_post_meta( get_user_meta( $user_id, '_np_migration_profile_post_id', true ), '_fgd2wp_old_node_id', true )
+		));
+
+		$this->logger->info( json_encode( $file_managed ) );
+		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
+
+		// wordpress image.
+		$avatar = get_user_meta( $user_id, 'simple_local_avatar', true );
+		$attachment_id = $avatar['media_id'];
+
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		$old_file_url        = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+
+		// sanity
+		if( empty( $attachment_metadata) ) {
+			$this->logger->warning( 'SKIP: Missing attachment metadata in db.' );
+			return;
+		}
+
+		// Sanity check, 'file' field should exist.
+		if( ! isset( $attachment_metadata['file'] ) ) {
+			$this->logger->warning( 'SKIP: File key does not exist.' );
+			return;
+		}
+
+		// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
+		if( $attachment_metadata['file'] !== $attached_file ) {
+			$this->logger->warning( 'SKIP: File meta does not match attached file.' );
+			return;
+		}
+
+		$this->logger->info( 'DB attached_file: ' . $attached_file );
+		$this->logger->info( 'Staging URL: ' . self::STAGING_UPLOADS_URL . $attached_file );
+		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+
+		// check basenames.
+		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
+			$this->logger->notice( 'File basenames are different.' );
+		}
+		
+		// compare filesize.
+		$wp_filesize = 0;
+
+		// Use original image since this will match to drupal.
+		if( isset( $attachment_metadata['original_image'] ) ) {
+			// On local dev, we dont have physical files, so fetch from staging.
+			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . dirname( $attached_file ) . '/' . $attachment_metadata['original_image'] );
+		}
+		// there is no original image so just use the attached file size if exits.
+		else if( isset( $attachment_metadata['filesize'] ) ) {
+			$wp_filesize = $attachment_metadata['filesize'];
+		}
+		// directly fetch the file size, for pdfs, etc...
+		else {
+			// On local dev, we dont have physical files, so fetch from staging.
+			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . '/' . $attached_file );
+		}
+
+		if( ! ( $wp_filesize > 0 ) ) {
+			$this->logger->error( 'Filesize not gt 0.' );
+			exit();
+		}
+
+		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
+		
+		if( $wp_filesize !== (int) $file_managed->filesize ) {
+			$this->logger->warning( 'File size mismatch.' );
+			return;
+		}
+
+		$this->logger->info( 'File size matched.' );
+
+
+	}
 
     private function clean_up_content_un_fetched( $post_content ) {
 
