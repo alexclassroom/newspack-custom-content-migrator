@@ -1042,88 +1042,10 @@ wp newspack-post-image-downloader import-images
 		foreach( $attached_file_matches[1] as $lookup_file_with_path ) {
 			
 			// Look up each image.
-			$this->clean_up_post_assets_merged_lookup( $lookup_file_with_path, $old_content_node_id );
+			$this->clean_up_assets___compare_path_to_content_node( $lookup_file_with_path, $old_content_node_id );
 
 		}		
 		
-	}
-
-	/**
-	 * $lookup_file_with_path    2025/05/file.jpg (could be thumbnail, mp3, pdf, etc)
-	 * $old_content_node_id      The related Drupal node id for the post that had this url in it's content.
-	 */
-	private function clean_up_post_assets_merged_lookup( $lookup_file_with_path, $old_content_node_id ) {
-
-		global $wpdb;
-
-		// Attempt to get an attachment id
-		$attachment_id = $this->clean_up_assets___get_attachment_id_by_path( $lookup_file_with_path );
-		if( ! ( $attachment_id > 0 ) ) {
-			return;
-		}
-
-		// We found an attachment.
-		$this->logger->info( 'Attachment id: ' . $attachment_id );
-
-		// Validate db data.
-		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
-			return;
-		}
-		
-		// Attachment fields.
-		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		$this->logger->info( 'DB attached_file: ' . $attached_file );
-
-		// Sanity.  Since in-content images $lookup_file_with_path were set by FG, then they should all
-		// have the old file url.
-		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
-		if( empty( $old_file_url ) ) {
-			$this->logger->error( 'No old file url.' );
-			exit();
-		}
-		$this->logger->info( 'Old file url: ' . $old_file_url );
-
-		// Look up the old file in the Drupal table.
-		$old_file_url_parsed = $this->clean_up_assets___get_old_file_url_parsed( $old_file_url );
-		$file_managed = $this->clean_up_assets___get_file_managed_by_url( $old_file_url_parsed );
-		if( ! is_object( $file_managed ) ) {
-			return;
-		}
-
-		// compare filesize.
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $lookup_file_with_path, $attachment_metadata );
-		
-		if( $wp_filesize !== (int) $file_managed->filesize ) {
-			$this->logger->error( 'File size mismatch.' );
-			exit();
-		}
-
-		$this->logger->info( 'File size matched.' );
-
-		// -- Check usage and content.
-		
-		$related_book_node_usage_found = false;
-		
-		$file_warning_count = 0;
-		
-
-die('change this to no reference...create its own function.');
-
-		$file_warning_count += $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
-		
-		// Check content body.
-
-		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
-		if( $related_book_node_usage_found ) {
-			$this->logger->info( 'Node content body skip for found related book node.' );
-		}
-		else {
-			$file_warning_count += $this->clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed );
-		}
-
-		$this->logger->info( 'File is ' . ( ( 0 === $file_warning_count ) ? 'OK' : $file_warning_count ) . ' --' );
-
 	}
 
     /**
@@ -1391,6 +1313,84 @@ die('change this to no reference...create its own function.');
 			$this->logger->warning( 'File usage not found...MAKE SURE in-content IS YES!' );
 			return 1;
 		}	
+
+	}
+
+	/**
+	 * $lookup_file_with_path    2025/05/file.jpg (could be thumbnail, mp3, pdf, etc)
+	 * $old_content_node_id      The related Drupal node id for the post that had this url in it's content.
+	 */
+	private function clean_up_assets___compare_path_to_content_node( $lookup_file_with_path, $old_content_node_id ) {
+
+		global $wpdb;
+
+		// Attempt to get an attachment id
+		$attachment_id = $this->clean_up_assets___get_attachment_id_by_path( $lookup_file_with_path );
+		if( ! ( $attachment_id > 0 ) ) {
+			return;
+		}
+
+		// We found an attachment.
+		$this->logger->info( 'Attachment id: ' . $attachment_id );
+
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
+		// Attachment fields.
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		$this->logger->info( 'DB attached_file: ' . $attached_file );
+
+		// Sanity.  Since in-content images $lookup_file_with_path were set by FG, then they should all
+		// have the old file url.
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
+			exit();
+		}
+		$this->logger->info( 'Old file url: ' . $old_file_url );
+
+		// Look up the old file in the Drupal table.
+		$old_file_url_parsed = $this->clean_up_assets___get_old_file_url_parsed( $old_file_url );
+		$file_managed = $this->clean_up_assets___get_file_managed_by_url( $old_file_url_parsed );
+		if( ! is_object( $file_managed ) ) {
+			return;
+		}
+
+		// compare filesize.
+		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $lookup_file_with_path, $attachment_metadata );
+		
+		if( $wp_filesize !== (int) $file_managed->filesize ) {
+			$this->logger->error( 'File size mismatch.' );
+			exit();
+		}
+
+		$this->logger->info( 'File size matched.' );
+
+		// -- Check usage and content.
+		
+		$related_book_node_usage_found = false;
+		
+		$file_warning_count = 0;
+		
+
+die('change this to no reference...create its own function.');
+
+		$file_warning_count += $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
+		
+		// Check content body.
+
+		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
+		if( $related_book_node_usage_found ) {
+			$this->logger->info( 'Node content body skip for found related book node.' );
+		}
+		else {
+			$file_warning_count += $this->clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed );
+		}
+
+		$this->logger->info( 'File is ' . ( ( 0 === $file_warning_count ) ? 'OK' : $file_warning_count ) . ' --' );
 
 	}
 
