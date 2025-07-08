@@ -21,6 +21,7 @@ use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngla
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEImportMetaEnum;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEInternalPublisherNamingMap;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEPublisherEnum;
+use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNETagMap;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
 use stdClass;
@@ -179,6 +180,14 @@ class NNEMigrator implements RegisterCommandInterface {
 				],
 			],
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newspapers-of-new-england-update-tags-to-mapped-values',
+			self::get_command_closure( 'cmd_update_tags' ),
+			[
+				'shortdesc' => 'Tags were migrated as-is from the XMLs, this command updates the tags to mapped values provided by the NNE Team',
+			],
+		);
 	}
 
 	/**
@@ -221,6 +230,200 @@ class NNEMigrator implements RegisterCommandInterface {
 			}
 
 			$this->migrate_xml_file( "$this->path_to_xmls/$xml_file", $update_existing_posts );
+		}
+	}
+
+	/**
+	 * This command fixes an issue where tags were imported directly, as-is, from XML files when they should've been
+	 * mapped to either new tag values or categories.
+	 *
+	 * @return void
+	 * @throws Exception If a new tag cannot be created.
+	 */
+	public function cmd_update_tags(): void {
+		ConsoleColor::title_output( 'Updating tags...' );
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$tags = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT t.term_id, tt.term_taxonomy_id, t.name, t.slug, tt.taxonomy FROM $wpdb->terms t 
+    					INNER JOIN $wpdb->term_taxonomy tt 
+    					    ON t.term_id = tt.term_id 
+    				LEFT JOIN $wpdb->termmeta tm ON t.term_id = tm.term_id AND tm.meta_key = %s
+         			WHERE tt.taxonomy = %s AND tm.meta_value IS NULL",
+				NNEImportMetaEnum::TAG_UPDATE_META_KEY->value,
+				'post_tag'
+			)
+		);
+
+		foreach ( $tags as $tag ) {
+			ConsoleColor::white( 'Updating tag:' )->underlined_yellow( $tag->name )->output();
+
+			if ( ! array_key_exists( $tag->name, NNETagMap::$mapping ) ) {
+				ConsoleColor::magenta( 'No mapping found for tag. Skipping...' )->output();
+				add_term_meta(
+					$tag->term_id,
+					NNEImportMetaEnum::TAG_UPDATE_META_KEY->value,
+					NNEImportMetaEnum::TAG_UPDATE_SKIPPED_META_VALUE->value
+				);
+				continue;
+			}
+
+			$mapped_tag                = NNETagMap::$mapping[ $tag->name ];
+			$count_of_new_tags         = ! empty( $mapped_tag['tags'] ) ? count( $mapped_tag['tags'] ) : 0;
+			$contains_category_mapping = ! empty( $mapped_tag['category'] );
+			$output                    = ConsoleColor::white( 'Contains Category Mapping:' );
+			$output                    = $contains_category_mapping ? $output->green( 'Yes' ) : $output->yellow( 'No' );
+
+			$output->white( 'Count of New Tags:' )->yellow( $count_of_new_tags )->output();
+
+			if (
+				! $contains_category_mapping &&
+				1 === $count_of_new_tags &&
+				strtolower( $tag->name ) === strtolower( $mapped_tag['tags'][0] )
+			) {
+				if ( $tag->name !== $mapped_tag['tags'][0] ) { // If the case dependent names are the same, we can skip renaming.
+					ConsoleColor::green( 'Only name change required.' )
+								->white( 'Old:' )
+								->underlined_white( $tag->name )
+								->white( 'New:' )
+								->underlined_white( $mapped_tag['tags'][0] )
+								->output();
+
+					// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+					$maybe_term_updated = $wpdb->update(
+						$wpdb->terms,
+						[
+							'name' => $mapped_tag['tags'][0],
+						],
+						[
+							'term_id' => $tag->term_id,
+						]
+					);
+
+					if ( 1 === $maybe_term_updated ) {
+						ConsoleColor::cyan( 'Rename successful' )->output();
+						add_term_meta(
+							$tag->term_id,
+							NNEImportMetaEnum::TAG_UPDATE_META_KEY->value,
+							NNEImportMetaEnum::TAG_UPDATE_UPDATED_META_VALUE->value
+						);
+					} else {
+						ConsoleColor::red( 'Rename failed' )->output();
+					}
+				} else {
+					ConsoleColor::green( 'No name change required.' )->output();
+					add_term_meta(
+						$tag->term_id,
+						NNEImportMetaEnum::TAG_UPDATE_META_KEY->value,
+						NNEImportMetaEnum::TAG_UPDATE_UPDATED_META_VALUE->value
+					);
+				}
+
+				continue;
+			}
+
+			$associated_post_ids = $this->get_associated_post_ids( $tag->term_taxonomy_id );
+
+			$maybe_category_added_to_all_posts = null;
+			$maybe_all_tags_added_to_posts     = [];
+			
+			// if category, find all posts associated with old tag, and add this category.
+			// if no tag,
+			// delete the old tag
+			// If exactly 1 tag, rename to the new tag.
+			// If more than 1 tag, use first tag to rename, add subsequent tag to all posts associated with the new tag.
+
+			if ( $contains_category_mapping ) {
+				$parent_term = (object) [
+					'term_id'          => 0,
+					'term_taxonomy_id' => 0,
+				];
+				if ( ! empty( $mapped_tag['category']['parent'] ) ) {
+					$parent_term = NNECategoryMap::get_term_by_name( $mapped_tag['category']['parent'], 'category' );
+				}
+
+				$category = NNECategoryMap::get_term_by_name( $mapped_tag['category']['name'], 'category' );
+
+				if ( null === $category || $category->parent !== $parent_term->term_taxonomy_id ) {
+					ConsoleColor::red( 'Category without proper parent.' )->output();
+					ConsoleColor::white( "\t" )->red( 'Name:' )->bright_red( $mapped_tag['category']['name'] )->output();
+					ConsoleColor::white( "\t" )->red( 'Parent:' )->bright_red( $mapped_tag['category']['parent'] ?? '-' )->output();
+					continue;
+				}
+
+				$maybe_category_added_to_all_posts = $this->add_taxonomy_to_post_ids( $category->term_taxonomy_id, $associated_post_ids );
+
+				if ( $maybe_category_added_to_all_posts ) {
+					ConsoleColor::green( 'Successfully added category to all associated posts.' )->output();
+				} else {
+					ConsoleColor::red( 'Failed to add category to all associated posts.' )->output();
+				}
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->delete(
+				$wpdb->term_relationships,
+				[
+					'term_taxonomy_id' => $tag->term_taxonomy_id,
+				]
+			);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->delete(
+				$wpdb->term_taxonomy,
+				[
+					'term_taxonomy_id' => $tag->term_taxonomy_id,
+				]
+			);
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$wpdb->delete(
+				$wpdb->terms,
+				[
+					'term_id' => $tag->term_id,
+				]
+			);
+
+			if ( ! empty( $mapped_tag['tags'] ) ) {
+				foreach ( $mapped_tag['tags'] as $new_tag_name ) {
+					ConsoleColor::white( "\t" )->underlined_white( $tag->name )->white( '👉🏼' )->bright_white( $new_tag_name )->output();
+
+					$new_tag = NNECategoryMap::get_term_by_name( $new_tag_name, 'post_tag' );
+					if ( null === $new_tag ) {
+						$new_tag = NNECategoryMap::create_taxonomy( $new_tag_name, 'post_tag' );
+					}
+
+					$maybe_tag_added_to_posts = $this->add_taxonomy_to_post_ids( $new_tag->term_taxonomy_id, $associated_post_ids );
+
+					if ( $maybe_tag_added_to_posts ) {
+						ConsoleColor::green( "Successfully added new tag (`$new_tag->name`) to associated posts." )->output();
+						$maybe_all_tags_added_to_posts[] = true;
+					} else {
+						ConsoleColor::red( "Failed to add new tag (`$new_tag->name`) to associated posts." )->output();
+						$maybe_all_tags_added_to_posts[] = false;
+					}
+				}
+
+				$maybe_all_tags_added_to_posts = ! empty( $maybe_all_tags_added_to_posts ) && ! in_array( false, $maybe_all_tags_added_to_posts, true );
+			}
+
+			$mark_as_complete = true;
+
+			if ( null !== $maybe_category_added_to_all_posts ) {
+				$mark_as_complete = $maybe_category_added_to_all_posts;
+			}
+
+			if ( is_bool( $maybe_all_tags_added_to_posts ) ) {
+				$mark_as_complete = $mark_as_complete && $maybe_all_tags_added_to_posts;
+			}
+
+			if ( $mark_as_complete ) {
+				add_term_meta(
+					$tag->term_id,
+					NNEImportMetaEnum::TAG_UPDATE_META_KEY->value,
+					NNEImportMetaEnum::TAG_UPDATE_UPDATED_META_VALUE->value
+				);
+			}
 		}
 	}
 
@@ -1195,5 +1398,60 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		return array_reduce( $update_attempts, fn( $a, $b ) => $a && $b, true );
+	}
+
+	/**
+	 * Returns a list of all post IDs associated with a specific term taxonomy.
+	 *
+	 * @param int $term_taxonomy_id Term taxonomy ID.
+	 *
+	 * @return array
+	 */
+	private function get_associated_post_ids( int $term_taxonomy_id ): array {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		return $wpdb->get_col(
+			$wpdb->prepare(
+				"SELECT object_id FROM $wpdb->term_relationships tr WHERE term_taxonomy_id = %d",
+				$term_taxonomy_id
+			),
+		);
+	}
+
+	/**
+	 * Adds a specific term taxonomy to a list of post IDs.
+	 *
+	 * @param int   $term_taxonomy_id Term taxonomy ID.
+	 * @param array $post_ids List of post IDs.
+	 *
+	 * @return bool
+	 */
+	private function add_taxonomy_to_post_ids( int $term_taxonomy_id, array $post_ids ): bool {
+		global $wpdb;
+
+		$currently_associated_post_ids = $this->get_associated_post_ids( $term_taxonomy_id );
+		$post_ids                      = array_diff( $post_ids, $currently_associated_post_ids );
+
+		$count_of_posts              = 0;
+		$count_of_successful_inserts = 0;
+		foreach ( $post_ids as $post_id ) {
+			++$count_of_posts;
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery
+			$maybe_category_added = $wpdb->insert(
+				$wpdb->term_relationships,
+				[
+					'object_id'        => $post_id,
+					'term_taxonomy_id' => $term_taxonomy_id,
+				]
+			);
+
+			if ( false !== $maybe_category_added ) {
+				++$count_of_successful_inserts;
+			}
+		}
+
+		return $count_of_posts === $count_of_successful_inserts;
 	}
 }
