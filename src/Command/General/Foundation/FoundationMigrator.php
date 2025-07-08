@@ -839,7 +839,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'post',
-				'post_title'        => wp_strip_all_tags( $post->headline ),
+				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $post->headline ) ),
 				'post_name'         => $post->basename . '-' . $post->oid,
 				'post_excerpt'      => $post->summary,
 				'post_status'       => $this->map_post_status( $post->status ),
@@ -1036,7 +1036,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'page',
-				'post_title'        => wp_strip_all_tags( $page->headline ),
+				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $page->headline ) ),
 				'post_name'         => $page->permalink,
 				'post_status'       => $this->map_post_status( $page->status ),
 				'post_modified'     => $last_modified->format( 'Y-m-d H:i:s' ),
@@ -1152,7 +1152,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'post',
-				'post_title'        => wp_strip_all_tags( $slideshow->title ),
+				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $slideshow->title ) ),
 				'post_name'         => $slideshow->basename . '-' . $slideshow->oid,
 				'post_status'       => $this->map_post_status( $slideshow->status ),
 				'post_date'         => $release_date->format( 'Y-m-d H:i:s' ),
@@ -1697,6 +1697,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$content = $this->strip_style_tags( $content );
 		$content = $this->strip_line_breaks( $content );
 		$content = $this->strip_whitespace( $content );
+		$content = $this->normalize_html_list( $content );
 
 		return $content;
 	}
@@ -2571,18 +2572,34 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string The processed HTML content.
 	 */
 	private function strip_line_breaks( string $html ): string {
-		// Remove <br> tags that appear between paragraphs.
-		// This pattern matches <br> tags (with optional whitespace) that are between </p> and <p> tags.
-		$html = preg_replace( '/<\/p>\s*<br\s*\/?>\s*<p/', "</p>\n<p", $html );
+		// Remove <br> and newlines inside the dropcap span.
+		$html = preg_replace_callback(
+			'/<span class="fdnDropCap">.*?<\/span>/is',
+			function ( $matches ) {
+				return preg_replace( '/<br\s*\/?>|\R/i', '', $matches[0] );
+			},
+			$html
+		);
 
-		// Also remove standalone <br> tags that might be at the beginning or end of content.
-		$html = preg_replace( '/^\s*<br\s*\/?>\s*/', '', $html );
-		$html = preg_replace( '/\s*<br\s*\/?>\s*$/', '', $html );
+		// Remove any <br> tags (with or without \n) immediately after </span>.
+		$html = preg_replace( '/(<\/span>)(\s*<br\s*\/?>\s*|\s*\n\s*)+/i', '$1 ', $html );
 
-		// Remove multiple consecutive <br> tags.
-		$html = preg_replace( '/(<br\s*\/?>\s*)+/', "<br>\n", $html );
+		// Match one or more <br> tags in a row (with optional whitespace/newlines).
+		$normalized = preg_replace( '/(<br\s*\/?>\s*){2,}/i', '###PARA_BREAK###', $html );
 
-		return $html;
+		// Split on our placeholder.
+		$paragraphs = explode( '###PARA_BREAK###', $normalized );
+
+		// Wrap each paragraph.
+		$output = '';
+		foreach ( $paragraphs as $p ) {
+			$trimmed = trim( $p );
+			if ( ! empty( $trimmed ) ) {
+				$output .= '<p>' . $trimmed . '</p>' . "\n";
+			}
+		}
+
+		return $output;
 	}
 
 	/**
@@ -2593,13 +2610,80 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function strip_whitespace( string $html ): string {
 		// Remove excessive whitespace between closing tag and the first character of its content.
-		$html = preg_replace( '/>\s+(\S)/', '>$1', $html );
+		$html = preg_replace( '/>\s+(\S)/', '> $1', $html );
 		// Remove excessive whitespace between tags.
 		$html = preg_replace( '/>\s+</', '> <', $html );
 		$html = preg_replace( '/\]\s+</', '] <', $html );
 		$html = preg_replace( '/>\s+\[/', '> [', $html );
 
 		return trim( $html );
+	}
+
+	/**
+	 * Normalizes HTML lists to a standard format by cleaning up whitespace and formatting.
+	 * Groups multiple single-item ul tags into one consolidated ul tag.
+	 *
+	 * @param string $html The HTML content to process.
+	 * @return string The processed HTML content with normalized lists.
+	 */
+	private function normalize_html_list( string $html ): string {
+		// Group consecutive single-item ul tags into one ul tag.
+		$html = preg_replace_callback(
+			'/(<ul[^>]*>\s*<li[^>]*>.*?<\/li>\s*<\/ul>\s*(?:<br[^>]*>\s*)*)+/is',
+			function ( $matches ) {
+				$all_ul_content = $matches[0];
+
+				// Extract all li tags from the matched ul tags.
+				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $all_ul_content, $li_matches );
+
+				if ( empty( $li_matches[0] ) ) {
+					return $matches[0]; // Return unchanged if no li tags found.
+				}
+
+				$cleaned_li_tags = [];
+				foreach ( $li_matches[1] as $index => $li_content ) {
+					// Clean up the content of each li tag.
+					$cleaned_content = preg_replace( '/\s+/', ' ', $li_content );
+					$cleaned_content = trim( $cleaned_content );
+
+					$cleaned_li_tags[] = '<li>' . $cleaned_content . '</li>';
+				}
+
+				// Return a single ul tag containing all the cleaned li tags.
+				return '<ul>' . implode( '', $cleaned_li_tags ) . '</ul>';
+			},
+			$html
+		);
+
+		// Group consecutive single-item ol tags into one ol tag.
+		$html = preg_replace_callback(
+			'/(<ol[^>]*>\s*<li[^>]*>.*?<\/li>\s*<\/ol>\s*(?:<br[^>]*>\s*)*)+/is',
+			function ( $matches ) {
+				$all_ol_content = $matches[0];
+
+				// Extract all li tags from the matched ol tags.
+				preg_match_all( '/<li[^>]*>(.*?)<\/li>/is', $all_ol_content, $li_matches );
+
+				if ( empty( $li_matches[0] ) ) {
+					return $matches[0]; // Return unchanged if no li tags found.
+				}
+
+				$cleaned_li_tags = [];
+				foreach ( $li_matches[1] as $index => $li_content ) {
+					// Clean up the content of each li tag.
+					$cleaned_content = preg_replace( '/\s+/', ' ', $li_content );
+					$cleaned_content = trim( $cleaned_content );
+
+					$cleaned_li_tags[] = '<li>' . $cleaned_content . '</li>';
+				}
+
+				// Return a single ol tag containing all the cleaned li tags.
+				return '<ol>' . implode( '', $cleaned_li_tags ) . '</ol>';
+			},
+			$html
+		);
+
+		return $html;
 	}
 
 	/**
