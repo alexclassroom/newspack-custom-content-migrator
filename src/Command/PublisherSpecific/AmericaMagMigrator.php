@@ -1166,32 +1166,26 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'Old basename: ' . $old_basename );
 
 		// get the file_managed from Drupal and compage the filesize
-		// $wpdb->charset = 'utf8mb4'; // needed for unicode?
-		// $wpdb->collate = 'utf8mb4_general_ci';  // needed for unicode?
-		// did this have to do with uuid????
-		// todo: reimport db to initial charset/collation...see not in README.
-		// todo: replace with mysqli see below ??
-		// removed " and filename = %s " ($old_basename) since these can diverge from uri in drupal.
-		// possibly need to select filename and print alert that filename <> $old_basename?
-		$results = $wpdb->get_results( $wpdb->prepare( "
+		// don't use wpdb as it will convert unicode to ascii based on table definitions.
+		$mysqli = $this->util_get_mysqli();
+		$result = $mysqli->query( "
 			select fid, filesize
 			from file_managed
 			where status = 1
-			and uri = %s
-			",
-			str_replace( 'sites/default/files/', 'public://', $old_uri ) // db has different format...
-		));
+			and uri = '" . $mysqli->real_escape_string( str_replace( 'sites/default/files/', 'public://', $old_uri ) ) . "'
+		");
 		
-		if( count( $results ) > 1 ) {
-			$this->logger->error( 'File managed has multiple results.' );
-			exit();
-		}
-		else if( 1 !== count( $results ) ) {
+		if( ! $result || ! isset( $result->num_rows ) ||  ! ( $result->num_rows > 0 ) ) {
 			$this->logger->warning( 'File managed results not found.' );
 			return;
 		}
 
-		$file_managed = reset( $results );
+		if( $result->num_rows > 1 ) {
+			$this->logger->error( 'File managed has multiple results.' );
+			exit();
+		}
+		
+		$file_managed = $result->fetch_object();
 
 		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
 
