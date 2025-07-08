@@ -13,4 +13,8 @@ enum NNEImportMetaEnum: string {
 
 	case BYLINE_FEATURE_ACTIVE_KEY = '_newspack_byline_active';
 	case BYLINE_KEY                = '_newspack_byline';
+
+	case TAG_UPDATE_META_KEY           = '_newspack_update_tag_via_mapping';
+	case TAG_UPDATE_SKIPPED_META_VALUE = 'skipped';
+	case TAG_UPDATE_UPDATED_META_VALUE = 'updated';
 }
