@@ -14,7 +14,7 @@ use WP_CLI;
 
 // use Newspack\MigrationTools\Logic\GuestContributorsHelper;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\AmericaMagMigratorTempGC as GuestContributorsHelper;
-
+use stdClass;
 
 class AmericaMagMigrator implements RegisterCommandInterface {
 
@@ -1320,6 +1320,9 @@ wp newspack-post-image-downloader import-images
 	 */
 	private function clean_up_assets___compare_path_to_content_node( $wp_path, $old_content_node_id ) {
 
+		$file_warning_count = 0;
+		$related_book_node_usage_found = false;
+		
 		// Attempt to get an attachment id from url path.
 		$attachment_id = $this->clean_up_assets___get_attachment_id_by_path( $wp_path );
 		if( ! ( $attachment_id > 0 ) ) {
@@ -1352,9 +1355,27 @@ wp newspack-post-image-downloader import-images
 		// Look up the old file in the Drupal table.
 		$old_file_url_parsed = $this->clean_up_assets___get_old_file_url_parsed( $old_file_url );
 		$file_managed = $this->clean_up_assets___get_file_managed_by_url( $old_file_url_parsed );
+
 		if( ! is_object( $file_managed ) ) {
-			return;
+
+			// if this happens we could still try to build a file managed object for certain old url paths.
+			// urls like sites/default/files/images/ don't seem to have file_managed...but they might still be in content?
+			if( str_starts_with( $old_file_url_parsed['old_uri'], 'sites/default/files/images/') ) {
+
+				++$file_warning_count;
+				$this->logger->notice( 'Building file managed based on allowed uri.' );
+
+				$file_managed = new stdClass();
+				$file_managed->fid = 0;
+				$file_managed->filesize = $this->util_get_remote_image_filesize( $old_file_url );
+				// $file_managed->filemime - do we need this? this isn't part of the SQL query for file_managed lookup.
+
+			}
+			// Not a special url.
+			else return;
 		}
+
+		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
 
 		// compare filesize.
 		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $wp_path, $attachment_metadata );
@@ -1367,11 +1388,7 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( 'File size matched.' );
 
 		// -- Check usage and content.
-		
-		$related_book_node_usage_found = false;
-		
-		$file_warning_count = 0;
-		
+						
 		$file_warning_count += $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
 		
 		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
@@ -1382,7 +1399,7 @@ wp newspack-post-image-downloader import-images
 			$file_warning_count += $this->clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed );
 		}
 
-		$this->logger->info( 'File is ' . ( ( 0 === $file_warning_count ) ? 'OK' : $file_warning_count ) . ' --' );
+		$this->logger->info( 'File is ' . $file_warning_count . ' --' );
 
 	}
 
@@ -1478,11 +1495,7 @@ wp newspack-post-image-downloader import-images
 			exit();
 		}
 		
-		$file_managed = $result->fetch_object();
-
-		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
-
-		return $file_managed;
+		return $result->fetch_object();
 
 	}
 
