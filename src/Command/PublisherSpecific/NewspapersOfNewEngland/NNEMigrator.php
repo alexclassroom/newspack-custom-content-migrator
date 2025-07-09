@@ -362,7 +362,7 @@ class NNEMigrator implements RegisterCommandInterface {
 
 				$category_output = 'Name: ' . $mapped_tag['category']['name'];
 				if ( $mapped_tag['category']['parent'] ) {
-					$category_output .= 'Parent: ' . $mapped_tag['category']['parent'];
+					$category_output .= ' Parent: ' . $mapped_tag['category']['parent'];
 				}
 
 				if ( $maybe_category_added_to_all_posts ) {
