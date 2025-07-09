@@ -1034,7 +1034,9 @@ wp newspack-post-image-downloader import-images
 			$this->logger->error( 'Post is missing old content node id.' );
 			exit();
 		}
-		$this->logger->info( 'Old post content node id: ' . $old_content_node_id );
+
+		$this->logger->info( 'Staging content url: https://americamagazine-newspack.newspackstaging.com/?p=' .  $post_id );
+		$this->logger->info( 'Old post content url: https://www.americamagazine.org/node/' . $old_content_node_id );
 		
 		// Loop through each file match
 		foreach( $attached_file_matches[1] as $wp_path ) {
@@ -1242,12 +1244,12 @@ wp newspack-post-image-downloader import-images
 		
 		if( $result && $result->num_rows > 0 ) {
 			$this->logger->info( 'Old node body matched the old uri.' );
-			return 0;
+			return '-YESBODY';
 		}
 		else {
 			// Need to alert if both 'File usage not found.' and 'no body match'.  This would mean just filesize match.
-			$this->logger->warning( 'No match old uri in body...MAKE SURE file usage WAS FOUND!' );
-			return 1;
+			$this->logger->warning( 'No match old uri in body.' );
+			return '-NOBODY';
 		}
 		
 	}
@@ -1294,22 +1296,22 @@ wp newspack-post-image-downloader import-images
 		// file_managed->filemime = audio/mpeg => 51563
 		if( in_array( (int) $file_managed->fid, [ 51563 ], true ) ) {
 			$this->logger->warning( 'File usage not needed for podcasts...?' );
-			return 1;
+			return '-FUPODCASTNO';
 		}
 		// Did Book node have the usage?
 		else if( $related_book_node_usage_found ) {
 			$this->logger->info( 'File usage found on related book node.' );
-			return 0;
+			return '-FUYES';
 		} 
 		// Just try the normal usage
 		else if( $this->clean_up_assets___check_file_usage_table( $file_managed->fid, $old_content_node_id ) ) {
 			$this->logger->info( 'File usage found on node.' );
-			return 0;
+			return '-FUYES';
 		} 
 		// No usage.
 		else {
-			$this->logger->warning( 'File usage not found...MAKE SURE in-content IS YES!' );
-			return 1;
+			$this->logger->warning( 'File usage not found.' );
+			return '-FUNO';
 		}	
 
 	}
@@ -1320,7 +1322,7 @@ wp newspack-post-image-downloader import-images
 	 */
 	private function clean_up_assets___compare_path_to_content_node( $wp_path, $old_content_node_id ) {
 
-		$file_warning_count = 0;
+		$file_warning_msg = '';
 		$related_book_node_usage_found = false;
 		
 		// Attempt to get an attachment id from url path.
@@ -1341,7 +1343,7 @@ wp newspack-post-image-downloader import-images
 		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
 		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
 
-		$this->logger->info( 'DB attached_file: ' . $attached_file );
+		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
 
 		// Sanity.  Since in-content images $wp_path were set by FG, then they should all
 		// have the old file url.
@@ -1354,25 +1356,11 @@ wp newspack-post-image-downloader import-images
 
 		// Look up the old file in the Drupal table.
 		$old_file_url_parsed = $this->clean_up_assets___get_old_file_url_parsed( $old_file_url );
-		$file_managed = $this->clean_up_assets___get_file_managed_by_url( $old_file_url_parsed );
+		$file_managed = $this->clean_up_assets___get_file_managed_by_url( $old_file_url_parsed, $file_warning_msg );
 
 		if( ! is_object( $file_managed ) ) {
-
-			// if this happens we could still try to build a file managed object for certain old url paths.
-			// urls like sites/default/files/images/ don't seem to have file_managed...but they might still be in content?
-			if( str_starts_with( $old_file_url_parsed['old_uri'], 'sites/default/files/images/') ) {
-
-				++$file_warning_count;
-				$this->logger->notice( 'Building file managed based on allowed uri.' );
-
-				$file_managed = new stdClass();
-				$file_managed->fid = 0;
-				$file_managed->filesize = $this->util_get_remote_image_filesize( $old_file_url );
-				// $file_managed->filemime - do we need this? this isn't part of the SQL query for file_managed lookup.
-
-			}
-			// Not a special url.
-			else return;
+			$this->logger->warning( 'File managed results not found.' );
+			return;
 		}
 
 		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
@@ -1386,20 +1374,21 @@ wp newspack-post-image-downloader import-images
 		}
 
 		$this->logger->info( 'File size matched.' );
+		$file_warning_msg .= "-SIZEYES";
 
 		// -- Check usage and content.
 						
-		$file_warning_count += $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
+		$file_warning_msg .= $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
 		
 		// Don't need to check content body if usage was on the book node since it's an in-content replacment like [...view: book node...]
 		if( $related_book_node_usage_found ) {
 			$this->logger->info( 'Node content body skip for found related book node.' );
 		}
 		else {
-			$file_warning_count += $this->clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed );
+			$file_warning_msg .= $this->clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed );
 		}
 
-		$this->logger->info( 'File is ' . $file_warning_count . ' --' );
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
 	}
 
@@ -1407,7 +1396,7 @@ wp newspack-post-image-downloader import-images
 
 		global $wpdb;
 
-		$this->logger->info( '-- Finding: ' . $wp_path );
+		$this->logger->info( '-- Finding: ' . self::STAGING_UPLOADS_URL . $wp_path );
 
 		// Try exact match on db attached_file
 		$results = $wpdb->get_col( $wpdb->prepare( "
@@ -1469,11 +1458,11 @@ wp newspack-post-image-downloader import-images
 		$old_basename = basename( $old_file_url );
 		$this->logger->info( 'Old basename: ' . $old_basename );
 		
-		return [ 'old_uri' => $old_uri, 'old_basename' => $old_basename ];
+		return [ 'old_uri' => $old_uri, 'old_basename' => $old_basename, 'old_file_url' => $old_file_url ];
 
 	}
 
-	private function clean_up_assets___get_file_managed_by_url( $old_file_url_parsed ) {
+	private function clean_up_assets___get_file_managed_by_url( $old_file_url_parsed, &$file_warning_msg ) {
 	
 		// get the file_managed from Drupal and compage the filesize
 		// don't use wpdb as it will convert unicode to ascii based on table definitions.
@@ -1485,17 +1474,35 @@ wp newspack-post-image-downloader import-images
 			and uri = '" . $mysqli->real_escape_string( str_replace( 'sites/default/files/', 'public://', $old_file_url_parsed['old_uri'] ) ) . "'
 		");
 		
-		if( ! $result || ! isset( $result->num_rows ) ||  ! ( $result->num_rows > 0 ) ) {
-			$this->logger->warning( 'File managed results not found.' );
-			return null;
+		if( ! $result || ! isset( $result->num_rows ) ) {
+			$this->logger->error( 'File managed SQL error.' );
+			exit();
 		}
 
 		if( $result->num_rows > 1 ) {
 			$this->logger->error( 'File managed has multiple results.' );
 			exit();
 		}
+
+		if( 1 === $result->num_rows ) return $result->fetch_object();
+
+		// if this happens we could still try to build a file managed object for certain old url paths.
+		// urls like sites/default/files/images/ don't seem to have file_managed...but they might still be in content?
+		if( ! preg_match( '#^sites/default/files/(images|styles)/#', $old_file_url_parsed['old_uri'] ) ) {			
+			// Not a special url.
+			return null;
+		}
+
+		$this->logger->notice( 'Building file managed based on allowed uri.' );
+
+		$file_warning_msg .= '-FMBUILD';
 		
-		return $result->fetch_object();
+		$file_managed = new stdClass();
+		$file_managed->fid = 0;
+		$file_managed->filesize = $this->util_get_remote_image_filesize( $old_file_url_parsed['old_file_url'] );
+		// $file_managed->filemime - do we need this? this isn't part of the SQL query above.
+
+		return $file_managed;
 
 	}
 
