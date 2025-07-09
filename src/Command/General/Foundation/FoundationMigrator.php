@@ -748,10 +748,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			if ( isset( $contributor->image ) && ! empty( $contributor->image ) ) {
 				$avatar_id = Attachments::import_external_file( $contributor->image );
 				if ( is_wp_error( $avatar_id ) ) {
-					$logger->error( sprintf( 'Error importing avatar for contributor %s: %s', $contributor->oid, $avatar_id->get_error_message() ) );
+					$logger->error( sprintf( 'Error importing avatar for contributor %s (%s): %s', $contributor->oid, $contributor->image, $avatar_id->get_error_message() ) );
+				} else {
+					$this->simple_local_avatars->assign_avatar( $migrated_contributor->ID, $avatar_id );
 				}
-
-				$this->simple_local_avatars->assign_avatar( $migrated_contributor->ID, $avatar_id );
 			}
 
 			$migrated_contributors[ $contributor->oid ] = $migrated_contributor->ID;
