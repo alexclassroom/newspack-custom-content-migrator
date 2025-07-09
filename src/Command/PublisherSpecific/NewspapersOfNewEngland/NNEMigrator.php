@@ -257,7 +257,12 @@ class NNEMigrator implements RegisterCommandInterface {
 			)
 		);
 
+		if ( empty( $tags ) ) {
+			ConsoleColor::green( 'No tags to update.' )->output();
+		}
+
 		foreach ( $tags as $tag ) {
+			echo "\n";
 			ConsoleColor::white( 'Updating tag:' )->underlined_yellow( $tag->name )->output();
 
 			if ( ! array_key_exists( $tag->name, NNETagMap::$mapping ) ) {
@@ -328,7 +333,7 @@ class NNEMigrator implements RegisterCommandInterface {
 
 			$maybe_category_added_to_all_posts = null;
 			$maybe_all_tags_added_to_posts     = [];
-			
+
 			// if category, find all posts associated with old tag, and add this category.
 			// if no tag,
 			// delete the old tag
@@ -355,10 +360,23 @@ class NNEMigrator implements RegisterCommandInterface {
 
 				$maybe_category_added_to_all_posts = $this->add_taxonomy_to_post_ids( $category->term_taxonomy_id, $associated_post_ids );
 
+				$category_output = 'Name: ' . $mapped_tag['category']['name'];
+				if ( $mapped_tag['category']['parent'] ) {
+					$category_output .= 'Parent: ' . $mapped_tag['category']['parent'];
+				}
+
 				if ( $maybe_category_added_to_all_posts ) {
-					ConsoleColor::green( 'Successfully added category to all associated posts.' )->output();
+					ConsoleColor::green( 'Successfully' )
+								->white( 'added category' )
+								->green( $category_output )
+								->white( 'to all associated posts.' )
+								->output();
 				} else {
-					ConsoleColor::red( 'Failed to add category to all associated posts.' )->output();
+					ConsoleColor::red( 'Failed' )
+								->white( 'to add category' )
+								->red( $category_output )
+								->white( 'to all associated posts.' )
+								->output();
 				}
 			}
 
@@ -425,6 +443,8 @@ class NNEMigrator implements RegisterCommandInterface {
 				);
 			}
 		}
+
+		ConsoleColor::green( 'Tag migration completed.' )->output();
 	}
 
 	/**
