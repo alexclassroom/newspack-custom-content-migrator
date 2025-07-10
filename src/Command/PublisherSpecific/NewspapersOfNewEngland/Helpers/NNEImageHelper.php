@@ -29,6 +29,13 @@ class NNEImageHelper {
 	protected bool $has_editorial_key = false;
 
 	/**
+	 * Custom checksum-like value used for the name of the image.
+	 *
+	 * @var bool $has_checksum_key Custom checksum-like value used for the name of the image.
+	 */
+	protected bool $has_checksum_key = false;
+
+	/**
 	 * Data ID of the image.
 	 *
 	 * @var string $data_id Data ID of the image.
@@ -216,6 +223,14 @@ class NNEImageHelper {
 	}
 
 	/**
+	 * Returns whether this image value has a checksum-like filename.
+	 *
+	 * @return bool
+	 */
+	public function has_checksum_key(): bool {
+		return $this->has_checksum_key;
+	}
+
 	/**
 	 * Returns whether this image value has an editorial key.
 	 *
@@ -245,6 +260,15 @@ class NNEImageHelper {
 	 */
 	public function get_data_id(): ?string {
 		return $this->data_id;
+	}
+
+	/**
+	 * Returns the checksum-like filename of the image.
+	 *
+	 * @return string|null
+	 */
+	public function get_checksum_key(): ?string {
+		return $this->original_value;
 	}
 
 	/**
