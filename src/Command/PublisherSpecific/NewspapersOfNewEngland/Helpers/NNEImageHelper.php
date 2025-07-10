@@ -184,7 +184,9 @@ class NNEImageHelper {
 			}
 
 			$this->exists_in_media_library = file_exists( $this->get_full_local_file_path() );
-			if ( ! $this->exists_in_media_library() ) {
+			if ( $this->exists_in_media_library() ) {
+				break;
+			} else {
 				$search = glob( "{$this->local_search_directory}/*/{$this->file_name}" );
 				if ( $search ) {
 					$this->full_file_path          = $search[0];
@@ -194,7 +196,7 @@ class NNEImageHelper {
 			}
 
 			// If the image doesn't exist in the media library, and it's a checksum value, we need to check if it exists on the site.
-			if ( ! $this->exists_in_media_library() && $this->has_checksum_key() ) {
+			if ( $this->has_checksum_key() ) {
 				if ( $this->exists_on_site() ) {
 					break;
 				} else {
