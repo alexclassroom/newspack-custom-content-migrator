@@ -22,6 +22,13 @@ class NNEImageHelper {
 	protected bool $from_data_id = false;
 
 	/**
+	 * This is some legacy value that NNE used to store and track their images.
+	 *
+	 * @var bool $has_editorial_key Editorial key of the image.
+	 */
+	protected bool $has_editorial_key = false;
+
+	/**
 	 * Data ID of the image.
 	 *
 	 * @var string $data_id Data ID of the image.
@@ -206,6 +213,16 @@ class NNEImageHelper {
 	 */
 	public function has_data_id(): bool {
 		return $this->from_data_id;
+	}
+
+	/**
+	/**
+	 * Returns whether this image value has an editorial key.
+	 *
+	 * @return bool
+	 */
+	public function has_editorial_key(): bool {
+		return $this->has_editorial_key;
 	}
 
 	/**
