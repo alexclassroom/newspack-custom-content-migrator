@@ -1172,7 +1172,7 @@ class NNEMigrator implements RegisterCommandInterface {
 				$import_data = [
 					'post_title'   => $post_title,
 					'post_content' => $post_content,
-					'post_date'    => ( new DateTimeImmutable( $image_object->ModificationDate ) )->format( 'Y-m-d H:i:s' ),
+					'post_date'    => isset( $image_object->ModificationDate ) ? ( new DateTimeImmutable( $image_object->ModificationDate ) )->format( 'Y-m-d H:i:s' ) : gmdate( 'Y-m-d H:i:s' ),
 					'post_excerpt' => $image_object->filecaption,
 					'meta_input'   => [],
 				];
@@ -1210,9 +1210,13 @@ class NNEMigrator implements RegisterCommandInterface {
 									->output();
 		$attachment_meta = [
 			'meta_input' => [],
-			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-			'post_date'  => ( new DateTimeImmutable( $image_object->ModificationDate ) )->format( 'Y-m-d H:i:s' ),
+			'post_date'  => gmdate( 'Y-m-d H:i:s' ),
 		];
+
+		if ( isset( $image_object->ModificationDate ) ) {
+			// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
+			$attachment_meta['post_date'] = ( new DateTimeImmutable( $image_object->ModificationDate ) )->format( 'Y-m-d H:i:s' );
+		}
 
 		if ( ! empty( trim( $image_object->filecredit ) ) ) {
 			$attachment_meta['meta_input']['_media_credit'] = $image_object->filecredit;
