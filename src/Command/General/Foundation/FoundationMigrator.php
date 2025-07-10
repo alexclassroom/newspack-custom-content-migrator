@@ -2203,7 +2203,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function migrate_raw_attachment( object $raw_attachment, int $post_id ) {
 		$meta_input = [
 			'meta_input' => [
-				'foundation_oid' => $raw_attachment->oid,
+				'_media_credit' => $raw_attachment->credit ?? '',
 			],
 		];
 
@@ -2657,8 +2657,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$output = '';
 		foreach ( $paragraphs as $p ) {
 			$trimmed = trim( $p );
-			if ( ! empty( $trimmed ) ) {
+			if ( ! empty( $trimmed ) && ! str_starts_with( $trimmed, '<p>' ) && ! str_starts_with( $trimmed, '[' ) ) {
 				$output .= '<p>' . $trimmed . '</p>' . "\n";
+			} else {
+				$output .= $trimmed . "\n";
 			}
 		}
 
@@ -2852,7 +2854,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 						// Create a temporary raw image object for download.
 						$temp_raw_image = (object) [
-							'oid' => 'temp_' . $image_index,
+							'oid' => $image_oid,
 							'url' => $image_url,
 						];
 
