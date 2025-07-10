@@ -1129,9 +1129,14 @@ class NNEMigrator implements RegisterCommandInterface {
 
 				if ( null !== $attachment ) {
 					$attachments[ $attachment['ID'] ] = $attachment;
-					$attachments[ $attachment['meta_input'][ NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value ] ] = $attachments[ $attachment['ID'] ];
+					if ( array_key_exists( NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value, $attachment['meta_input'] ) ) {
+						$attachments[ $attachment['meta_input'][ NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value ] ] = $attachments[ $attachment['ID'] ];
+					}
 					if ( array_key_exists( NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value, $attachment['meta_input'] ) ) {
 						$attachments[ 'dId' . $attachment['meta_input'][ NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value ] ] = $attachments[ $attachment['ID'] ];
+					}
+					if ( array_key_exists( NNEImportMetaEnum::IMAGE_CHECKSUM_KEY->value, $attachment['meta_input'] ) ) {
+						$attachments[ 'dId' . $attachment['meta_input'][ NNEImportMetaEnum::IMAGE_CHECKSUM_KEY->value ] ] = $attachments[ $attachment['ID'] ];
 					}
 				}
 			}
