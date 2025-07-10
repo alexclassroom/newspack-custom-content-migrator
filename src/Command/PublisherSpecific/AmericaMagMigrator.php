@@ -2301,7 +2301,7 @@ wp newspack-post-image-downloader import-images
 	************************************/
 
 	function util_get_remote_image_filesize( $url ) {
-		$response = wp_remote_head( $url );
+		$response = wp_remote_head( $url, [ 'timeout' => 30 ] ); // increase timeout to be safe.
 		if ( is_wp_error( $response ) ) {
 			return 0;
 		}
