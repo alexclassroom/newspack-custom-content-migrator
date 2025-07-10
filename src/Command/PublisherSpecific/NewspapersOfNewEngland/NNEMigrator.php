@@ -868,14 +868,68 @@ class NNEMigrator implements RegisterCommandInterface {
 					continue;
 				}
 
-				ConsoleColor::white( "\t-" )->underlined_bright_white( $tag )->output();
-				$tag_term = NNECategoryMap::get_term_by_name( $tag, 'post_tag' );
+				if ( array_key_exists( $tag, NNETagMap::$mapping ) ) {
+					$mapped_tag = NNETagMap::$mapping[ $tag ];
+					ConsoleColor::white( "\t-" )->bright_white( $tag )->yellow( 'mapped to...' )->output();
+					// Handle categories.
+					if ( ! empty( $mapped_tag['category'] ) ) {
+						$output   = ConsoleColor::white( "\t\t-" )
+												->white( '(' )
+												->cyan( 'category' )
+												->white( ')' )
+												->underlined_bright_white( $mapped_tag['category']['name'] );
+						$category = NNECategoryMap::get_term_by_name( $mapped_tag['category']['name'], 'category' );
 
-				if ( null === $tag_term ) {
-					$tag_term = NNECategoryMap::create_taxonomy( $tag, 'post_tag' );
+						$parent_term = (object) [
+							'term_id'          => 0,
+							'term_taxonomy_id' => 0,
+						];
+						if ( ! empty( $mapped_tag['category']['parent'] ) ) {
+							$parent_term = NNECategoryMap::get_term_by_name( $mapped_tag['category']['parent'], 'category' );
+							$output->underlined_bright_white( "(parent: $parent_term->name)" );
+						}
+						$output->output();
+
+						if ( ! $category ) {
+							$category = NNECategoryMap::create_taxonomy(
+								$mapped_tag['category']['name'],
+								'category',
+								$parent_term->term_taxonomy_id
+							);
+						}
+
+						wp_set_post_terms( $post_id, [ intval( $category->term_id ) ], 'category', true );
+					}
+
+					// Handle tags.
+					if ( ! empty( $mapped_tag['tags'] ) ) {
+						foreach ( $mapped_tag['tags'] as $sub_tag ) {
+							ConsoleColor::white( "\t\t-" )
+										->white( '(' )
+										->black_with_cyan_background( 'tag' )
+										->white( ')' )
+										->underlined_bright_white( $sub_tag )
+										->output();
+							$tag = NNECategoryMap::get_term_by_name( $sub_tag, 'post_tag' );
+
+							if ( null === $tag ) {
+								$tag = NNECategoryMap::create_taxonomy( $sub_tag, 'post_tag' );
+							}
+
+							$tag_term_ids[] = (int) $tag->term_id;
+						}
+					}
+				} else {
+
+					ConsoleColor::white( "\t-" )->underlined_bright_white( $tag )->output();
+					$tag_term = NNECategoryMap::get_term_by_name( $tag, 'post_tag' );
+
+					if ( null === $tag_term ) {
+						$tag_term = NNECategoryMap::create_taxonomy( $tag, 'post_tag' );
+					}
+
+					$tag_term_ids[] = (int) $tag_term->term_id;
 				}
-
-				$tag_term_ids[] = (int) $tag_term->term_id;
 			}
 
 			wp_set_post_terms( $post_id, $tag_term_ids, 'post_tag', true );
