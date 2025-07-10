@@ -1004,17 +1004,6 @@ wp newspack-post-image-downloader import-images
      */
     private function clean_up_post_assets_merged( int $post_id, $logger_slug ): void {
 
-		/*
-		[caption id="attachment_92625" align="alignleft" width="1619"]
-			<img class=" alignleft size-full wp-image-92625" 
-				alt="Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)"
-				data-align="left" data-caption="Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)"
-				data-entity-type="file" data-entity-uuid="8ce0db13-f593-4f04-8660-f14674195c43"
-				src="https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/2025/05/stranger-things.jpg" width="1619" height="1080" />
-				Gabrielle Nevaeh as Patty Newby and Louis McCartney as Henry Creel in ‘Stranger Things: The First Shadow’ (Matthew Murphy and Evan Zimmerman)
-		[/caption]
-		*/
-
 		// get asset urls from in the content.
 		$post_content = get_post_field( 'post_content', $post_id, 'raw' );
 
@@ -1139,7 +1128,32 @@ wp newspack-post-image-downloader import-images
 
 		global $wpdb;
 
-		// old profile photo in Drupal.
+		// wordpress image via simple local avatars.  This might have errors.
+		$avatar = get_user_meta( $user_id, 'simple_local_avatar', true );
+		$attachment_id = $avatar['media_id'];
+
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
+
+		// Sanity.  Since in-content images $wp_path were set by FG, then they should all
+		// have the old file url.
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
+			exit();
+		}
+		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+
+		// old profile photo in Drupal by way of CPT profile.  This should be correct value.
 		$file_managed = $wpdb->get_row( $wpdb->prepare( "
 			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
 			FROM node__field_profile_photo nfpp
@@ -1152,75 +1166,25 @@ wp newspack-post-image-downloader import-images
 		$this->logger->info( json_encode( $file_managed ) );
 		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
 
-		// wordpress image.
-		$avatar = get_user_meta( $user_id, 'simple_local_avatar', true );
-		$attachment_id = $avatar['media_id'];
-
-		$this->logger->info( 'attachment_id: ' . $attachment_id );
-
-		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		$old_file_url        = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
-
-		// sanity
-		if( empty( $attachment_metadata) ) {
-			$this->logger->warning( 'SKIP: Missing attachment metadata in db.' );
-			return;
-		}
-
-		// Sanity check, 'file' field should exist.
-		if( ! isset( $attachment_metadata['file'] ) ) {
-			$this->logger->warning( 'SKIP: File key does not exist.' );
-			return;
-		}
-
-		// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
-		if( $attachment_metadata['file'] !== $attached_file ) {
-			$this->logger->warning( 'SKIP: File meta does not match attached file.' );
-			return;
-		}
-
-		$this->logger->info( 'DB attached_file: ' . $attached_file );
-		$this->logger->info( 'Staging URL: ' . self::STAGING_UPLOADS_URL . $attached_file );
-		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+		// -- setup warning counter.
+		$file_warning_msg = '';
 
 		// check basenames.
 		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
-			$this->logger->notice( 'File basenames are different.' );
+			$this->logger->warning( 'File basenames are different.' );
+			$file_warning_msg .= '-FBDIFF';
 		}
 		
 		// compare filesize.
-		$wp_filesize = 0;
-
-		// Use original image since this will match to drupal.
-		if( isset( $attachment_metadata['original_image'] ) ) {
-			// On local dev, we dont have physical files, so fetch from staging.
-			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . dirname( $attached_file ) . '/' . $attachment_metadata['original_image'] );
-		}
-		// there is no original image so just use the attached file size if exits.
-		else if( isset( $attachment_metadata['filesize'] ) ) {
-			$wp_filesize = $attachment_metadata['filesize'];
-		}
-		// directly fetch the file size, for pdfs, etc...
-		else {
-			// On local dev, we dont have physical files, so fetch from staging.
-			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . '/' . $attached_file );
-		}
-
-		if( ! ( $wp_filesize > 0 ) ) {
-			$this->logger->error( 'Filesize not gt 0.' );
+		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
+		if( $wp_filesize !== (int) $file_managed->filesize ) {
+			$this->logger->error( 'File size mismatch.' );
 			exit();
 		}
-
-		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
-		
-		if( $wp_filesize !== (int) $file_managed->filesize ) {
-			$this->logger->warning( 'File size mismatch.' );
-			return;
-		}
-
 		$this->logger->info( 'File size matched.' );
+		$file_warning_msg .= "-SIZEYES";
 
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
 	}
 
