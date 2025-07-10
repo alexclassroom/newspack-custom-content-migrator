@@ -1160,7 +1160,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			$image_object->fileattachment,
 			$this->host_url,
 			$this->path_to_images,
-			$image_object->GN3EditorialKey,
+			$image_object->GN3EditorialKey ?? null,
 		);
 
 		if ( null === $image_helper->get_best_path() ) {
