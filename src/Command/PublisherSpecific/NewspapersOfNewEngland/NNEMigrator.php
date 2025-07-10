@@ -1091,6 +1091,18 @@ class NNEMigrator implements RegisterCommandInterface {
 							->underlined_bright_blue( $attachment_id )
 							->output();
 			}
+		} elseif ( $image_helper->has_checksum_key() ) {
+			$attachment_id = $this->get_post_id_from_legacy_id( $image_helper->get_checksum_key(), NNEImportMetaEnum::IMAGE_CHECKSUM_KEY );
+
+			if ( null !== $attachment_id ) {
+				ConsoleColor::white( "\t-" )
+							->bright_white_with_blue_background( 'Found image via checksum: - ' )
+							->white( 'Checksum: ' )
+							->bright_blue( $image_helper->get_checksum_key() )
+							->white( 'Attachment ID: ' )
+							->underlined_bright_blue( $attachment_id )
+							->output();
+			}
 		}
 
 		return $attachment_id;
@@ -1188,9 +1200,11 @@ class NNEMigrator implements RegisterCommandInterface {
 		ConsoleColor::white( "\t-" )->white( 'File Name:' )
 									->bright_yellow( $image_object->DocumentName ?? '' )
 									->white( 'Editorial Key:' )
-									->bright_yellow( $image_object->GN3EditorialKey ?? '' )
+			                        ->bright_yellow( $image_helper->has_editorial_key() ? $image_helper->get_editorial_key() : '-' )
 									->white( 'Data ID:' )
-									->bright_yellow( $image_helper->has_data_id() ? $image_helper->get_data_id() : '' )
+			                        ->bright_yellow( $image_helper->has_data_id() ? $image_helper->get_data_id() : '-' )
+			                        ->white( 'Checksum:' )
+			                        ->bright_yellow( $image_helper->has_checksum_key() ? $image_helper->get_checksum_key() : '-' )
 									->white( 'Exists Locally:' )
 									->bright_yellow( $image_helper->exists_in_media_library() ? 'Yes' : 'No' )
 									->output();
