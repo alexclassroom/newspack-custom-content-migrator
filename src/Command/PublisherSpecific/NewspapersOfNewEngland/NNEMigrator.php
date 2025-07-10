@@ -1086,15 +1086,15 @@ class NNEMigrator implements RegisterCommandInterface {
 
 		if ( ! empty( $taxonomies ) ) {
 			$taxonomy_constraint = 'AND tt.taxonomy IN (' . implode(
-					',',
-					array_map(
-						function ( $taxonomy ) {
+				',',
+				array_map(
+					function ( $taxonomy ) {
 
-							return "'" . esc_sql( $taxonomy ) . "'";
-						},
-						$taxonomies
-					)
-				) . ')';
+						return "'" . esc_sql( $taxonomy ) . "'";
+					},
+					$taxonomies
+				)
+			) . ')';
 		}
 
 		// phpcs:disable -- properly escaped and prepared.
@@ -1266,11 +1266,11 @@ class NNEMigrator implements RegisterCommandInterface {
 		ConsoleColor::white( "\t-" )->white( 'File Name:' )
 									->bright_yellow( $image_object->DocumentName ?? '' )
 									->white( 'Editorial Key:' )
-			                        ->bright_yellow( $image_helper->has_editorial_key() ? $image_helper->get_editorial_key() : '-' )
+									->bright_yellow( $image_helper->has_editorial_key() ? $image_helper->get_editorial_key() : '-' )
 									->white( 'Data ID:' )
-			                        ->bright_yellow( $image_helper->has_data_id() ? $image_helper->get_data_id() : '-' )
-			                        ->white( 'Checksum:' )
-			                        ->bright_yellow( $image_helper->has_checksum_key() ? $image_helper->get_checksum_key() : '-' )
+									->bright_yellow( $image_helper->has_data_id() ? $image_helper->get_data_id() : '-' )
+									->white( 'Checksum:' )
+									->bright_yellow( $image_helper->has_checksum_key() ? $image_helper->get_checksum_key() : '-' )
 									->white( 'Exists Locally:' )
 									->bright_yellow( $image_helper->exists_in_media_library() ? 'Yes' : 'No' )
 									->output();
