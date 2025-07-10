@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post_tag', 'user-assets-merged' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post-audio-file', 'post_tag', 'user', 'user-assets-merged' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -277,8 +277,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						'search_columns' => [ 'post_content' ],
 					] );
 					break;
-                case 'user':
-                    $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
+				case 'post-audio-file':
+					$meta_query[] = [ 'key' => 'audio_file', 'compare' => 'EXISTS' ];
+					$db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+					break;
+				case 'user':
+					$db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
 				case 'user-assets-merged':
 					$meta_query[] = [ 'key' => '_np_migration_profile_post_id', 'compare' => 'EXISTS' ];
@@ -319,7 +323,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                         $this->clean_up_post_assets_merged( $db_id, $logger_slug );
                         update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
-                    case 'user':
+					case 'post-audio-file':
+						$this->clean_up_post_audio_file( $db_id, $logger_slug );
+						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+						break;	
+					case 'user':
                         $this->clean_up_user( $db_id, $logger_slug );
                         update_user_meta( $db_id, $meta_key_cleaned_item, 'yes' );
                         break;
@@ -739,7 +747,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// $this->clean_up_attachment_capitalized_exts( $attachment_id, $logger_slug );
 		
-		$this->clean_up_attachment_merged_images( $attachment_id, $logger_slug );
+		$this->clean_up_assets___verify_attachment_db( $attachment_id );
 
 	}
     
@@ -807,23 +815,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		
 		// Replace anywhere the image could be used, post_content, term desc, author bio, etc.
 		// use a global search and replace?
-
-	}
-
-	private function clean_up_attachment_merged_images( int $attachment_id, $logger_slug ): void {
-
-		$related_podcast = get_post_meta( $attachment_id, 'related_podcast', true );
-		$related_video = get_post_meta( $attachment_id, 'related_video', true );
-		
-		if( empty( $related_podcast ) && empty( $related_video ) ) return;
-
-		var_dump( $related_podcast );
-		var_dump( $related_video );
-		
-		exit();
-		
-
-
 
 	}
 
@@ -1037,6 +1028,14 @@ wp newspack-post-image-downloader import-images
 		
 	}
 
+	/**
+	 * Posts with audio file.
+	 */
+	 private function clean_up_post_audio_file( int $post_id, $logger_slug ): void {
+
+
+	 }
+ 
     /**
      * Clean up one term using verified (checksum) json_item.
      */
@@ -1504,50 +1503,34 @@ wp newspack-post-image-downloader import-images
 
 	private function clean_up_assets___verify_attachment_db( $attachment_id ) {
 	
-		// Attachment info.
-		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-
 		// Mime info.
-		$mimes_without_meta_file  = array( 'application/pdf', 'audio/mpeg' ); // these don't have metadata in db.
-		$post_mime_type           = get_post_field( 'post_mime_type', $attachment_id, 'raw' );
-
+		$post_mime_type = get_post_field( 'post_mime_type', $attachment_id, 'raw' );
 		$this->logger->info( 'Mime type is: ' . $post_mime_type );
 
-		// Do a sanity check for mimes that have meta data with the 'file' key.
-		if( ! in_array( $post_mime_type, $mimes_without_meta_file, true ) ) {
+		// PDFs don't have metadata, so no verification possible, so return OK.
+		if( 'application/pdf' === $post_mime_type ) { 
+			return true;
+		}
+	
+		// Attachment info.
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		// Do a sanity check that metadata exists.
+		if( empty( $attachment_metadata ) ) {
+			$this->logger->warning( 'SKIP: Missing attachment metadata in db.' );
+			return false;
+		}
 
-			if( empty( $attachment_metadata ) ) {
-				// for images, skip this as it's probably a merge issue to be fixed.
-				if( str_starts_with( $post_mime_type, 'image/' ) ) {
-					$this->logger->warning( 'SKIP: Missing attachment metadata in db.' );
-					return false;
-				}
-				// for other mimes, exit for now...
-				$this->logger->error( 'Missing attachment metadata in db.' );
-				exit();
-			}
+		// Sanity check, 'file' field should exist.
+		if( ! isset( $attachment_metadata['file'] ) ) {
+			$this->logger->warning( 'SKIP: File key does not exist.' );
+			return false;
+		}
 
-			// Sanity check, 'file' field should exist.
-			if( ! isset( $attachment_metadata['file'] ) ) {
-				// for images, skip this as it's probably a merge issue to be fixed.
-				if( str_starts_with( $post_mime_type, 'image/' ) ) {
-					$this->logger->warning( 'SKIP: File key does not exist.' );
-					return false;
-				}
-				// for other mimes, exit for now...
-				$this->logger->error( 'File key does not exist.' );
-				exit();
-			}
-
-			// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
-			// don't test $wp_path here, since that value could have been a thumbnail
-			// or maybe "original_image" so the file might contain "-scaled" or "-rotated"
-			if( $attachment_metadata['file'] !== $attached_file ) {
-				$this->logger->warning( 'SKIP: File meta does not match attached file.' );
-				return false;
-			}
-
+		// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
+		if( $attachment_metadata['file'] !== get_post_meta( $attachment_id, '_wp_attached_file', true ) ) {
+			$this->logger->warning( 'SKIP: File meta does not match attached file.' );
+			return false;
 		}
 
 		return true;
