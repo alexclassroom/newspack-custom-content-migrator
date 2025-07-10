@@ -1277,12 +1277,12 @@ class NNEMigrator implements RegisterCommandInterface {
 	/**
 	 * Helper function to retrieve the inner contents of a DOM element.
 	 *
-	 * @param DOMElement $element DOM element.
-	 * @param string     $type Type of content to retrieve (html or xml).
+	 * @param DOMNode $element DOM element.
+	 * @param string  $type Type of content to retrieve (html or xml).
 	 *
 	 * @return string
 	 */
-	private function get_inner_contents( DOMElement $element, string $type ): string {
+	private function get_inner_contents( DOMNode $element, string $type ): string {
 		$inner_contents = '';
 
 		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
