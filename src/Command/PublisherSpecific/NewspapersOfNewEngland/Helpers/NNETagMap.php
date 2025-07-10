@@ -263,7 +263,7 @@ class NNETagMap {
 		],
 		'umass amherst'                           => [
 			'category' => [
-				'name'   => 'Umass',
+				'name'   => 'UMass News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
@@ -1525,7 +1525,7 @@ class NNETagMap {
 		],
 		'University of Massachusetts Amherst'     => [
 			'category' => [
-				'name'   => 'UMass',
+				'name'   => 'UMass News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
