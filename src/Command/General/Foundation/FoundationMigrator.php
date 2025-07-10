@@ -280,6 +280,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -794,6 +801,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$start_from             = $assoc_args['start-from'] ?? 0;
 		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
+		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
 		$raw_posts               = $this->json_iterator->items( $post_json_file );
@@ -804,6 +812,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		foreach ( $raw_posts as $index => $post ) {
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
 				continue;
 			}
 
@@ -1654,6 +1666,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 		// Migrate images.
 		$content = $this->migrate_images_markers( $post->oid, $content, $migrated_images, $post->imageLinks );
 
+		// Check if any image markers remain and try robust approach if needed.
+		preg_match_all( '/\[image-(\d+)\]/', $content, $remaining_markers );
+		if ( ! empty( $remaining_markers[0] ) ) {
+			$logger->warning( sprintf( 'Regular image migration failed for post %s, trying robust approach. Remaining markers: %s', $post->oid, implode( ', ', $remaining_markers[0] ) ) );
+			$content = $this->migrate_images_markers_robust( $post->oid, $content, $migrated_images, $post->imageLinks, $post->images ?? [] );
+		}
+
 		// Migrate pullquote.
 		if ( ! empty( $post->pullquotes ) ) {
 			$content = $this->migrate_pullquote_markers( $post->oid, $content, $post->pullquotes, $post->infoBoxPosition );
@@ -1830,15 +1849,44 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function migrate_images_markers( string $post_oid, string $content, array $migrated_images, array $post_image_oids ): string {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
+		// Debug: Log initial state.
+		$logger->info( sprintf( 'Starting image marker migration for post %s', $post_oid ) );
+		$logger->info( sprintf( 'Content length: %d', strlen( $content ) ) );
+		$logger->info( sprintf( 'Number of migrated images: %d', count( $migrated_images ) ) );
+		$logger->info( sprintf( 'Number of post image OIDs: %d', count( $post_image_oids ) ) );
+
+		// Count image markers in content before replacement.
+		preg_match_all( '/\[image-(\d+)\]/', $content, $marker_matches );
+		$marker_count = count( $marker_matches[0] );
+		$logger->info( sprintf( 'Found %d image markers in content', $marker_count ) );
+
+		if ( $marker_count > 0 ) {
+			$logger->info( sprintf( 'Image markers found: %s', implode( ', ', $marker_matches[0] ) ) );
+		}
+
 		$content = preg_replace_callback(
 			'/\[image-(\d+)\]/',
 			function ( $matches ) use ( $post_oid, $migrated_images, $logger, $post_image_oids ) {
 				$image_index = (int) $matches[1] - 1; // Convert to 0-based index.
-				if ( ! isset( $migrated_images[ $post_image_oids[ $image_index ] ] ) ) {
-					$logger->warning( sprintf( 'Image %d not found in post images for post %s', (int) $matches[1], $post_oid ) );
+				$logger->info( sprintf( 'Processing image marker [image-%d] (index %d)', (int) $matches[1], $image_index ) );
+
+				if ( ! isset( $post_image_oids[ $image_index ] ) ) {
+					$logger->warning( sprintf( 'Image index %d not found in post_image_oids array for post %s', $image_index, $post_oid ) );
+					$logger->warning( sprintf( 'Available indices: %s', implode( ', ', array_keys( $post_image_oids ) ) ) );
 					return $matches[0];
 				}
-				$raw_image = $migrated_images[ $post_image_oids[ $image_index ] ];
+
+				$image_oid = $post_image_oids[ $image_index ];
+				$logger->info( sprintf( 'Image OID: %s', $image_oid ) );
+
+				if ( ! isset( $migrated_images[ $image_oid ] ) ) {
+					$logger->warning( sprintf( 'Image OID %s not found in migrated_images for post %s', $image_oid, $post_oid ) );
+					$logger->warning( sprintf( 'Available migrated image OIDs: %s', implode( ', ', array_keys( $migrated_images ) ) ) );
+					return $matches[0];
+				}
+
+				$raw_image = $migrated_images[ $image_oid ];
+				$logger->info( sprintf( 'Found raw image data for OID %s', $image_oid ) );
 
 				$attachment_post = get_post( $raw_image['attachment_id'] );
 
@@ -1846,6 +1894,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 					$logger->warning( sprintf( 'Attachment post %d not found for image %d in post %s', $raw_image['attachment_id'], (int) $matches[1], $post_oid ) );
 					return $matches[0];
 				}
+
+				$logger->info( sprintf( 'Found attachment post %d for image %d', $raw_image['attachment_id'], (int) $matches[1] ) );
 
 				$classes = '';
 				if ( ! empty( $raw_image['alignment'] ) ) {
@@ -1855,10 +1905,23 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
 
-				return serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
+				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
+				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
+
+				return $replacement;
 			},
 			$content
 		);
+
+		// Debug: Check if any markers remain after replacement.
+		preg_match_all( '/\[image-(\d+)\]/', $content, $remaining_matches );
+		$remaining_count = count( $remaining_matches[0] );
+
+		if ( $remaining_count > 0 ) {
+			$logger->warning( sprintf( 'After replacement, %d image markers remain: %s', $remaining_count, implode( ', ', $remaining_matches[0] ) ) );
+		} else {
+			$logger->info( sprintf( 'All image markers successfully replaced for post %s', $post_oid ) );
+		}
 
 		return $content;
 	}
@@ -2723,5 +2786,136 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $html;
+	}
+
+	/**
+	 * Migrate images markers with robust replacement.
+	 * This method ensures all image markers are replaced by iterating until no more replacements can be made.
+	 *
+	 * @param string $post_oid     Post OID.
+	 * @param string $content      Post content.
+	 * @param array  $migrated_images   Migrated images. A key-value pair of post image OID and an array with the raw image data and the attachment ID.
+	 * @param array  $post_image_oids Post image OIDs. A 0-based indexed array.
+	 * @param array  $image_urls   Image URLs from the images field. A 0-based indexed array.
+	 *
+	 * @return string Post content with image markers replaced by Gutenberg blocks.
+	 */
+	private function migrate_images_markers_robust( string $post_oid, string $content, array $migrated_images, array $post_image_oids, array $image_urls ): string {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$logger->info( sprintf( 'Starting robust image marker migration for post %s', $post_oid ) );
+
+		$max_iterations   = 10; // Prevent infinite loops.
+		$iteration        = 0;
+		$previous_content = '';
+		$content_updated  = $content;
+
+		while ( $iteration < $max_iterations && $content_updated !== $previous_content ) {
+			$previous_content = $content_updated;
+			++$iteration;
+
+			$logger->info( sprintf( 'Iteration %d for post %s', $iteration, $post_oid ) );
+
+			// Count remaining markers.
+			preg_match_all( '/\[image-(\d+)\]/', $content_updated, $marker_matches );
+			$marker_count = count( $marker_matches[0] );
+
+			if ( 0 === $marker_count ) {
+				$logger->info( sprintf( 'No more image markers found after iteration %d', $iteration ) );
+				break;
+			}
+
+			$logger->info( sprintf( 'Found %d image markers in iteration %d: %s', $marker_count, $iteration, implode( ', ', $marker_matches[0] ) ) );
+
+			$content_updated = preg_replace_callback(
+				'/\[image-(\d+)\]/',
+				function ( $matches ) use ( $post_oid, $migrated_images, $logger, $post_image_oids, $image_urls, $iteration ) {
+					$image_index = (int) $matches[1] - 1; // Convert to 0-based index.
+					$logger->info( sprintf( 'Iteration %d: Processing image marker [image-%d] (index %d)', $iteration, (int) $matches[1], $image_index ) );
+
+					// Try to find the image in migrated_images first.
+					$attachment_id = null;
+					$raw_image     = null;
+
+					// Look for the image in migrated_images by index.
+					$image_oid = $post_image_oids[ $image_index ];
+					if ( array_key_exists( $image_oid, $migrated_images ) ) {
+						$raw_image     = $migrated_images[ $image_oid ];
+						$attachment_id = $raw_image['attachment_id'];
+						$logger->info( sprintf( 'Iteration %d: Found image in migrated_images with OID %s', $iteration, $image_oid ) );
+					}
+
+					// If not found in migrated_images, try to download from URL.
+					if ( ! $attachment_id && isset( $image_urls[ $image_index ] ) ) {
+						$image_url = $image_urls[ $image_index ];
+						$logger->info( sprintf( 'Iteration %d: Attempting to download image from URL: %s', $iteration, $image_url ) );
+
+						// Create a temporary raw image object for download.
+						$temp_raw_image = (object) [
+							'oid' => 'temp_' . $image_index,
+							'url' => $image_url,
+						];
+
+						$attachment_id = $this->migrate_raw_attachment( $temp_raw_image, 0 ); // Use 0 as post_id for now.
+
+						if ( is_wp_error( $attachment_id ) ) {
+							$logger->warning( sprintf( 'Iteration %d: Failed to download image from URL: %s', $iteration, $image_url ) );
+							return $matches[0];
+						}
+
+						$logger->info( sprintf( 'Iteration %d: Successfully downloaded image with attachment ID %d', $iteration, $attachment_id ) );
+					}
+
+					if ( ! $attachment_id ) {
+						$logger->warning( sprintf( 'Iteration %d: No image found for index %d in post %s', $iteration, $image_index, $post_oid ) );
+						return $matches[0];
+					}
+
+					$attachment_post = get_post( $attachment_id );
+
+					if ( ! $attachment_post ) {
+						$logger->warning( sprintf( 'Iteration %d: Attachment post %d not found for image %d in post %s', $iteration, $attachment_id, (int) $matches[1], $post_oid ) );
+						return $matches[0];
+					}
+
+					$logger->info( sprintf( 'Iteration %d: Found attachment post %d for image %d', $iteration, $attachment_id, (int) $matches[1] ) );
+
+					$classes         = '';
+					$alignment       = null;
+					$destination_url = null;
+
+					// Use raw_image data if available.
+					if ( $raw_image ) {
+						if ( ! empty( $raw_image['alignment'] ) ) {
+							$classes = 'align' . strtolower( $raw_image['alignment'] );
+						}
+						$destination_url = $raw_image['destinationURL'] ?? null;
+						$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
+					}
+
+					$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
+					$logger->info( sprintf( 'Iteration %d: Successfully generated replacement for image %d', $iteration, (int) $matches[1] ) );
+
+					return $replacement;
+				},
+				$content_updated
+			);
+		}
+
+		// Final check for remaining markers.
+		preg_match_all( '/\[image-(\d+)\]/', $content_updated, $remaining_matches );
+		$remaining_count = count( $remaining_matches[0] );
+
+		if ( $remaining_count > 0 ) {
+			$logger->warning( sprintf( 'After %d iterations, %d image markers remain for post %s: %s', $iteration, $remaining_count, $post_oid, implode( ', ', $remaining_matches[0] ) ) );
+		} else {
+			$logger->info( sprintf( 'All image markers successfully replaced for post %s after %d iterations', $post_oid, $iteration ) );
+		}
+
+		if ( $iteration >= $max_iterations ) {
+			$logger->warning( sprintf( 'Reached maximum iterations (%d) for post %s', $max_iterations, $post_oid ) );
+		}
+
+		return $content_updated;
 	}
 }
