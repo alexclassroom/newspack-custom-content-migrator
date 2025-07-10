@@ -1250,13 +1250,24 @@ class NNEMigrator implements RegisterCommandInterface {
 			return null;
 		}
 
-		add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value, $image_object->GN3EditorialKey );
 		add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_DOC_NAME_KEY->value, $image_object->DocumentName );
-		add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_INCLUDE_IN_GALLERY_KEY->value, strtolower( $image_object->includeingallery ?? '' ) === 'true' );
-		add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_INLINE_KEY->value, strtolower( $image_object->InlineImage ?? '' ) === 'true' );
-		add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_POSITION_KEY->value, $image_object->InlineImageLocation );
+		if ( isset( $image_object->includeingallery ) ) {
+			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_INCLUDE_IN_GALLERY_KEY->value, strtolower( $image_object->includeingallery ) === 'true' );
+		}
+		if ( isset( $image_object->InlineImage ) ) {
+			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_INLINE_KEY->value, strtolower( $image_object->InlineImage ) === 'true' );
+		}
+		if ( isset( $image_object->InlineImageLocation ) ) {
+			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_POSITION_KEY->value, $image_object->InlineImageLocation );
+		}
+		if ( $image_helper->has_editorial_key() ) {
+			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value, $image_helper->get_editorial_key() );
+		}
 		if ( $image_helper->has_data_id() ) {
 			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value, $image_helper->get_data_id() );
+		}
+		if ( $image_helper->has_checksum_key() ) {
+			add_post_meta( $maybe_attachment_id, NNEImportMetaEnum::IMAGE_CHECKSUM_KEY->value, $image_helper->get_checksum_key() );
 		}
 
 		return $this->get_post_data( $maybe_attachment_id );
