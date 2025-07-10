@@ -135,6 +135,10 @@ class NNEImageHelper {
 		$this->archive_site_url       = $this->site_url;
 		$this->local_search_directory = untrailingslashit( $local_search_directory );
 		$this->editorial_key          = $editorial_key;
+		if ( null !== $this->editorial_key ) {
+			$this->has_editorial_key = true;
+		}
+
 		$archive_site_url_parts = wp_parse_url( $this->archive_site_url );
 		if ( ! isset( $archive_site_url_parts['scheme'] ) ) {
 			$archive_site_url_parts['scheme'] = 'https';
