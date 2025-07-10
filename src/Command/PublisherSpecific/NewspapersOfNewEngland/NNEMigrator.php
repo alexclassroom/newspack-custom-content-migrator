@@ -1079,7 +1079,7 @@ class NNEMigrator implements RegisterCommandInterface {
 							->bright_green_with_blue_background( $attachment_id )
 							->output();
 			}
-		} elseif ( null !== $image_helper->get_editorial_key() ) {
+		} elseif ( $image_helper->has_editorial_key() ) {
 			$attachment_id = $this->get_post_id_from_legacy_id( $image_helper->get_editorial_key(), NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY );
 
 			if ( null !== $attachment_id ) {
