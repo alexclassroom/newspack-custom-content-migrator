@@ -71,6 +71,13 @@ class NNEImageHelper {
 	protected string $site_url;
 
 	/**
+	 * Archive site URL.
+	 *
+	 * @var string $archive_site_url URL of the archive site.
+	 */
+	protected string $archive_site_url;
+
+	/**
 	 * Site identifier.
 	 *
 	 * @var string $site_identifier Identifier of the publisher's site.
@@ -109,8 +116,24 @@ class NNEImageHelper {
 	public function __construct( string $file_attachment, string $publisher_site_url, string $local_search_directory, ?string $editorial_key = null ) {
 		$this->original_value         = $file_attachment;
 		$this->site_url               = untrailingslashit( $publisher_site_url );
+		$this->archive_site_url       = $this->site_url;
 		$this->local_search_directory = untrailingslashit( $local_search_directory );
 		$this->editorial_key          = $editorial_key;
+		$archive_site_url_parts = wp_parse_url( $this->archive_site_url );
+		if ( ! isset( $archive_site_url_parts['scheme'] ) ) {
+			$archive_site_url_parts['scheme'] = 'https';
+		}
+
+		if ( ! isset( $archive_site_url_parts['host'] ) && isset( $archive_site_url_parts['path'] ) ) {
+			// Assume the path is the same as the host.
+			$archive_site_url_parts['host'] = $archive_site_url_parts['path'];
+		}
+
+		if ( str_starts_with( $archive_site_url_parts['host'], 'www.' ) ) {
+			$archive_site_url_parts['host'] = str_replace( 'www.', 'archive.', $archive_site_url_parts['host'] );
+		}
+
+		$this->archive_site_url = $archive_site_url_parts['scheme'] . '://' . $archive_site_url_parts['host'];
 
 		$this->initialize();
 	}
@@ -250,7 +273,7 @@ class NNEImageHelper {
 			return "$this->site_url/attachments/$this->site_identifier/$this->file_name";
 		}
 
-		return null;
+		return "$this->archive_site_url/priorarchive/$this->site_identifier/$this->file_name";
 	}
 
 	/**
