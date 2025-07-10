@@ -1177,12 +1177,14 @@ wp newspack-post-image-downloader import-images
 		
 		// compare filesize.
 		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
-		if( $wp_filesize !== (int) $file_managed->filesize ) {
-			$this->logger->error( 'File size mismatch.' );
-			exit();
+		if( $wp_filesize === (int) $file_managed->filesize ) {
+
+			$this->logger->info( 'File size matched.' );
+			$file_warning_msg .= "-SIZEYES";
+		} else {
+			$this->logger->warning( 'File size mismatch.' );
+			$file_warning_msg .= "-SIZENO";
 		}
-		$this->logger->info( 'File size matched.' );
-		$file_warning_msg .= "-SIZEYES";
 
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
