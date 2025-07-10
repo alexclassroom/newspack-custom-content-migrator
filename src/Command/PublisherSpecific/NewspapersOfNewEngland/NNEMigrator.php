@@ -749,10 +749,17 @@ class NNEMigrator implements RegisterCommandInterface {
 				$post_data['meta_input']['_newspack_featured_image_is_hidden'] = true;
 			}
 		} elseif ( ! empty( $attachments ) ) {
-				$first_attachment                         = array_shift( $attachments );
-				$post_data['meta_input']['_thumbnail_id'] = $first_attachment['ID'];
+			$first_attachment                         = array_shift( $attachments );
+			$post_data['meta_input']['_thumbnail_id'] = $first_attachment['ID'];
+			if ( isset( $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value ] ) ) {
 				unset( $attachments[ $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_DATA_ID_KEY->value ] ] );
+			}
+			if ( isset( $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value ] ) ) {
 				unset( $attachments[ $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_EDITORIAL_ID_KEY->value ] ] );
+			}
+			if ( isset( $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_CHECKSUM_KEY->value ] ) ) {
+				unset( $attachments[ $first_attachment['meta_input'][ NNEImportMetaEnum::IMAGE_CHECKSUM_KEY->value ] ] );
+			}
 		}
 
 		if ( 'false' === strtolower( $article_object->HidePhotos ) && $image_elements->count() > 0 ) {
