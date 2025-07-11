@@ -1655,8 +1655,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return string Post content.
 	 */
 	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file ): string {
-			$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
-		$content    = $this->clean_content( $post->body );
+		$logger  = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+		$content = $this->clean_content( $post->body );
 
 		// Migrate info box.
 		if ( ! empty( $post->infoBoxTitle ) && ! empty( $post->infoBoxText ) && ! empty( $post->infoBoxPosition ) ) {
@@ -1713,6 +1713,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function clean_content( string $content ): string {
 		$content = $this->strip_container_div_robust( $content );
+		$content = $this->strip_comments( $content );
 		$content = $this->strip_style_tags( $content );
 		$content = $this->strip_line_breaks( $content );
 		$content = $this->strip_whitespace( $content );
@@ -2610,6 +2611,18 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$html
 		);
 
+		// Temporarily replace style tags to preserve them during wp_kses processing.
+		$style_placeholders = [];
+		$html               = preg_replace_callback(
+			'/<style[^>]*>.*?<\/style>/is',
+			function ( $matches ) use ( &$style_placeholders ) {
+				$placeholder                        = '<!--STYLE_PLACEHOLDER_' . count( $style_placeholders ) . '-->';
+				$style_placeholders[ $placeholder ] = $matches[0];
+				return $placeholder;
+			},
+			$html
+		);
+
 		$allowed_tags = wp_kses_allowed_html( 'post' );
 
 		// Remove style attribute from all tags.
@@ -2624,6 +2637,41 @@ class FoundationMigrator implements RegisterCommandInterface {
 		foreach ( $script_placeholders as $placeholder => $script_tag ) {
 			$html = str_replace( $placeholder, $script_tag, $html );
 		}
+
+		// Restore style tags.
+		foreach ( $style_placeholders as $placeholder => $style_tag ) {
+			$html = str_replace( $placeholder, $style_tag, $html );
+		}
+
+		return $html;
+	}
+
+	/**
+	 * Strips HTML comments.
+	 *
+	 * @param string $html The HTML content to process.
+	 * @return string The processed HTML content.
+	 */
+	private function strip_comments( string $html ): string {
+		// Use Simple HTML DOM to remove HTML comments.
+		$dom = new \simplehtmldom\HtmlDocument( $html );
+
+		// Remove all comment nodes by finding nodes with comment type.
+		$nodes_to_remove = [];
+		foreach ( $dom->nodes as $node ) {
+			if ( \simplehtmldom\HtmlNode::HDOM_TYPE_COMMENT === $node->nodetype ) {
+				$nodes_to_remove[] = $node;
+			}
+		}
+
+		// Remove the comment nodes.
+		foreach ( $nodes_to_remove as $node ) {
+			$node->outertext = '';
+		}
+
+		$html = $dom->save();
+		$dom->clear();
+		unset( $dom );
 
 		return $html;
 	}
