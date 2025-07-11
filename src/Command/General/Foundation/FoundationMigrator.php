@@ -1713,7 +1713,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	private function clean_content( string $content ): string {
 		$content = $this->strip_container_div_robust( $content );
-		$content = $this->strip_comments( $content );
 		$content = $this->strip_style_tags( $content );
 		$content = $this->strip_line_breaks( $content );
 		$content = $this->strip_whitespace( $content );
@@ -2593,12 +2592,24 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
-	 * Strips style attributes from all tags.
+	 * Strips style attributes from all tags and preserves HTML comments.
 	 *
 	 * @param string $html The HTML content to process.
 	 * @return string The processed HTML content.
 	 */
 	private function strip_style_tags( string $html ): string {
+		// Temporarily replace HTML comments to preserve them during processing.
+		$comment_placeholders = [];
+		$html                 = preg_replace_callback(
+			'/<!--.*?-->/s',
+			function ( $matches ) use ( &$comment_placeholders ) {
+				$placeholder                          = '<!--COMMENT_PLACEHOLDER_' . count( $comment_placeholders ) . '-->';
+				$comment_placeholders[ $placeholder ] = $matches[0];
+				return $placeholder;
+			},
+			$html
+		);
+
 		// Temporarily replace script tags to preserve them during wp_kses processing.
 		$script_placeholders = [];
 		$html                = preg_replace_callback(
@@ -2643,38 +2654,15 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$html = str_replace( $placeholder, $style_tag, $html );
 		}
 
+		// Restore HTML comments.
+		foreach ( $comment_placeholders as $placeholder => $comment ) {
+			$html = str_replace( $placeholder, $comment, $html );
+		}
+
 		return $html;
 	}
 
-	/**
-	 * Strips HTML comments.
-	 *
-	 * @param string $html The HTML content to process.
-	 * @return string The processed HTML content.
-	 */
-	private function strip_comments( string $html ): string {
-		// Use Simple HTML DOM to remove HTML comments.
-		$dom = new \simplehtmldom\HtmlDocument( $html );
 
-		// Remove all comment nodes by finding nodes with comment type.
-		$nodes_to_remove = [];
-		foreach ( $dom->nodes as $node ) {
-			if ( \simplehtmldom\HtmlNode::HDOM_TYPE_COMMENT === $node->nodetype ) {
-				$nodes_to_remove[] = $node;
-			}
-		}
-
-		// Remove the comment nodes.
-		foreach ( $nodes_to_remove as $node ) {
-			$node->outertext = '';
-		}
-
-		$html = $dom->save();
-		$dom->clear();
-		unset( $dom );
-
-		return $html;
-	}
 
 	/**
 	 * Strips unnecessary line break lines.
