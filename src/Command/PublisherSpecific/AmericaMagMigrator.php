@@ -1031,10 +1031,82 @@ wp newspack-post-image-downloader import-images
 	/**
 	 * Posts with audio file.
 	 */
-	 private function clean_up_post_audio_file( int $post_id, $logger_slug ): void {
+	private function clean_up_post_audio_file( int $post_id, $logger_slug ): void {
 
+		global $wpdb;
 
-	 }
+		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
+		if( ! ( $old_content_node_id > 0 ) ) {
+			$this->logger->error( 'Post is missing old content node id.' );
+			exit();
+		}
+
+		$this->logger->info( 'Old content node id: ' . $old_content_node_id );
+
+		// compare audio_file to node's audio file.  This might point to the wrong file.
+		$attachment_id = get_post_meta( $post_id, 'audio_file', true );
+
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
+
+		// Sanity.  
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
+			exit();
+		}
+		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+
+		// get the related Drupal info via the post info.  This is the correct URL.
+		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+			FROM node__field_audio_file nfaf
+			JOIN file_managed fm on fm.fid = nfaf.field_audio_file_target_id and fm.status = 1			
+			WHERE nfaf.entity_id = %d and nfaf.deleted = 0
+			",
+			$old_content_node_id
+		));
+
+		$this->logger->info( json_encode( $file_managed ) );
+		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
+	
+		// -- setup warning counter.
+		$file_warning_msg = '';
+
+		// check basenames.  file managed uri is coming from the correct node id, but $old_file_url is coming from the possibly incorrect attachment id.
+		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
+			$this->logger->warning( 'File basenames are different.' );
+			$file_warning_msg .= '-FBDIFF';
+		}
+		
+		// compare filesize.
+
+		if( ! ( (int) $file_managed->filesize > 0 ) ) {
+			$this->logger->warning( 'SKIP: File mangaged filsize is null.' );
+			return;
+		}
+
+		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
+		if( $wp_filesize === (int) $file_managed->filesize ) {
+			$this->logger->info( 'File size matched.' );
+			$file_warning_msg .= "-SIZEYES";
+		} else {
+			$this->logger->warning( 'File size mismatch.' );
+			$file_warning_msg .= "-SIZENO";
+		}
+
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+
+	}
  
     /**
      * Clean up one term using verified (checksum) json_item.
@@ -1521,6 +1593,11 @@ wp newspack-post-image-downloader import-images
 			return false;
 		}
 
+		// Audio and video don't have "file", so no verification possible, so return OK.
+		if( preg_match( '#^(audio|video)/#', $post_mime_type ) ) { 
+			return true;
+		}
+		
 		// Sanity check, 'file' field should exist.
 		if( ! isset( $attachment_metadata['file'] ) ) {
 			$this->logger->warning( 'SKIP: File key does not exist.' );
