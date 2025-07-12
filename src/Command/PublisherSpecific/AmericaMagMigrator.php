@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post-audio-file', 'post_tag', 'user', 'user-assets-merged' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post-audio-file', 'post-thumbnails', 'post_tag', 'user', 'user-assets-merged' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -281,6 +281,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					$meta_query[] = [ 'key' => 'audio_file', 'compare' => 'EXISTS' ];
 					$db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
 					break;
+				case 'post-thumbnails':
+					$meta_query[] = [ 'key' => '_thumbnail_id', 'compare' => 'EXISTS' ];
+					$db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+					break;
 				case 'user':
 					$db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
                     break;
@@ -325,6 +329,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                         break;
 					case 'post-audio-file':
 						$this->clean_up_post_audio_file( $db_id, $logger_slug );
+						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+						break;	
+					case 'post-thumbnails':
+						$this->clean_up_post_thumbnails( $db_id, $logger_slug );
 						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
 						break;	
 					case 'user':
@@ -1108,7 +1116,96 @@ wp newspack-post-image-downloader import-images
 
 	}
  
-    /**
+ 	/**
+	 * Posts with thumbnail id
+	 */
+	private function clean_up_post_thumbnails( int $post_id, $logger_slug ): void {
+
+		global $wpdb;
+
+		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
+		if( ! ( $old_content_node_id > 0 ) ) {
+			$this->logger->error( 'Post is missing old content node id.' );
+			exit();
+		}
+
+		$this->logger->info( 'Old content node id: ' . $old_content_node_id );
+
+		// compare thumbnail to node's featured image.  This might point to the wrong file.
+		$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
+
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+
+		// sanity;
+		$maybe_old_image_id = get_post_meta( $post_id, 'image', true );
+		if( ! empty( $maybe_old_image_id ) && $maybe_old_image_id !== $attachment_id ) {
+			$this->logger->error( 'Old image id did not match.' );
+			exit();
+		}
+
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
+
+		// Sanity.  
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
+			exit();
+		}
+		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+
+		// get the related Drupal info via the post info.  This is the correct URL.
+		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+
+SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+FROM node__field_image nfi
+JOIN file_managed fm on fm.fid = nfi.field_image_target_id and fm.status = 1			
+WHERE nfi.entity_id = %d and nfi.deleted = 0
+
+			",
+			$old_content_node_id
+		));
+
+		$this->logger->info( json_encode( $file_managed ) );
+		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
+	
+		// -- setup warning counter.
+		$file_warning_msg = '';
+
+		// check basenames.  file managed uri is coming from the correct node id, but $old_file_url is coming from the possibly incorrect attachment id.
+		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
+			$this->logger->warning( 'File basenames are different.' );
+			$file_warning_msg .= '-FBDIFF';
+		}
+		
+		// compare filesize.
+
+		if( ! ( (int) $file_managed->filesize > 0 ) ) {
+			$this->logger->warning( 'SKIP: File mangaged filsize is null.' );
+			return;
+		}
+
+		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
+		if( $wp_filesize === (int) $file_managed->filesize ) {
+			$this->logger->info( 'File size matched.' );
+			$file_warning_msg .= "-SIZEYES";
+		} else {
+			$this->logger->warning( 'File size mismatch.' );
+			$file_warning_msg .= "-SIZENO";
+		}
+
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+
+	}
+ 
+	/**
      * Clean up one term using verified (checksum) json_item.
      */
     private function clean_up_term( int $term_id, $logger_slug, $taxonomy ): void {
