@@ -862,7 +862,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				'post_content'      => $post->body,
 				'post_category'     => $post_categories,
 				'tags_input'        => $post->tags ?? [],
-				'comment_status'    => 'members only' === $post->commentStatus ? 'open' : 'close',
+				'comment_status'    => in_array( $post->commentStatus, [ 'open', 'members only' ] ) ? 'open' : 'close',
 			];
 
 			$migrated_post_id = Posts::create_or_get_post( $post_data, $post->oid );
