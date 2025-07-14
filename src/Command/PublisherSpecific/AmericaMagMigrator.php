@@ -929,37 +929,47 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// cover image.
 		$meta_key = 'iss_cover';
-		$iss_cover = get_post_meta( $post_id, $meta_key, true );
+		if( ! empty( get_post_meta( $post_id, $meta_key, true ) ) ) {
+
+			$this->logger->info( 'Meta key: ' . $meta_key );
+
+			$file_warning_msg = '';
+			$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
+			// get the related Drupal info via the post info.  This is the correct URL.
+			$file_managed = $wpdb->get_row( $wpdb->prepare( "
+				SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+				FROM node__field_iss_cover nfis
+				JOIN file_managed fm on fm.fid = nfis.field_iss_cover_target_id and fm.status = 1			
+				WHERE nfis.entity_id = %d and nfis.deleted = 0
+				",
+				$assets_info['old_content_node_id']
+			));
+			$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+			$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+			$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+		}
 
 		// issue pdf.
 		$meta_key = 'issue_pdf';
-		$issue_pdf = get_post_meta( $post_id, $meta_key, true );
-		
+		if( ! empty( get_post_meta( $post_id, $meta_key, true ) ) ) {
 
-
-// do this for both!!!
-
-		$file_warning_msg = '';
-		$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
-		// get the related Drupal info via the post info.  This is the correct URL.
-		$file_managed = $wpdb->get_row( $wpdb->prepare( "
-			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
-			FROM node__field_audio_file nfaf
-			JOIN file_managed fm on fm.fid = nfaf.field_audio_file_target_id and fm.status = 1			
-			WHERE nfaf.entity_id = %d and nfaf.deleted = 0
-			",
-			$assets_info['old_content_node_id']
-		));
-		$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
-		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
-
-
-
-
-
-
-		exit();
+			$this->logger->info( 'Meta key: ' . $meta_key );
+			
+			$file_warning_msg = '';
+			$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
+			// get the related Drupal info via the post info.  This is the correct URL.
+			$file_managed = $wpdb->get_row( $wpdb->prepare( "
+				SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+				FROM node__field_iss_cover nfis
+				JOIN file_managed fm on fm.fid = nfis.field_iss_cover_target_id and fm.status = 1			
+				WHERE nfis.entity_id = %d and nfis.deleted = 0
+				",
+				$assets_info['old_content_node_id']
+			));
+			$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+			$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+			$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+		}
 
 	}
 
