@@ -20,7 +20,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'post', 'post-assets-merged', 'post-audio-file', 'post-thumbnails', 'post_tag', 'user', 'user-assets-merged' ];
+	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'issue-assets-merged', 'post', 'post-assets-merged', 'post-audio-file', 'post-thumbnails', 'post_tag', 'user', 'user-assets-merged' ];
 
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
@@ -267,6 +267,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				case 'category':
 					$db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => $pos_args[0], 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
 					break;
+				case 'issue-assets-merged':
+					$db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query, 'post_type' => 'issue' ] );
+					break;	
 				case 'post':
                     $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
                     break;
@@ -319,6 +322,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						$this->clean_up_term( $db_id, $logger_slug, $pos_args[0] );
 						update_term_meta( $db_id, $meta_key_cleaned_item, 'yes' );
 						break;	
+					case 'issue-assets-merged':
+						$this->clean_up_issue_assets_merged( $db_id, $logger_slug );
+						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+						break;
 					case 'post':
                         $this->clean_up_post( $db_id, $logger_slug );
                         update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
@@ -914,6 +921,26 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * One Issue's assets that were merged.
+	 */
+	private function clean_up_issue_assets_merged( int $post_id, $logger_slug ): void {
+
+		global $wpdb;
+
+		// cover image.
+		$iss_cover = get_post_meta( $post_id, 'iss_cover', true );
+
+		// issue pdf.
+		$issue_pdf = get_post_meta( $post_id, 'issue_pdf', true );
+		
+
+		
+
+		exit();
+
+	}
+
+	/**
      * Clean up one post.
      */
     private function clean_up_post( int $post_id, $logger_slug ): void {
@@ -1103,14 +1130,7 @@ wp newspack-post-image-downloader import-images
 			return;
 		}
 
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
-		if( $wp_filesize === (int) $file_managed->filesize ) {
-			$this->logger->info( 'File size matched.' );
-			$file_warning_msg .= "-SIZEYES";
-		} else {
-			$this->logger->warning( 'File size mismatch.' );
-			$file_warning_msg .= "-SIZENO";
-		}
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
 
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
@@ -1192,15 +1212,8 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 			return;
 		}
 
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
-		if( $wp_filesize === (int) $file_managed->filesize ) {
-			$this->logger->info( 'File size matched.' );
-			$file_warning_msg .= "-SIZEYES";
-		} else {
-			$this->logger->warning( 'File size mismatch.' );
-			$file_warning_msg .= "-SIZENO";
-		}
-
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
+		
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
 	}
@@ -1344,16 +1357,8 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		}
 		
 		// compare filesize.
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $attached_file, $attachment_metadata );
-		if( $wp_filesize === (int) $file_managed->filesize ) {
-
-			$this->logger->info( 'File size matched.' );
-			$file_warning_msg .= "-SIZEYES";
-		} else {
-			$this->logger->warning( 'File size mismatch.' );
-			$file_warning_msg .= "-SIZENO";
-		}
-
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
+		
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
 	}
@@ -1500,16 +1505,8 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
 
 		// compare filesize.
-		$wp_filesize = $this->clean_up_assets___get_wp_filesize( $wp_path, $attachment_metadata );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $wp_path, $attachment_metadata, $file_managed->filesize );
 		
-		if( $wp_filesize !== (int) $file_managed->filesize ) {
-			$this->logger->error( 'File size mismatch.' );
-			exit();
-		}
-
-		$this->logger->info( 'File size matched.' );
-		$file_warning_msg .= "-SIZEYES";
-
 		// -- Check usage and content.
 						
 		$file_warning_msg .= $this->clean_up_assets___check_file_usage_with_node( $file_managed, $old_content_node_id, $related_book_node_usage_found );
@@ -1640,7 +1637,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	}
 
-	private function clean_up_assets___get_wp_filesize( $wp_path, $attachment_metadata ) {
+	private function clean_up_assets___compare_wp_filesize( $wp_path, $attachment_metadata, $file_managed_filesize ) {
 
 		$wp_filesize = 0;
 
@@ -1666,7 +1663,13 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
 
-		return $wp_filesize;
+		if( $wp_filesize === (int) $file_managed_filesize ) {
+			$this->logger->info( 'File size matched.' );
+			return "-SIZEYES";
+		}
+
+		$this->logger->warning( 'File size mismatch.' );
+		return "-SIZENO";
 		
 	}
 
@@ -2459,17 +2462,37 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 	  UTILS
 	************************************/
 
-	function util_get_remote_image_filesize( $url ) {
+	function util_get_remote_image_filesize( $url, $max_tries = 2 ) {
+
+		$this->logger->info( 'Requesting head: ' . $url );
+
 		$response = wp_remote_head( $url, [ 'timeout' => 60 ] ); // increase timeout to be safe.
+
 		if ( is_wp_error( $response ) ) {
+			
 			print_r( $response );
+			
+			// for some reason remote head is ignoring timeout...so if timeout, just try again....
+			// stop infinite loop with max tries.				
+			if( 'http_request_failed' === $response->get_error_code() 
+				&& str_contains( $response->get_error_message(), 'Connection timeout after' )
+				&& $max_tries > 0
+			) {
+				return $this->util_get_remote_image_filesize( $url, --$max_tries );
+			}
+
 			return 0;
+
 		}
+		
 		$headers = wp_remote_retrieve_headers( $response );
+		
 		if ( isset( $headers['content-length'] ) ) {
 			return (int) $headers['content-length']; // size in bytes
 		}
+		
 		print_r( $headers );
+		
 		return 0;
 	}
 
