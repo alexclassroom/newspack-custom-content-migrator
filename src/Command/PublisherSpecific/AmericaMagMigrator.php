@@ -928,13 +928,36 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		global $wpdb;
 
 		// cover image.
-		$iss_cover = get_post_meta( $post_id, 'iss_cover', true );
+		$meta_key = 'iss_cover';
+		$iss_cover = get_post_meta( $post_id, $meta_key, true );
 
 		// issue pdf.
-		$issue_pdf = get_post_meta( $post_id, 'issue_pdf', true );
+		$meta_key = 'issue_pdf';
+		$issue_pdf = get_post_meta( $post_id, $meta_key, true );
 		
 
-		
+
+// do this for both!!!
+
+		$file_warning_msg = '';
+		$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
+		// get the related Drupal info via the post info.  This is the correct URL.
+		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+			FROM node__field_audio_file nfaf
+			JOIN file_managed fm on fm.fid = nfaf.field_audio_file_target_id and fm.status = 1			
+			WHERE nfaf.entity_id = %d and nfaf.deleted = 0
+			",
+			$assets_info['old_content_node_id']
+		));
+		$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+
+
+
+
+
 
 		exit();
 
@@ -1070,36 +1093,9 @@ wp newspack-post-image-downloader import-images
 
 		global $wpdb;
 
-		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
-		if( ! ( $old_content_node_id > 0 ) ) {
-			$this->logger->error( 'Post is missing old content node id.' );
-			exit();
-		}
+		$file_warning_msg = '';
 
-		$this->logger->info( 'Old content node id: ' . $old_content_node_id );
-
-		// compare audio_file to node's audio file.  This might point to the wrong file.
-		$attachment_id = get_post_meta( $post_id, 'audio_file', true );
-
-		$this->logger->info( 'attachment_id: ' . $attachment_id );
-
-		// Validate db data.
-		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
-			return;
-		}
-		
-		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		
-		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
-
-		// Sanity.  
-		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
-		if( empty( $old_file_url ) ) {
-			$this->logger->error( 'No old file url.' );
-			exit();
-		}
-		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+		$assets_info = $this->clean_up_assets___1( $post_id, 'audio_file' );
 
 		// get the related Drupal info via the post info.  This is the correct URL.
 		$file_managed = $wpdb->get_row( $wpdb->prepare( "
@@ -1108,29 +1104,11 @@ wp newspack-post-image-downloader import-images
 			JOIN file_managed fm on fm.fid = nfaf.field_audio_file_target_id and fm.status = 1			
 			WHERE nfaf.entity_id = %d and nfaf.deleted = 0
 			",
-			$old_content_node_id
+			$assets_info['old_content_node_id']
 		));
 
-		$this->logger->info( json_encode( $file_managed ) );
-		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
-	
-		// -- setup warning counter.
-		$file_warning_msg = '';
-
-		// check basenames.  file managed uri is coming from the correct node id, but $old_file_url is coming from the possibly incorrect attachment id.
-		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
-			$this->logger->warning( 'File basenames are different.' );
-			$file_warning_msg .= '-FBDIFF';
-		}
-		
-		// compare filesize.
-
-		if( ! ( (int) $file_managed->filesize > 0 ) ) {
-			$this->logger->warning( 'SKIP: File mangaged filsize is null.' );
-			return;
-		}
-
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
+		$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
 
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
@@ -1366,6 +1344,72 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 	/*************************
 	  CLEAN UP ASSSETS 
 	*************************/
+
+	private function clean_up_assets___1( $post_id, $meta_key ) {
+
+		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
+		if( ! ( $old_content_node_id > 0 ) ) {
+			$this->logger->error( 'Post is missing old content node id.' );
+			exit();
+		}
+
+		$this->logger->info( 'Old content node id: ' . $old_content_node_id );
+
+		// This might point to the wrong file.
+		$attachment_id = get_post_meta( $post_id, $meta_key, true );
+
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
+
+		// Sanity.  
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+		if( empty( $old_file_url ) ) {
+			$this->logger->error( 'No old file url.' );
+			exit();
+		}
+		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
+
+		return [
+			'old_content_node_id' => $old_content_node_id,
+			'attachment_id'       => $attachment_id,
+			'attached_file'       => $attached_file,
+			'attachment_metadata' => $attachment_metadata,
+			'old_file_url'        => $old_file_url,
+		];
+
+	}
+
+	private function clean_up_assets___2( $file_managed, $old_file_url ) {
+
+		$file_warning_msg = '';
+
+		$this->logger->info( json_encode( $file_managed ) );
+		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
+	
+		// check basenames.  file managed uri is coming from the correct node id, but $old_file_url is coming from the possibly incorrect attachment id.
+		if( 0 !== strcmp( basename( $file_managed->uri ), basename( $old_file_url ) ) ) {
+			$this->logger->warning( 'File basenames are different.' );
+			$file_warning_msg .= '-FBDIFF';
+		}
+		
+		// compare filesize.
+		if( ! ( (int) $file_managed->filesize > 0 ) ) {
+			$this->logger->warning( 'File mangaged filsize is null.' );
+			$file_warning_msg .= '-FMSIZENULL';
+		}
+
+		return $file_warning_msg;
+
+	}
 
 	private function clean_up_assets___check_node_body( $old_content_node_id, $old_file_url_parsed ) {
 
