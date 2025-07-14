@@ -2460,14 +2460,16 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 	************************************/
 
 	function util_get_remote_image_filesize( $url ) {
-		$response = wp_remote_head( $url, [ 'timeout' => 30 ] ); // increase timeout to be safe.
+		$response = wp_remote_head( $url, [ 'timeout' => 60 ] ); // increase timeout to be safe.
 		if ( is_wp_error( $response ) ) {
+			print_r( $response );
 			return 0;
 		}
 		$headers = wp_remote_retrieve_headers( $response );
 		if ( isset( $headers['content-length'] ) ) {
 			return (int) $headers['content-length']; // size in bytes
 		}
+		print_r( $headers );
 		return 0;
 	}
 
