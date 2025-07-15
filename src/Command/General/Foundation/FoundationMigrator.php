@@ -1134,7 +1134,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				continue;
 			}
 			if ( ! $update_content && in_array( $slideshow->oid, $all_migrated_slideshows_oids ) ) {
-				$logger->info( sprintf( 'Skipping slideshow %d because it has already been migrated', $slideshow->oid ) );
+				$logger->info( sprintf( '[%d] Skipping slideshow %d because it has already been migrated', $index + 1, $slideshow->oid ) );
 				continue;
 			}
 
@@ -1179,7 +1179,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$migrated_slideshow_id = Posts::create_or_get_post( $post_data, $slideshow->oid );
 
 			if ( is_wp_error( $migrated_slideshow_id ) ) {
-				$logger->error( sprintf( 'Error migrating slideshow %d: %s', $slideshow->oid, $migrated_slideshow_id->get_error_message() ) );
+				$logger->error( sprintf( '[%d] Error migrating slideshow %d: %s', $index + 1, $slideshow->oid, $migrated_slideshow_id->get_error_message() ) );
 				continue;
 			}
 
@@ -1232,7 +1232,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$csv_writer->put( [ $slideshow->oid, $migrated_slideshow_id, 'https://' . $publisher_domain . $slideshow->permalink, get_permalink( $migrated_slideshow_id ) ] );
 
-			$logger->info( sprintf( 'Migrated slideshow %d with ID %d', $slideshow->oid, $migrated_slideshow_id ) );
+			$logger->info( sprintf( '[%d] Migrated slideshow %d with ID %d', $index + 1, $slideshow->oid, $migrated_slideshow_id ) );
 		}
 
 		$csv_writer->close();
@@ -1944,7 +1944,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		$content = preg_replace_callback(
-			'/\[pullquote-(\d+)-(\w+)\]/',
+			'/\[pullquote-(\d+)(?:-(\w+))?\]/',
 			function ( $matches ) use ( $post_oid, $logger, $post_pullquotes ) {
 				$pullquote_index = (int) $matches[1] - 1; // Convert to 0-based index.
 				if ( ! isset( $post_pullquotes[ $pullquote_index ] ) ) {
