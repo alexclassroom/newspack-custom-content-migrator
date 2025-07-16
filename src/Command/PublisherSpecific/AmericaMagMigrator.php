@@ -762,7 +762,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		// $this->clean_up_attachment_capitalized_exts( $attachment_id, $logger_slug );
 		
-		$this->clean_up_assets___verify_attachment_db( $attachment_id );
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+
 
 	}
     
@@ -935,18 +938,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			$file_warning_msg = '';
 			$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
-			// get the related Drupal info via the post info.  This is the correct URL.
-			$file_managed = $wpdb->get_row( $wpdb->prepare( "
-				SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
-				FROM node__field_iss_cover nfis
-				JOIN file_managed fm on fm.fid = nfis.field_iss_cover_target_id and fm.status = 1			
-				WHERE nfis.entity_id = %d and nfis.deleted = 0
-				",
-				$assets_info['old_content_node_id']
-			));
-			$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-			$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
-			$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+			if( is_array( $assets_info ) ) {
+				// get the related Drupal info via the post info.  This is the correct URL.
+				$file_managed = $wpdb->get_row( $wpdb->prepare( "
+					SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+					FROM node__field_iss_cover nfis
+					JOIN file_managed fm on fm.fid = nfis.field_iss_cover_target_id and fm.status = 1			
+					WHERE nfis.entity_id = %d and nfis.deleted = 0
+					",
+					$assets_info['old_content_node_id']
+				));
+				$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+				$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+			}
 		}
 
 		// issue pdf.
@@ -957,18 +962,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			
 			$file_warning_msg = '';
 			$assets_info = $this->clean_up_assets___1( $post_id, $meta_key );
-			// get the related Drupal info via the post info.  This is the correct URL.
-			$file_managed = $wpdb->get_row( $wpdb->prepare( "
-				SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
-				FROM node__field_iss_cover nfis
-				JOIN file_managed fm on fm.fid = nfis.field_iss_cover_target_id and fm.status = 1			
-				WHERE nfis.entity_id = %d and nfis.deleted = 0
-				",
-				$assets_info['old_content_node_id']
-			));
-			$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-			$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
-			$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+			if( is_array( $assets_info ) ) {
+				// get the related Drupal info via the post info.  This is the correct URL.
+				$file_managed = $wpdb->get_row( $wpdb->prepare( "
+					SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+					FROM node__field_issue_pdf nfip
+					JOIN file_managed fm on fm.fid = nfip.field_issue_pdf_target_id and fm.status = 1			
+					WHERE nfip.entity_id = %d and nfip.deleted = 0
+					",
+					$assets_info['old_content_node_id']
+				));
+				$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
+				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+				$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
+			}
 		}
 
 	}
@@ -1711,8 +1718,8 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		}
 
 		if( ! ( $wp_filesize > 0 ) ) {
-			$this->logger->error( 'Filesize not gt 0.' );
-			exit();
+			$this->logger->warning( 'Filesize not gt 0.' );
+			return "-FSZERO";
 		}
 
 		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
