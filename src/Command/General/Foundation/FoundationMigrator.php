@@ -1002,6 +1002,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$logger->info( sprintf( '[%d] Migrated post %d with ID %d', $index + 1, $post->oid, $migrated_post_id ) );
 		}
 
+		wp_cache_flush();
 		$logger->info( sprintf( 'Skipped %d posts because they have already been migrated.', count( $skipped_posts ) ) );
 		$logger->info( sprintf( 'Migrated %d posts.', count( $migrated_posts ) ) );
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
