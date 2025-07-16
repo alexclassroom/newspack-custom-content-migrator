@@ -1761,7 +1761,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	/**
 	 * Migrate images tray and featured image.
 	 *
-	 * The featured image is the image with "Teaser" placement. The "first" image is also the default Teaser if a Teaser isn't set.
+	 * The featured image is the image with "Teaser" placement, if not it's the one with "Magnum" placement. The "first" image is also the default Teaser if a Teaser isn't set.
 	 *
 	 * @param int    $post_id      Post ID.
 	 * @param array  $post_image_oids  Post image OIDs.
@@ -1779,6 +1779,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$migrated_images           = [];
 		$possible_teaser_image_ids = [];
+		$possible_magnum_image_ids = [];
 
 		foreach ( $post_image_oids as $index => $post_image_oid ) {
 			$possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $raw_images_file, 'oid', $post_image_oid ) );
@@ -1811,6 +1812,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 				if ( isset( $raw_image->placements ) && in_array( 'teaser', $raw_image->placements, true ) ) {
 					$possible_teaser_image_ids[] = $attachment_id;
 				}
+
+				if ( isset( $raw_image->placements ) && in_array( 'magnum', $raw_image->placements, true ) ) {
+					$possible_magnum_image_ids[] = $attachment_id;
+				}
 			} else {
 				$logger->warning( sprintf( 'Image %s not found in raw images for post %s', $post_image_oid, $post_id ) );
 			}
@@ -1824,6 +1829,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 		// Set the featured image.
 		if ( ! empty( $possible_teaser_image_ids ) ) {
 			set_post_thumbnail( $post_id, $possible_teaser_image_ids[0] );
+		} elseif ( ! empty( $possible_magnum_image_ids ) ) {
+			set_post_thumbnail( $post_id, $possible_magnum_image_ids[0] );
 		} elseif ( ! empty( $migrated_images ) ) {
 			$first_image = current( $migrated_images );
 			set_post_thumbnail( $post_id, $first_image['attachment_id'] );
@@ -2201,16 +2208,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return int|WP_Error Attachment ID or WP_Error.
 	 */
 	private function migrate_raw_attachment( object $raw_attachment, int $post_id ) {
+		$caption = isset( $raw_attachment->caption ) ? wp_strip_all_tags( $raw_attachment->caption ) : '';
+		$alt     = isset( $raw_attachment->alt ) ? wp_strip_all_tags( $raw_attachment->alt ) : '';
+		$credit  = isset( $raw_attachment->credit ) ? wp_strip_all_tags( $raw_attachment->credit ) : '';
+
 		$meta_input = [
 			'meta_input' => [
-				'_media_credit' => $raw_attachment->credit ?? '',
+				'_media_credit' => $credit,
 			],
 		];
 
 		$local_media_path = isset( $raw_attachment->path ) ? rtrim( $this->media_local_path, '/' ) . '/' . ltrim( $raw_attachment->path, '/' ) : '';
 		$media_path       = is_file( $local_media_path ) ? $local_media_path : $raw_attachment->url;
 
-		return Attachments::import_external_file( $media_path, null, $raw_attachment->caption ?? null, null, $raw_attachment->alt ?? null, $post_id, $meta_input, '', true, $raw_attachment->oid );
+		return Attachments::import_external_file( $media_path, null, $caption, null, $alt, $post_id, $meta_input, '', true, $raw_attachment->oid );
 	}
 
 	/**
