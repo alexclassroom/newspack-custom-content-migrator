@@ -3,6 +3,7 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\CollectionsHelper;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\FgHelper;
 use Newspack\MigrationTools\Util\Log\CliLog;
@@ -29,6 +30,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	const META_KEY_CLEANED_ITEM_SLUG       = '_np_migration_cleaned_item';
 
 	const STAGING_UPLOADS_URL              = 'https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/';
+
+	const ISSUE_POST_TYPE = 'issue';
+
+	/**
+	 * Collections Helper instance
+	 * 
+	 * @var CollectionsHelper
+	 */
+	private CollectionsHelper $collections_helper;
 	
 	/**
      * WP allowed mime types.
@@ -131,6 +141,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
             array_push( $this->allowed_mime_types, ...explode( '|', $ext ) );
         }
         $this->allowed_mime_types = array_unique( $this->allowed_mime_types );
+
+		$this->collections_helper = new CollectionsHelper();
     }
 
 	/**
@@ -218,6 +230,33 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_profiles' ),
 			[
 				'shortdesc' => 'America Mag Profiles (to guest contributors)',
+			]
+		);
+
+		/**
+		 * Collections
+		 */
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-migrate-issues-to-collections',
+			self::get_command_closure( 'cmd_migrate_issues_to_collections' ),
+			[
+				'shortdesc' => 'Migrate issues to collections.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-migrate-posts-to-collections',
+			self::get_command_closure( 'cmd_migrate_posts_to_collections' ),
+			[
+				'shortdesc' => 'Migrate posts to collections.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-migrate-collections-sections',
+			self::get_command_closure( 'cmd_migrate_collections_sections' ),
+			[
+				'shortdesc' => 'Migrate Collections Sections.',
 			]
 		);
 
@@ -713,6 +752,209 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 			} // callback function
 		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator america-mag-migrate-issues-to-collections`.
+	 */
+	public function cmd_migrate_issues_to_collections( array $pos_args, array $assoc_args ): void {
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		// Loop through all collections post type rows.
+		(new Posts())->throttled_posts_loop( 
+			[
+				'post_type' => self::ISSUE_POST_TYPE,
+				'orderby'   => 'ID',
+				'order'     => 'DESC',
+			], 
+			function( $post ) {
+				$this->logger->info( '-- Issue Post ID: ' . $post->ID );
+
+				$collection_id = $this->collections_helper->get_or_create_collection( [
+					'post_title'    => $post->post_title,
+					'post_date'     => $post->post_date,
+					'post_date_gmt' => $post->post_date_gmt,
+				], $post->ID );
+
+				if ( is_wp_error( $collection_id ) ) {
+					$this->logger->error( sprintf( 'Failed to get or create collection for issue post ID %d: %s', $post->ID, $collection_id->get_error_message() ) );
+
+					return;
+				}
+
+				add_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10, 2 );
+
+				wp_update_post( [
+					'ID'                => $collection_id,
+					'post_author'       => $post->post_author,
+					'post_title'        => $post->post_title,
+					'post_content'      => $post->post_content,
+					'post_date'         => $post->post_date,
+					'post_date_gmt'     => $post->post_date_gmt,
+					'post_excerpt'      => $post->post_excerpt,
+					'post_status'       => $post->post_status,
+					'post_name'         => $post->post_name,
+					'post_modified'     => $post->post_modified,
+					'post_modified_gmt' => $post->post_modified_gmt,
+				] );
+
+				remove_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10 );
+
+				$this
+					->collections_helper
+					->update_collection_metadata( $collection_id, [
+						'thumbnail_id' => get_post_meta( $post->ID, 'iss_cover', true ),
+						'volume'       => get_post_meta( $post->ID, 'iss_vol', true ),
+						'number'       => get_post_meta( $post->ID, 'iss_num', true ),
+						'period'       => $post->post_title,
+					] );
+
+				// Update Collection Digital Edition PDF CTA
+				if ( get_post_meta( $post->ID, 'issue_pdf', true ) ) {
+					$this
+						->collections_helper
+						->update_collection_metadata( $collection_id, [
+							'ctas' => [
+								[
+									'type'  => 'attachment',
+									'label' => 'View Digital Edition (PDF)',
+									'id'    => get_post_meta( $post->ID, 'issue_pdf', true ),
+								]
+							]
+						] );
+				}
+
+				$this->logger->info( sprintf( 'Upserted Collection #%d "%s"', $collection_id, $post->post_title ) );
+			} // callback function
+		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator america-mag-migrate-posts-to-collections`.
+	 */
+	public function cmd_migrate_posts_to_collections( array $pos_args, array $assoc_args ): void {
+		global $wpdb;
+
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		// Loop through all collections post type rows.
+		(new Posts())->throttled_posts_loop( 
+			[
+				'post_type'    => 'post',
+				'orderby'      => 'ID',
+				'order'        => 'DESC',
+				'meta_key'     => 'issue',
+				'meta_value'   => '',
+				'meta_compare' => 'EXISTS',
+			], 
+			function( $post ) use ( $wpdb ) {
+				$this->logger->info( '-- Post ID: ' . $post->ID );
+
+				$issue_meta = get_post_meta( $post->ID, 'issue', true );
+				
+				if ( empty( $issue_meta ) ) {
+					return;
+				}
+
+				$issue_meta = is_array( $issue_meta ) ? array_unique( $issue_meta ) : [ $issue_meta ];
+
+				$collection_post_ids = $wpdb->get_col(
+					$wpdb->prepare(
+						"SELECT `post_id`
+						FROM $wpdb->postmeta
+						WHERE `meta_key` = %s
+						AND `meta_value` IN ('" . implode( "','", array_map( 'esc_sql', $issue_meta ) ) . "')",
+						CollectionsHelper::UNIQUE_COLLECTION_IDENTIFIER_META_KEY
+					)
+				);
+
+				$this
+					->collections_helper
+					->assign_post_to_collections_posts( $post->ID, $collection_post_ids );
+			} // callback function
+		); // throttled posts
+
+		$this->logger->info( 'Done.' ); 
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator america-mag-migrate-collections-sections`.
+	 */
+	public function cmd_migrate_collections_sections( array $pos_args, array $assoc_args ): void {
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		global $wpdb;
+
+		$collection_sections = $wpdb->get_results(
+			"SELECT
+				tm.term_id,
+				t.name,
+				t.slug,
+				ttfd.weight
+			FROM
+				wp_termmeta tm
+				JOIN wp_terms t ON t.`term_id` = tm.term_id
+				JOIN taxonomy_term_field_data ttfd ON ttfd.`tid` = tm.meta_value
+				AND ttfd.vid = 'sections'
+			WHERE
+				tm.meta_key = '_fgd2wp_old_taxonomy_id'
+			ORDER BY
+				t.slug;"
+		);
+
+		foreach ( $collection_sections as $collection_section ) {
+			$this->logger->info( '-- Collection Section Category ID: ' . $collection_section->term_id );
+	
+			$collection_section_wp_term = $this->collections_helper->get_or_create_collection_section( [
+				'name' => $collection_section->name,
+				'slug' => $collection_section->slug,
+			], $collection_section->term_id );
+
+			if ( is_wp_error( $collection_section_wp_term ) ) {
+				$this->logger->error( sprintf( 'Failed to get or create collection section for category ID %d: %s', $collection_section->term_id, $collection_section_wp_term->get_error_message() ) );
+
+				continue;
+			}
+
+			$collection_section_category_posts = get_posts(
+				[
+					'fields'           => 'ids',
+					'posts_per_page'   => -1,
+					'post_type'        => 'post',
+					'post_status'      => 'any',
+					'suppress_filters' => true, // phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.SuppressFilters_suppress_filters -- Suppress filters is needed here.
+					'category'         => $collection_section->term_id
+				]
+			);
+
+			$this
+				->collections_helper
+				->update_collection_section_metadata( $collection_section_wp_term->term_id, [
+					'order' => $collection_section->weight,
+				] );
+
+			foreach ( $collection_section_category_posts as $post_id ) {
+				$this
+					->collections_helper
+					->assign_post_to_collection_sections(
+						$post_id,
+						$collection_section_wp_term->term_id
+					);
+			}
+		}
 
 		$this->logger->info( 'Done.' ); 
 	}
@@ -2645,5 +2887,17 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
             WP_CLI::error( 'Positional argument must be one of: ' . implode( ', ', self::ITEM_TYPES ), true );
         }
     }
+
+	/**
+	 * Callback for `wp_update_post` to update content without touching the post_modified and post_modified_gmt.
+	 * 
+	 * @return void
+	 */
+	public function update_post_without_modified_dates( $data, $postarr ): array {
+		$data['post_modified']     = isset( $postarr['post_modified'] ) ? $postarr['post_modified'] : $data['post_modified'];
+		$data['post_modified_gmt'] = isset( $postarr['post_modified_gmt'] ) ? $postarr['post_modified_gmt'] : $data['post_modified_gmt'];
+
+		return $data;
+	}
 
 }
