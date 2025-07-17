@@ -896,11 +896,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Migrate images tray and featured image.
 			$time            = microtime( true );
-			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_post_id, $post->imageLinks, $image_json_file, $post->images ?? [] );
+			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_post_id, $post->imageLinks, $image_json_file, $post->images ?? [], $update_content );
 			$logger->info( sprintf( 'Migrated images tray and featured image in %s.02 seconds', microtime( true ) - $time ) );
 
 			// Migrate post content.
-			$updated_content = $this->generate_post_content( $migrated_post_id, $post, $migrated_images, $embed_json_file, $audio_json_file, $pdf_json_file, $slideshow_json_file );
+			$updated_content = $this->generate_post_content( $migrated_post_id, $post, $migrated_images, $embed_json_file, $audio_json_file, $pdf_json_file, $slideshow_json_file, $update_content );
 
 			if ( $updated_content !== $post->body ) {
 				// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -1065,10 +1065,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			// Migrate images tray and featured image.
-			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_page_id, $page->imageLinks, $image_json_file, $page->images ?? [] );
+			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_page_id, $page->imageLinks, $image_json_file, $page->images ?? [], $update_content );
 
 			// Migrate post content.
-			$updated_content = $this->generate_post_content( $migrated_page_id, $page, $migrated_images, $embed_json_file, $audio_json_file, $pdf_json_file, $slideshow_json_file );
+			$updated_content = $this->generate_post_content( $migrated_page_id, $page, $migrated_images, $embed_json_file, $audio_json_file, $pdf_json_file, $slideshow_json_file, $update_content );
 
 			if ( $updated_content !== $page->body ) {
 				// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -1188,7 +1188,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			GuestContributorsHelper::assign_contributors_to_post( $migrated_slideshow_id, array_values( $mapped_authors ) );
 
 			// Migrate images tray and featured image.
-			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_slideshow_id, $slideshow->imageLinks, $image_json_file, $slideshow->images ?? [] );
+			$migrated_images = $this->migrate_images_tray_and_featured_image( $migrated_slideshow_id, $slideshow->imageLinks, $image_json_file, $slideshow->images ?? [], $update_content );
 
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
@@ -1203,8 +1203,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
 				}
 
+				// Migrate post content.
+				$slideshow->body      = $slideshow->description;
+				$migrated_description = $this->generate_post_content( $migrated_slideshow_id, $slideshow, $migrated_images, '', '', '', $slideshow_json_file, $update_content );
 
-				$updated_content = $slideshow->description . $gallery_block;
+				$updated_content = $migrated_description . $gallery_block;
 
 				if ( $updated_content !== $slideshow->description ) {
 					// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -1652,10 +1655,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @param string $audio_json_file Raw audios file.
 	 * @param string $pdf_json_file   Raw PDFs file.
 	 * @param string $slideshow_json_file Raw slideshows file.
+	 * @param bool   $update_content  Whether to update the content of the post.
 	 *
 	 * @return string Post content.
 	 */
-	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file ): string {
+	private function generate_post_content( int $post_id, object $post, array $migrated_images, string $embed_json_file, string $audio_json_file, string $pdf_json_file, string $slideshow_json_file, bool $update_content = false ): string {
 		$logger  = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 		$content = $this->clean_content( $post->body );
 
@@ -1665,13 +1669,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		// Migrate images.
-		$content = $this->migrate_images_markers( $post->oid, $content, $migrated_images, $post->imageLinks );
+		$content = $this->migrate_images_markers( $post->oid, $content, $migrated_images, $post->imageLinks, $update_content );
 
 		// Check if any image markers remain and try robust approach if needed.
 		preg_match_all( '/\[image-(\d+)\]/', $content, $remaining_markers );
 		if ( ! empty( $remaining_markers[0] ) ) {
 			$logger->warning( sprintf( 'Regular image migration failed for post %s, trying robust approach. Remaining markers: %s', $post->oid, implode( ', ', $remaining_markers[0] ) ) );
-			$content = $this->migrate_images_markers_robust( $post->oid, $content, $migrated_images, $post->imageLinks, $post->images ?? [] );
+			$content = $this->migrate_images_markers_robust( $post->oid, $content, $migrated_images, $post->imageLinks, $post->images ?? [], $update_content );
 		}
 
 		// Migrate pullquote.
@@ -1771,7 +1775,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 *
 	 * @return array Migrated images. A key-value pair of post image OID and an array with the raw image data and the attachment ID.
 	 */
-	private function migrate_images_tray_and_featured_image( int $post_id, array $post_image_oids, string $raw_images_file, array $image_urls ): array {
+	private function migrate_images_tray_and_featured_image( int $post_id, array $post_image_oids, string $raw_images_file, array $image_urls, bool $update_meta = false ): array {
+		global $wpdb;
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		if ( empty( $post_image_oids ) ) {
@@ -1816,6 +1821,28 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				if ( isset( $raw_image->placements ) && in_array( 'magnum', $raw_image->placements, true ) ) {
 					$possible_magnum_image_ids[] = $attachment_id;
+				}
+
+				if ( $update_meta ) {
+					if ( isset( $raw_image->caption ) && ! empty( $raw_image->caption ) ) {
+						$wpdb->update(
+							$wpdb->posts,
+							[ 'post_excerpt' => wp_strip_all_tags( $raw_image->caption ) ],
+							[ 'ID' => $attachment_id ]
+						);
+					}
+
+					if ( isset( $raw_image->credit ) && ! empty( $raw_image->credit ) ) {
+						if ( str_contains( $raw_image->credit, 'href' ) ) {
+							preg_match( '/href="([^"]+)"/', $raw_image->credit, $image_credit_url );
+							update_post_meta( $attachment_id, '_media_credit_url', $image_credit_url[1] );
+						}
+						update_post_meta( $attachment_id, '_media_credit', wp_strip_all_tags( $raw_image->credit ) );
+					}
+
+					if ( isset( $raw_image->alt ) && ! empty( $raw_image->alt ) ) {
+						update_post_meta( $attachment_id, '_media_alt', wp_strip_all_tags( $raw_image->alt ) );
+					}
 				}
 			} else {
 				$logger->warning( sprintf( 'Image %s not found in raw images for post %s', $post_image_oid, $post_id ) );
@@ -2211,11 +2238,22 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private function migrate_raw_attachment( object $raw_attachment, int $post_id ) {
 		$caption = isset( $raw_attachment->caption ) ? wp_strip_all_tags( $raw_attachment->caption ) : '';
 		$alt     = isset( $raw_attachment->alt ) ? wp_strip_all_tags( $raw_attachment->alt ) : '';
-		$credit  = isset( $raw_attachment->credit ) ? wp_strip_all_tags( $raw_attachment->credit ) : '';
+
+		$credit_url = '';
+		$credit     = '';
+		if ( isset( $raw_attachment->credit ) && ! empty( $raw_attachment->credit ) ) {
+			if ( str_contains( $raw_attachment->credit, 'href' ) ) {
+				preg_match( '/href="([^"]+)"/', $raw_attachment->credit, $image_credit_url );
+				$credit_url = $image_credit_url[1];
+			}
+
+			$credit = wp_strip_all_tags( $raw_attachment->credit );
+		}
 
 		$meta_input = [
 			'meta_input' => [
-				'_media_credit' => $credit,
+				'_media_credit'     => $credit,
+				'_media_credit_url' => $credit_url,
 			],
 		];
 
@@ -2847,10 +2885,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @param array  $migrated_images   Migrated images. A key-value pair of post image OID and an array with the raw image data and the attachment ID.
 	 * @param array  $post_image_oids Post image OIDs. A 0-based indexed array.
 	 * @param array  $image_urls   Image URLs from the images field. A 0-based indexed array.
+	 * @param bool   $update_meta  Whether to update the meta data of the image.
 	 *
 	 * @return string Post content with image markers replaced by Gutenberg blocks.
 	 */
-	private function migrate_images_markers_robust( string $post_oid, string $content, array $migrated_images, array $post_image_oids, array $image_urls ): string {
+	private function migrate_images_markers_robust( string $post_oid, string $content, array $migrated_images, array $post_image_oids, array $image_urls, bool $update_meta = false ): string {
+		global $wpdb;
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		$logger->info( sprintf( 'Starting robust image marker migration for post %s', $post_oid ) );
@@ -2879,7 +2919,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$content_updated = preg_replace_callback(
 				'/\[image-(\d+)\]/',
-				function ( $matches ) use ( $post_oid, $migrated_images, $logger, $post_image_oids, $image_urls, $iteration ) {
+				function ( $matches ) use ( $post_oid, $migrated_images, $logger, $post_image_oids, $image_urls, $iteration, $wpdb, $update_meta ) {
 					$image_index = (int) $matches[1] - 1; // Convert to 0-based index.
 					$logger->info( sprintf( 'Iteration %d: Processing image marker [image-%d] (index %d)', $iteration, (int) $matches[1], $image_index ) );
 
@@ -2941,6 +2981,28 @@ class FoundationMigrator implements RegisterCommandInterface {
 						}
 						$destination_url = $raw_image['destinationURL'] ?? null;
 						$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
+
+						if ( $update_meta ) {
+							if ( isset( $raw_image->caption ) && ! empty( $raw_image->caption ) ) {
+								$wpdb->update(
+									$wpdb->posts,
+									[ 'post_excerpt' => wp_strip_all_tags( $raw_image->caption ) ],
+									[ 'ID' => $attachment_id ]
+								);
+							}
+
+							if ( isset( $raw_image->credit ) && ! empty( $raw_image->credit ) ) {
+								if ( str_contains( $raw_image->credit, 'href' ) ) {
+									preg_match( '/href="([^"]+)"/', $raw_image->credit, $image_credit_url );
+									update_post_meta( $attachment_id, '_media_credit_url', $image_credit_url[1] );
+								}
+								update_post_meta( $attachment_id, '_media_credit', wp_strip_all_tags( $raw_image->credit ) );
+							}
+
+							if ( isset( $raw_image->alt ) && ! empty( $raw_image->alt ) ) {
+								update_post_meta( $attachment_id, '_media_alt', wp_strip_all_tags( $raw_image->alt ) );
+							}
+						}
 					}
 
 					$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
