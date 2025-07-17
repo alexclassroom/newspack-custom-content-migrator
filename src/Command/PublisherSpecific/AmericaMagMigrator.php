@@ -766,6 +766,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			return;
 		}
 
+		$file_warning_msg = '';
+
+		// compare filesizes
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+
+		$file_managed_filesize = $this->util_get_remote_image_filesize( $old_file_url );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed_filesize );
+
+		if( "-SIZEYES" !== $file_warning_msg ) {
+			$this->logger->error( 'File is ' . $file_warning_msg . ' --' );
+			exit();
+		}
 
 	}
     
@@ -2535,10 +2549,13 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 			
 			// for some reason remote head is ignoring timeout...so if timeout, just try again....
 			// stop infinite loop with max tries.				
+			// message: Connection timeout after
+			// message: Connection timed out
 			if( 'http_request_failed' === $response->get_error_code() 
-				&& str_contains( $response->get_error_message(), 'Connection timeout after' )
+				&& str_contains( $response->get_error_message(), 'Connection time' )
 				&& $max_tries > 0
 			) {
+				sleep(3);
 				return $this->util_get_remote_image_filesize( $url, --$max_tries );
 			}
 
