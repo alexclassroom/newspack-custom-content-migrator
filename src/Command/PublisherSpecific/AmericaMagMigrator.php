@@ -1008,15 +1008,22 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			return;
 		}
 
+		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
+
+		// only do size comparison if old file exists.
+		if( ! ( str_starts_with( strtolower( $old_file_url ), 'http' ) ) ) {
+			$this->logger->info( 'No old file url.' );
+			return;
+		}
+
 		$file_warning_msg = '';
 
 		// compare filesizes
 		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
 		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
-
-		$file_managed_filesize = $this->util_get_remote_image_filesize( $old_file_url );
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed_filesize );
+		
+		$old_filesize = $this->clean_up_assets___get_attachment_old_filesize( $attachment_id, $old_file_url );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attachment_id, $attached_file, $attachment_metadata, $old_filesize );
 
 		if( "-SIZEYES" !== $file_warning_msg ) {
 			$this->logger->error( 'File is ' . $file_warning_msg . ' --' );
@@ -1205,7 +1212,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					$assets_info['old_content_node_id']
 				));
 				$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attachment_id'], $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
 				$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 			}
 		}
@@ -1229,7 +1236,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					$assets_info['old_content_node_id']
 				));
 				$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+				$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attachment_id'], $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
 				$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 			}
 		}
@@ -1381,7 +1388,7 @@ wp newspack-post-image-downloader import-images
 		));
 
 		$file_warning_msg .= $this->clean_up_assets___2( $file_managed, $assets_info['old_file_url'] );
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $assets_info['attachment_id'], $assets_info['attached_file'], $assets_info['attachment_metadata'], $file_managed->filesize );
 
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
@@ -1463,7 +1470,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 			return;
 		}
 
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attachment_id, $attached_file, $attachment_metadata, $file_managed->filesize );
 		
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
@@ -1608,7 +1615,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		}
 		
 		// compare filesize.
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attached_file, $attachment_metadata, $file_managed->filesize );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attachment_id, $attached_file, $attachment_metadata, $file_managed->filesize );
 		
 		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
@@ -1822,7 +1829,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		$this->logger->info( 'File managed: ' . wp_json_encode( $file_managed ) );
 
 		// compare filesize.
-		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $wp_path, $attachment_metadata, $file_managed->filesize );
+		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attachment_id, $wp_path, $attachment_metadata, $file_managed->filesize );
 		
 		// -- Check usage and content.
 						
@@ -1896,6 +1903,31 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	}
 
+	private function clean_up_assets___get_attachment_old_filesize( $attachment_id, $old_file_url ) {
+
+		// try to get from a previous lookup
+		$old_filesize = (int) get_post_meta( $attachment_id, '_np_migration_old_filesize', true );
+
+		// if not found, not > 0
+		if( ! ( $old_filesize > 0 ) ) {
+
+			// On local dev, we dont have physical files, so fetch from staging.
+			$old_filesize = $this->util_get_remote_image_filesize( $old_file_url );
+
+			// Test result.
+			if( ! ( $old_filesize > 0 ) ) {
+				return 0;
+			}
+
+			// save for other lookups.
+			update_post_meta( $attachment_id, '_np_migration_old_filesize', $old_filesize );
+
+		}		
+		
+		return $old_filesize;
+
+	}
+
 	private function clean_up_assets___get_old_file_url_parsed( $old_file_url ) {
 
 		// Look up the old file in the Drupal table.
@@ -1912,7 +1944,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	private function clean_up_assets___get_file_managed_by_url( $old_file_url_parsed, &$file_warning_msg ) {
 	
-		// get the file_managed from Drupal and compage the filesize
+		// get the file_managed from Drupal and compare the filesize
 		// don't use wpdb as it will convert unicode to ascii based on table definitions.
 		$mysqli = $this->util_get_mysqli();
 		$result = $mysqli->query( "
@@ -1954,28 +1986,38 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	}
 
-	private function clean_up_assets___compare_wp_filesize( $wp_path, $attachment_metadata, $file_managed_filesize ) {
+	private function clean_up_assets___compare_wp_filesize( $attachment_id, $wp_path, $attachment_metadata, $file_managed_filesize ) {
 
-		$wp_filesize = 0;
+		// try to get from a previous lookup
+		$wp_filesize = (int) get_post_meta( $attachment_id, '_np_migration_wp_filesize', true );
 
-		// Use original image since this will match to drupal.
-		if( isset( $attachment_metadata['original_image'] ) ) {
-			// On local dev, we dont have physical files, so fetch from staging.
-			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . dirname( $wp_path ) . '/' . $attachment_metadata['original_image'] );
-		}
-		// there is no original image so just use the attached file size if exits.
-		else if( isset( $attachment_metadata['filesize'] ) ) {
-			$wp_filesize = $attachment_metadata['filesize'];
-		}
-		// directly fetch the file size, for pdfs, etc...
-		else {
-			// On local dev, we dont have physical files, so fetch from staging.
-			$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . $wp_path );
-		}
-
+		// if not found, not > 0
 		if( ! ( $wp_filesize > 0 ) ) {
-			$this->logger->warning( 'Filesize not gt 0.' );
-			return "-FSZERO";
+
+			// Use original image since this will match to drupal.
+			if( isset( $attachment_metadata['original_image'] ) ) {
+				// On local dev, we dont have physical files, so fetch from staging.
+				$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . dirname( $wp_path ) . '/' . $attachment_metadata['original_image'] );
+			}
+			// there is no original image so just use the attached file size if exits.
+			else if( isset( $attachment_metadata['filesize'] ) ) {
+				$wp_filesize = (int) $attachment_metadata['filesize'];
+			}
+			// directly fetch the file size, for pdfs, etc...
+			else {
+				// On local dev, we dont have physical files, so fetch from staging.
+				$wp_filesize = $this->util_get_remote_image_filesize( self::STAGING_UPLOADS_URL . $wp_path );
+			}
+
+			// Test result.
+			if( ! ( $wp_filesize > 0 ) ) {
+				$this->logger->warning( 'Filesize not gt 0.' );
+				return "-FSZERO";
+			}
+
+			// save for other lookups.
+			update_post_meta( $attachment_id, '_np_migration_wp_filesize', $wp_filesize );
+
 		}
 
 		$this->logger->info( 'wp_filesize: ' . $wp_filesize );
