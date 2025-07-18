@@ -1025,10 +1025,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$old_filesize = $this->clean_up_assets___get_attachment_old_filesize( $attachment_id, $old_file_url );
 		$file_warning_msg .= $this->clean_up_assets___compare_wp_filesize( $attachment_id, $attached_file, $attachment_metadata, $old_filesize );
 
-		if( "-SIZEYES" !== $file_warning_msg ) {
-			$this->logger->error( 'File is ' . $file_warning_msg . ' --' );
-			exit();
-		}
+		$this->logger->info( 'File is ' . $file_warning_msg . ' --' );
 
 	}
     
@@ -2829,7 +2826,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 		if ( is_wp_error( $response ) ) {
 			
-			print_r( $response );
+			// print_r( $response );
 			
 			// for some reason remote head is ignoring timeout...so if timeout, just try again....
 			// stop infinite loop with max tries.				
@@ -2853,7 +2850,7 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 			return (int) $headers['content-length']; // size in bytes
 		}
 		
-		print_r( $headers );
+		// print_r( $headers );
 		
 		return 0;
 	}
