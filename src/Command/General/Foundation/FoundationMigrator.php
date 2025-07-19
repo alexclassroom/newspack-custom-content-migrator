@@ -1297,7 +1297,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$migrated_related_posts = 0;
 			$content                = preg_replace_callback(
 				'/\[content-(\d+)\]/',
-				function ( $matches ) use ( $post, $logger, $related_posts, $mapped_related_posts, $migrated_related_posts ) {
+				function ( $matches ) use ( $post, $logger, $related_posts, $mapped_related_posts, &$migrated_related_posts ) {
 					$related_story_index = (int) $matches[1] - 1; // Convert to 0-based index.
 					if ( ! isset( $related_posts[ $related_story_index ] ) || ! isset( $mapped_related_posts[ $related_posts[ $related_story_index ] ] ) ) {
 						$logger->warning( sprintf( 'Related story %d not found in post related stories for post %s', (int) $matches[1], $post->oid ) );
