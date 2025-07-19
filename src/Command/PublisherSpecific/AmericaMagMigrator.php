@@ -26,6 +26,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
 	const META_KEY_PROCESSED_CONTENT_TYPE  = '_np_migration_processed_content_type';
 	const META_KEY_CLEANED_ITEM_SLUG       = '_np_migration_cleaned_item';
+	const META_KEY_HASH_CHECKSUM_PREFIX    = '_np_migration_hash_checksum';
+	const META_KEY_HASH_BACKUP_PREFIX      = '_np_migration_hash_backup';
 
 	const STAGING_UPLOADS_URL              = 'https://americamagazine-newspack.newspackstaging.com/wp-content/uploads/';
 
@@ -151,6 +153,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	public static function register_commands(): void {
 
 		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-bulk',
+			self::get_command_closure( 'cmd_bulk' ),
+			[
+				'shortdesc' => 'Bulk processing.',
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator america-mag-clean-up',
 			self::get_command_closure( 'cmd_clean_up' ),
 			[
@@ -258,6 +268,45 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			]
 		);
 
+	}
+
+	/**
+	 * Bulk processing
+	 */
+	public function cmd_bulk( array $pos_args, array $assoc_args ): void {
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		$this->validate_pos_arg( 
+			$pos_args,
+			[ 
+				'attachment-set-hashes',
+			]
+		);
+
+        // Logger.
+        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+        $this->logger_set( $logger_slug );
+
+        // Run command.
+        $this->logger->info( 'Running command: ' . $logger_slug );
+            
+		$keep_going = true;
+
+        do {
+
+            switch( $pos_args[0] ) {
+				case 'attachment-set-hashes':
+                    $keep_going = $this->bulk_attachment_set_hashes();
+                    break;
+                default:
+                    $this->logger->error( 'No bulk processing for: ' . $pos_args[0] );
+                    exit();
+            }
+            
+        } while( $keep_going );
+
+		$this->logger->info( 'Done.' ); 
 	}
 
 	/**
@@ -1005,6 +1054,73 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		return ( $this->batch_counts[ $this->batch_get_key( $content_type, $entity_type ) ] >= $this->batch_max );
 	}
 
+	/************************************
+	  BULK PROCESSING
+	************************************/
+
+	private function bulk_attachment_set_hashes() {
+
+		$total_count_items = 0;
+
+		// keys to hash
+		$meta_keys = [
+			'_wp_attached_file',
+		];
+
+		foreach( $meta_keys as $meta_key ) {
+
+			$this->logger->info( '------------ doing key: ' . $meta_key );
+
+			$hash_key_backup   = self::META_KEY_HASH_BACKUP_PREFIX . '-' . $meta_key;
+			$hash_key_checksum = self::META_KEY_HASH_CHECKSUM_PREFIX . '-' . $meta_key;
+
+			$db_items = get_posts([
+				'fields' => 'ids',
+				'post_type' => 'attachment',
+				'numberposts' => 1000,
+				'meta_query' => [
+					[
+						'key'     => $hash_key_backup,
+						'compare' => 'NOT EXISTS',
+					],
+				],
+			]);
+	
+			$total_count_items += count( $db_items );
+
+			foreach( $db_items as $db_id ) {
+
+                $this->logger->info( '--- processing id: ' . $db_id );
+
+				$meta_value = get_post_meta( $db_id, $meta_key, true );
+
+				// save a hashed value.
+				update_post_meta(
+					$db_id,
+					$hash_key_checksum,
+					$this->util_get_checksum_hash( $meta_value ),
+				);
+
+				// Save a backup.
+				update_post_meta(
+					$db_id,
+					$hash_key_backup,
+					$meta_value,
+				);
+
+				$this->logger->info( 'saved.' );
+
+			} // db items
+
+		} // meta keys to process
+
+		// Keep going?
+		if( $total_count_items > 0 ) return true;
+		
+		// Done.
+		return false;
+
+	}
 
 	/************************************
 	  CLEAN UP
@@ -2884,6 +3000,10 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	}		
 	
+	private function util_get_checksum_hash( $value ) {
+        return hash( 'sha256', serialize( $value ) );
+    }
+
 	/************************************
 	  VALIDATIONS
 	************************************/
