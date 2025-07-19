@@ -21,8 +21,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
 
-	const ITEM_TYPES = [ 'attachment', 'book_review', 'category', 'issue-assets-merged', 'post', 'post-assets-merged', 'post-audio-file', 'post-thumbnails', 'post_tag', 'user', 'user-assets-merged' ];
-
 	const META_KEY_FEATURED_IMAGE_POSITION = 'newspack_featured_image_position';
 	const META_KEY_PROFILE_POST_ID         = '_np_migration_profile_post_id';
 	const META_KEY_OLD_POST_TYPE           = '_np_migration_old_post_type';
@@ -269,7 +267,22 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$this->validate_setup( [ 'skip-acfpro' ] );
 
-		$this->validate_item_type( $pos_args );
+		$this->validate_pos_arg( 
+			$pos_args,
+			[ 
+				'attachment',
+				'book_review',
+				'category',
+				'issue-assets-merged',
+				'post',
+				'post-assets-merged',
+				'post-audio-file',
+				'post-thumbnails',
+				'post_tag',
+				'user',
+				'user-assets-merged'
+			]
+		);
 
         // Logger.
         $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
@@ -2921,9 +2934,16 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 
 	}
     
-	private function validate_item_type( array $pos_args ): void {
-        if( empty( $pos_args ) || ! in_array( $pos_args[0], self::ITEM_TYPES, true ) ) {
-            WP_CLI::error( 'Positional argument must be one of: ' . implode( ', ', self::ITEM_TYPES ), true );
+	/**
+	 * Validate positional arg
+	 *
+	 * @param array $pos_args array of positional args.
+	 * @param array $allowed_values array of allowed values to check against.
+	 * @param integer $index (zero based) default is first index of $pos_args
+	 */
+	private function validate_pos_arg( array $pos_args, array $allowed_values, int $index = 0 ): void {
+        if( empty( $pos_args ) || ! isset( $pos_args[ $index ] ) || ! in_array( $pos_args[ $index ], $allowed_values, true ) ) {
+            WP_CLI::error( 'Positional argument (' . $index . ') must be one of: ' . implode( ', ', $allowed_values ), true );
         }
     }
 
