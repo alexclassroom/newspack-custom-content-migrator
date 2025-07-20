@@ -280,6 +280,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		$this->validate_pos_arg( 
 			$pos_args,
 			[ 
+				'attachment-check-hashes',
 				'attachment-set-hashes',
 			]
 		);
@@ -296,6 +297,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
         do {
 
             switch( $pos_args[0] ) {
+				case 'attachment-check-hashes':
+                    $keep_going = $this->bulk_attachment_check_hashes();
+                    break;
 				case 'attachment-set-hashes':
                     $keep_going = $this->bulk_attachment_set_hashes();
                     break;
@@ -1057,6 +1061,71 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	/************************************
 	  BULK PROCESSING
 	************************************/
+
+	private function bulk_attachment_check_hashes() {
+
+		$total_count_items = 0;
+
+		// keys to hash
+		$meta_keys = [
+			'_wp_attached_file',
+		];
+
+		foreach( $meta_keys as $meta_key ) {
+
+			$this->logger->info( '------------ doing key: ' . $meta_key );
+
+			$hash_key_checksum = self::META_KEY_HASH_CHECKSUM_PREFIX . '-' . $meta_key;
+
+			// Loop through all posts.
+			(new Posts())->throttled_posts_loop( 
+				[
+					'fields' => 'ids',
+					'post_type' => 'attachment',
+					'numberposts' => 1000,
+					'meta_query' => [
+						[
+							'key'     => $hash_key_checksum,
+							'compare' => 'EXISTS',
+						],
+					],
+				], 
+				function( $post ) use ( $coauthors_plus, $wpdb ) {
+				},
+				$query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 
+			);
+			
+
+			$db_items = get_posts([
+				
+			]);
+	
+			$total_count_items += count( $db_items );
+
+			foreach( $db_items as $db_id ) {
+
+                $this->logger->info( '--- processing id: ' . $db_id );
+
+				$meta_value = get_post_meta( $db_id, $meta_key, true );
+
+				if( $this->util_get_checksum_hash( $meta_value ) !== get_post_meta( $db_id, $hash_key_checksum, true ) ) {
+					$this->logger->error( 'checksum not equal.' );
+					exit();
+				}
+
+				$this->logger->info( 'checked.' );
+
+			} // db items
+
+		} // meta keys to process
+
+		// Keep going?
+		if( $total_count_items > 0 ) return true;
+		
+		// Done.
+		return false;
+
+	}
 
 	private function bulk_attachment_set_hashes() {
 
