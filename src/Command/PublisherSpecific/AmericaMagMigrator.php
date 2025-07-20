@@ -34,6 +34,29 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	const ISSUE_POST_TYPE = 'issue';
 
 	/**
+	 * Attachment columns to hash.
+	 *
+	 * @var array
+	 */
+	private array $attachment_hash_post_columns = [
+		'post_content',
+		'post_title',
+		'post_excerpt',
+	];
+
+	/**
+	 * Attachment meta keys to hash.
+	 *
+	 * @var array
+	 */
+	private array $attachment_hash_meta_keys = [
+		'_wp_attached_file',
+		'_wp_attachment_metadata',
+		'_wp_attachment_image_alt',
+		'_fgd2wp_old_file',
+	];
+	
+	/**
 	 * Collections Helper instance
 	 * 
 	 * @var CollectionsHelper
@@ -283,7 +306,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'attachment-check-hashes',
 				'attachment-set-hashes',
 			]
-		);
+		);		
 
         // Logger.
         $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
@@ -291,26 +314,20 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
         // Run command.
         $this->logger->info( 'Running command: ' . $logger_slug );
-            
-		$keep_going = true;
 
-        do {
+		switch( $pos_args[0] ) {
+			case 'attachment-check-hashes':
+				$this->bulk_attachment_check_hashes();
+				break;
+			case 'attachment-set-hashes':
+				$this->bulk_attachment_set_hashes();
+				break;
+			default:
+				$this->logger->error( 'No bulk processing for: ' . $pos_args[0] );
+				exit();
+		}
 
-            switch( $pos_args[0] ) {
-				case 'attachment-check-hashes':
-                    $keep_going = $this->bulk_attachment_check_hashes();
-                    break;
-				case 'attachment-set-hashes':
-                    $keep_going = $this->bulk_attachment_set_hashes();
-                    break;
-                default:
-                    $this->logger->error( 'No bulk processing for: ' . $pos_args[0] );
-                    exit();
-            }
-            
-        } while( $keep_going );
-
-		$this->logger->info( 'Done.' ); 
+		$this->logger->info( 'DONE WITH BULK PROCESSING.' ); 
 	}
 
 	/**
@@ -1064,14 +1081,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	private function bulk_attachment_check_hashes() {
 
-		$total_count_items = 0;
-
-		// keys to hash
-		$meta_keys = [
-			'_wp_attached_file',
-		];
-
-		foreach( $meta_keys as $meta_key ) {
+		foreach( $this->attachment_hash_meta_keys as $meta_key ) {
 
 			$this->logger->info( '------------ doing key: ' . $meta_key );
 
@@ -1082,7 +1092,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				[
 					'fields' => 'ids',
 					'post_type' => 'attachment',
-					'numberposts' => 1000,
 					'meta_query' => [
 						[
 							'key'     => $hash_key_checksum,
@@ -1090,104 +1099,67 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						],
 					],
 				], 
-				function( $post ) use ( $coauthors_plus, $wpdb ) {
-				},
-				$query_args, $callback, $wait = 3, $posts_per_batch = 1000, $batch = 1 
-			);
-			
+				function( $db_id ) use ( $meta_key, $hash_key_checksum )  {
 
-			$db_items = get_posts([
-				
-			]);
+					// $this->logger->info( '--- processing id: ' . $db_id );
+
+					$meta_value = get_post_meta( $db_id, $meta_key, true );
 	
-			$total_count_items += count( $db_items );
-
-			foreach( $db_items as $db_id ) {
-
-                $this->logger->info( '--- processing id: ' . $db_id );
-
-				$meta_value = get_post_meta( $db_id, $meta_key, true );
-
-				if( $this->util_get_checksum_hash( $meta_value ) !== get_post_meta( $db_id, $hash_key_checksum, true ) ) {
-					$this->logger->error( 'checksum not equal.' );
-					exit();
-				}
-
-				$this->logger->info( 'checked.' );
-
-			} // db items
+					if( $this->util_get_checksum_hash( $meta_value ) !== get_post_meta( $db_id, $hash_key_checksum, true ) ) {
+						$this->logger->warning( 'Checksum not equal: ' . $db_id . ' - ' . $meta_key );
+						return;
+					}
+	
+					// $this->logger->info( 'Equal.' );
+	
+				},
+				1
+			); // throttled posts
 
 		} // meta keys to process
-
-		// Keep going?
-		if( $total_count_items > 0 ) return true;
-		
-		// Done.
-		return false;
 
 	}
 
 	private function bulk_attachment_set_hashes() {
 
-		$total_count_items = 0;
-
-		// keys to hash
-		$meta_keys = [
-			'_wp_attached_file',
-		];
-
-		foreach( $meta_keys as $meta_key ) {
-
-			$this->logger->info( '------------ doing key: ' . $meta_key );
-
-			$hash_key_backup   = self::META_KEY_HASH_BACKUP_PREFIX . '-' . $meta_key;
-			$hash_key_checksum = self::META_KEY_HASH_CHECKSUM_PREFIX . '-' . $meta_key;
-
-			$db_items = get_posts([
-				'fields' => 'ids',
+		(new Posts())->throttled_posts_loop( 
+			[
 				'post_type' => 'attachment',
-				'numberposts' => 1000,
-				'meta_query' => [
-					[
-						'key'     => $hash_key_backup,
-						'compare' => 'NOT EXISTS',
-					],
-				],
-			]);
-	
-			$total_count_items += count( $db_items );
+			], 
+			function( $attachment_object ) {
 
-			foreach( $db_items as $db_id ) {
+				// $this->logger->info( '--- processing id: ' . $attachment_object->ID );
+				
+				// post (attachment) columns.
+				foreach( $this->attachment_hash_post_columns as $column ) {
+					
+					$this->util_set_checksum_and_backup( $column, $attachment_object->ID, $attachment_object->{$column} );
+					
+				} // each column.
 
-                $this->logger->info( '--- processing id: ' . $db_id );
+				// meta keys.
+				foreach( $this->attachment_hash_meta_keys as $meta_key ) {
 
-				$meta_value = get_post_meta( $db_id, $meta_key, true );
+					$meta_value = get_post_meta( $attachment_object->ID, $meta_key, true );
 
-				// save a hashed value.
-				update_post_meta(
-					$db_id,
-					$hash_key_checksum,
-					$this->util_get_checksum_hash( $meta_value ),
-				);
+					$this->util_set_checksum_and_backup( $meta_key, $attachment_object->ID, $meta_value );
 
-				// Save a backup.
-				update_post_meta(
-					$db_id,
-					$hash_key_backup,
-					$meta_value,
-				);
+				} // each meta key
 
-				$this->logger->info( 'saved.' );
+				// disk file.
+				$disk_file_path = get_attached_file( $attachment_object->ID );
+				if ( ! file_exists( $disk_file_path )) {
+					$this->logger->warning( 'Disk file not exists: ' . $attachment_object->ID );
+				}
+				else {
+					$this->util_set_checksum_and_backup( 'filemtime', $attachment_object->ID, filemtime( $disk_file_path ) );
+					$this->util_set_checksum_and_backup( 'filesize', $attachment_object->ID, filesize( $disk_file_path ) );
+					$this->util_set_checksum_and_backup( 'filemd5', $attachment_object->ID, md5_file( $disk_file_path ) );
+				} 
 
-			} // db items
-
-		} // meta keys to process
-
-		// Keep going?
-		if( $total_count_items > 0 ) return true;
-		
-		// Done.
-		return false;
+			}, // function
+			1 // sleep
+		); // throttled posts
 
 	}
 
@@ -3072,6 +3044,23 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 	private function util_get_checksum_hash( $value ) {
         return hash( 'sha256', serialize( $value ) );
     }
+
+	private function util_set_checksum_and_backup( $suffix, $id, $value, $meta_type = 'post' ) {
+
+		$hash_key_backup   = self::META_KEY_HASH_BACKUP_PREFIX . '-' . $suffix;
+		$hash_key_checksum = self::META_KEY_HASH_CHECKSUM_PREFIX . '-' . $suffix;		
+		
+		// Backup, if a value (could be blank) not already set.
+		if( ! metadata_exists( $meta_type, $id, $hash_key_backup ) ) {
+			update_post_meta( $id, $hash_key_backup, $value );
+		}
+
+		// Checksum if not exists.
+		if( ! metadata_exists( $meta_type, $id, $hash_key_checksum ) ) {
+			update_post_meta( $id, $hash_key_checksum, $this->util_get_checksum_hash( $value ) );
+		}
+
+	}
 
 	/************************************
 	  VALIDATIONS
