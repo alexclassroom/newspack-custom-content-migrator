@@ -1098,6 +1098,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 							'compare' => 'EXISTS',
 						],
 					],
+'include' => [ 
+	99532,  
+	99474,
+	99503,
+	70430,
+	90786,
+	100410,
+	100411,
+	100412,
+	76455,
+],
+	
 				], 
 				function( $db_id ) use ( $meta_key, $hash_key_checksum )  {
 
@@ -1125,6 +1137,18 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type' => 'attachment',
+'include' => [ 
+99532,  
+99474,
+99503,
+70430,
+90786,
+100410,
+100411,
+100412,
+76455,
+],
+
 			], 
 			function( $attachment_object ) {
 
@@ -1147,15 +1171,15 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				} // each meta key
 
 				// disk file.
-				$disk_file_path = get_attached_file( $attachment_object->ID );
-				if ( ! file_exists( $disk_file_path )) {
-					$this->logger->warning( 'Disk file not exists: ' . $attachment_object->ID );
+				$file_path = get_attached_file( $attachment_object->ID );
+				$this->util_set_checksum_and_backup_for_file ( $attachment_object->ID, $file_path, 'file' );
+				
+				// original image too since it could be used by Atomic/WP-Cloud
+				$file_path_original = wp_get_original_image_path( $attachment_object->ID );
+				// make sure it's a path, then compare to other path.
+				if( str_starts_with( $file_path_original, '/' ) && $file_path_original !== $file_path ) {
+					$this->util_set_checksum_and_backup_for_file ( $attachment_object->ID, $file_path_original, 'original_image' );
 				}
-				else {
-					$this->util_set_checksum_and_backup( 'filemtime', $attachment_object->ID, filemtime( $disk_file_path ) );
-					$this->util_set_checksum_and_backup( 'filesize', $attachment_object->ID, filesize( $disk_file_path ) );
-					$this->util_set_checksum_and_backup( 'filemd5', $attachment_object->ID, md5_file( $disk_file_path ) );
-				} 
 
 			}, // function
 			1 // sleep
@@ -3059,6 +3083,19 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 		if( ! metadata_exists( $meta_type, $id, $hash_key_checksum ) ) {
 			update_post_meta( $id, $hash_key_checksum, $this->util_get_checksum_hash( $value ) );
 		}
+
+	}
+
+	private function util_set_checksum_and_backup_for_file ( $id, $file_path, $type ) {
+
+		if ( ! file_exists( $file_path )) {
+			$this->logger->warning( 'File not exists: ' . $id . ' - ' . $type );
+			return;
+		}
+
+		$this->util_set_checksum_and_backup( $type . '-mtime', $id, filemtime( $file_path ) );
+		$this->util_set_checksum_and_backup( $type . '-size', $id, filesize( $file_path ) );
+		$this->util_set_checksum_and_backup( $type . '-md5', $id, md5_file( $file_path ) );
 
 	}
 
