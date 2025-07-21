@@ -655,19 +655,32 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate topics.
 		foreach ( $raw_topics as $topic ) {
+			$topic_data = [
+				'cat_name'             => $topic->name,
+				'category_description' => $topic->description,
+				'category_nicename'    => $topic->id,
+				'category_parent'      => 0,
+			];
+
 			$migrated_topic = $this->taxonomy_logic->get_or_create_category(
-				[
-					'cat_name'             => $topic->name,
-					'category_description' => $topic->description,
-					'category_nicename'    => $topic->id,
-					'category_parent'      => 0,
-				],
+				$topic_data,
 				$topic->oid
 			);
 
 			if ( is_wp_error( $migrated_topic ) ) {
-				$logger->error( sprintf( 'Error migrating topic %s: %s', $topic->name, $migrated_topic->get_error_message() ) );
-				continue;
+				if ( $migrated_topic->get_error_code() === 'term_exists' ) {
+					// Append ' topic' to the topic name to avoid the error.
+					$topic_data['cat_name'] = $topic->name . ' topic';
+
+					$migrated_topic = $this->taxonomy_logic->get_or_create_category(
+						$topic_data,
+						$topic->oid
+					);
+				}
+				if ( is_wp_error( $migrated_topic ) ) {
+					$logger->error( sprintf( 'Error migrating topic %s: %s', $topic->name, $migrated_topic->get_error_message() ) );
+					continue;
+				}
 			}
 
 			$migrated_topics[ $topic->oid ] = $migrated_topic;
