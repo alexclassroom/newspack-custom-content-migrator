@@ -419,6 +419,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -1123,6 +1130,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
 		$gallery_mode           = $assoc_args['gallery-mode'] ?? false;
+		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
 		$raw_slideshows               = $this->json_iterator->items( $slideshow_json_file );
@@ -1134,6 +1142,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $slideshow->oid, $oid_to_migrate ) ) {
+				continue;
+			}
+
 			if ( ! $update_content && in_array( $slideshow->oid, $all_migrated_slideshows_oids ) ) {
 				$logger->info( sprintf( '[%d] Skipping slideshow %d because it has already been migrated', $index + 1, $slideshow->oid ) );
 				continue;
@@ -1396,7 +1409,37 @@ class FoundationMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-			$content = $wp_post->post_content . $this->generate_related_slideshows_block( array_values( $mapped_related_slideshows ) );
+			// Replace the [slideshow-N] markers with the related slideshows.
+			$migrated_related_slideshows = 0;
+			$content                     = preg_replace_callback(
+				'/\[slideshow-(\d+)\]/',
+				function ( $matches ) use ( $wp_post, $slideshow, $logger, $related_slideshows, $mapped_related_slideshows, &$migrated_related_slideshows ) {
+					$related_slideshow_index = (int) $matches[1] - 1; // Convert to 0-based index.
+					if ( ! isset( $related_slideshows[ $related_slideshow_index ] ) || ! isset( $mapped_related_slideshows[ $related_slideshows[ $related_slideshow_index ] ] ) ) {
+						$logger->warning( sprintf( 'Related slideshow %d not found in post related slideshows for slideshow %s', (int) $matches[1], $slideshow->oid ) );
+						return $matches[0];
+					}
+
+					$related_slideshow_id = $mapped_related_slideshows[ $related_slideshows[ $related_slideshow_index ] ];
+					// Check if the marker is in the end of the post content.
+					// Related slideshows have different styling depending if they are inline or not.
+					$is_inline = ! str_ends_with( trim( wp_strip_all_tags( $wp_post->post_content ) ), $matches[0] );
+
+					++$migrated_related_slideshows;
+
+					return $is_inline
+						? $this->generate_content_slideshows_block( $related_slideshow_id )
+						: $this->generate_related_slideshows_block( [ $related_slideshow_id ] );
+				},
+				$wp_post->post_content
+			);
+
+			// If we didn't migrate all the related slideshows, we'll add the related slideshows to the end of the post content.
+			if ( $content === $wp_post->post_content || count( $mapped_related_slideshows ) !== $migrated_related_slideshows ) {
+				// Not all the markers are present in the post content, so we'll add the related slideshows to the end of the post content.
+				$unique_related_slideshows = array_values( array_unique( array_values( $mapped_related_slideshows ) ) );
+				$content                   = $content . $this->generate_related_slideshows_block( $unique_related_slideshows );
+			}
 
 			if ( $content !== $wp_post->post_content ) {
 				// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
@@ -1406,7 +1449,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 					[ 'ID' => $existing_post_id ]
 				);
 
-				// Mark the post as migrated related posts.
+				// Mark the post as migrated related slideshows.
 				update_post_meta( $existing_post_id, self::MIGRATED_RELATED_SLIDESHOWS_META_KEY, true );
 
 				$csv_writer->put( [ $slideshow->oid, $existing_post_id, 'https://' . $publisher_domain . $slideshow->permalink, get_permalink( $existing_post_id ) ] );
