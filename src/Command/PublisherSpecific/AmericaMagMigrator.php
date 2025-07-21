@@ -1569,35 +1569,35 @@ wp newspack-post-image-downloader import-images
 
 		global $wpdb;
 
+		// compare thumbnail to node's featured image.  This might point to the wrong file.
+		$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
+		$this->logger->info( 'attachment_id: ' . $attachment_id );
+		
+		// Old node:
 		$old_content_node_id = get_post_meta( $post_id, '_fgd2wp_old_node_id', true );
 		if( ! ( $old_content_node_id > 0 ) ) {
 			$this->logger->error( 'Post is missing old content node id.' );
 			exit();
 		}
-
 		$this->logger->info( 'Old content node id: ' . $old_content_node_id );
 
-		// compare thumbnail to node's featured image.  This might point to the wrong file.
-		$attachment_id = get_post_meta( $post_id, '_thumbnail_id', true );
+		// get the related Drupal info via the post info.  This is the correct URL.
+		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+			SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
+			FROM node__field_image nfi
+			JOIN file_managed fm on fm.fid = nfi.field_image_target_id and fm.status = 1			
+			WHERE nfi.entity_id = %d and nfi.deleted = 0
+			",
+			$old_content_node_id
+		));
 
-		$this->logger->info( 'attachment_id: ' . $attachment_id );
-
-		// sanity;
-		$maybe_old_image_id = get_post_meta( $post_id, 'image', true );
-		if( ! empty( $maybe_old_image_id ) && $maybe_old_image_id !== $attachment_id ) {
-			$this->logger->error( 'Old image id did not match.' );
+		if ( ! is_object( $file_managed ) ) {
+			$this->logger->error( 'Filemanaged is not an object, not found.' );
 			exit();
 		}
 
-		// Validate db data.
-		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
-			return;
-		}
-		
-		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
-		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
-		
-		$this->logger->info( 'DB attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
+		$this->logger->info( json_encode( $file_managed ) );
+		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
 
 		// Sanity.  
 		$old_file_url = get_post_meta( $attachment_id, '_fgd2wp_old_file', true );
@@ -1607,20 +1607,23 @@ wp newspack-post-image-downloader import-images
 		}
 		$this->logger->info( 'Old attachment file url: ' . $old_file_url );
 
-		// get the related Drupal info via the post info.  This is the correct URL.
-		$file_managed = $wpdb->get_row( $wpdb->prepare( "
+		// sanity;
+		$maybe_old_image_id = get_post_meta( $post_id, 'image', true );
+		if( ! empty( $maybe_old_image_id ) && $maybe_old_image_id !== $attachment_id ) {
+			$this->logger->error( 'Old image id did not match.' );
+			exit();
+		}
 
-SELECT fm.fid, fm.filename, fm.uri, fm.filemime, fm.filesize
-FROM node__field_image nfi
-JOIN file_managed fm on fm.fid = nfi.field_image_target_id and fm.status = 1			
-WHERE nfi.entity_id = %d and nfi.deleted = 0
+		$attached_file       = get_post_meta( $attachment_id, '_wp_attached_file', true );
+		$attachment_metadata = get_post_meta( $attachment_id, '_wp_attachment_metadata', true );
+		
+		$this->logger->info( 'WP attached_file: ' . self::STAGING_UPLOADS_URL . $attached_file );
 
-			",
-			$old_content_node_id
-		));
-
-		$this->logger->info( json_encode( $file_managed ) );
-		$this->logger->info( 'File managed URL: https://www.americamagazine.org/sites/default/files/' . str_replace( 'public://', '', $file_managed->uri ) );
+		// Validate db data.
+		if( ! $this->clean_up_assets___verify_attachment_db( $attachment_id ) ) {
+			return;
+		}
+		
 	
 		// -- setup warning counter.
 		$file_warning_msg = '';
@@ -2230,6 +2233,8 @@ WHERE nfi.entity_id = %d and nfi.deleted = 0
 			$this->logger->warning( 'SKIP: File key does not exist.' );
 			return false;
 		}
+
+		$this->logger->info( 'WP meta file: ' . $attachment_metadata['file'] );
 
 		// Sanity check.  file should equal wp_attached_file otherwise "merged" problem.
 		if( $attachment_metadata['file'] !== get_post_meta( $attachment_id, '_wp_attached_file', true ) ) {
