@@ -392,11 +392,16 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'repeating'   => false,
 					],
 					[
-						'type'        => 'flag',
+						'type'        => 'assoc',
 						'name'        => 'gallery-mode',
-						'description' => 'Use gallery mode for the slideshow.',
+						'description' => 'What type of gallery display to use for slideshows. Default value is slideshow.',
 						'optional'    => true,
 						'repeating'   => false,
+						'default'     => 'slideshow',
+						'options'     => [
+							'slideshow',
+							'individual-images',
+						],
 					],
 					[
 						'type'        => 'flag',
@@ -472,11 +477,16 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'repeating'   => false,
 					],
 					[
-						'type'        => 'flag',
+						'type'        => 'assoc',
 						'name'        => 'gallery-mode',
-						'description' => 'Use gallery mode for the slideshow.',
+						'description' => 'What type of gallery display to use for slideshows. Default value is slideshow.',
 						'optional'    => true,
 						'repeating'   => false,
+						'default'     => 'slideshow',
+						'options'     => [
+							'slideshow',
+							'individual-images',
+						],
 					],
 					[
 						'type'        => 'flag',
@@ -1136,7 +1146,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$start_from             = $assoc_args['start-from'] ?? 0;
 		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
-		$gallery_mode           = $assoc_args['gallery-mode'] ?? false;
+		$gallery_mode           = $assoc_args['gallery-mode'] ?? 'slideshow';
 		$migrate_sample         = $assoc_args['migrate-sample'] ?? false;
 		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
@@ -1217,7 +1227,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
-				if ( $gallery_mode ) {
+				if ( 'slideshow' === $gallery_mode ) {
+					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
+				} elseif ( 'individual-images' === $gallery_mode ) {
 					$image_blocks = [];
 					foreach ( $migrated_images as $image ) {
 						$image_blocks[] = $this->gutenberg_block_generator->get_image( get_post( $image['attachment_id'] ) );
@@ -1225,7 +1237,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 					$gallery_block = serialize_blocks( $image_blocks );
 				} else {
-					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
+					$logger->error( sprintf( "Invalid gallery mode '%s', exiting.", $gallery_mode ) );
+					exit( 1 );
 				}
 
 				// Migrate post content.
