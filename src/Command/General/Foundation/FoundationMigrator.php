@@ -426,6 +426,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'migrate-sample',
+						'description' => 'Migrate a sample of the slideshows.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -1130,6 +1137,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$end_at                 = $assoc_args['end-at'] ?? 0;
 		$update_content         = $assoc_args['update-content'] ?? false;
 		$gallery_mode           = $assoc_args['gallery-mode'] ?? false;
+		$migrate_sample         = $assoc_args['migrate-sample'] ?? false;
 		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 		$this->media_local_path = $assoc_args['media-local-path'] ?? '';
 
@@ -1139,6 +1147,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$migrated_slideshows = [];
 
 		foreach ( $raw_slideshows as $index => $slideshow ) {
+			if ( $migrate_sample && $index > 4 ) {
+				break;
+			}
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
