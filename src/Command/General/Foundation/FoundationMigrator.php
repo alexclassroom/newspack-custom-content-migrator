@@ -1193,14 +1193,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Migrate post content.
 			if ( ! empty( $migrated_images ) ) {
 				if ( $gallery_mode ) {
+					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
+				} else {
 					$image_blocks = [];
 					foreach ( $migrated_images as $image ) {
 						$image_blocks[] = $this->gutenberg_block_generator->get_image( get_post( $image['attachment_id'] ) );
 					}
 
 					$gallery_block = serialize_blocks( $image_blocks );
-				} else {
-					$gallery_block = serialize_block( $this->gutenberg_block_generator->get_jetpack_slideshow( array_column( $migrated_images, 'attachment_id' ) ) );
 				}
 
 				// Migrate post content.
