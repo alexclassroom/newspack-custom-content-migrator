@@ -608,6 +608,44 @@ class FoundationMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-migrate-sponsors',
+			self::get_command_closure( 'cmd_migrate_sponsors' ),
+			[
+				'shortdesc' => 'Migrates Foundation sponsors received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json` or `Slideshow.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -1297,6 +1335,67 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$csv_writer->close();
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 		$logger->info( sprintf( 'Check the CSV file for migration details: %s', __FUNCTION__ . '.csv' ) );
+	}
+
+	/**
+	 * Migrates Foundation sponsors received from their export.
+	 * Callable for 'newspack-content-migrator foundation-migrate-sponsors' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_migrate_sponsors( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file = $assoc_args['post-json-file'];
+		$start_from     = $assoc_args['start-from'] ?? 0;
+		$end_at         = $assoc_args['end-at'] ?? 0;
+		$oid_to_migrate = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
+				continue;
+			}
+
+			if ( ! isset( $post->sponsored ) || ! $post->sponsored ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				continue;
+			}
+
+			// Get or create generic underwriter sponsor.
+			$sponsor_logic = new \Newspack\MigrationTools\Logic\Sponsors();
+			$sponsor_id    = $sponsor_logic->get_or_add_sponsor(
+				'Generic Underwriter',
+				[
+					'sponsorship_scope' => 'underwritten',
+				]
+			);
+
+			if ( ! $sponsor_id ) {
+				$logger->error( sprintf( 'Error getting or creating sponsor %s: %s', $post->oid, $sponsor_id->get_error_message() ) );
+				continue;
+			}
+
+			// Add sponsor to post.
+			$sponsor_logic->add_sponsor_to_post( $sponsor_id, $existing_post_id );
+
+			$logger->info( sprintf( 'Migrated sponsor %s with ID %d to post %d', $sponsor_id, $existing_post_id ) );
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 	}
 
 	/**
