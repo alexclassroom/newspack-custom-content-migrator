@@ -692,12 +692,25 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		// Migrate topics.
+		$topic_category_id = $this->taxonomy_logic->get_or_create_category(
+			[
+				'cat_name'        => 'Topic',
+				'category_parent' => 0,
+			],
+			'Topic'
+		);
+
+		if ( is_wp_error( $topic_category_id ) ) {
+			$logger->error( sprintf( 'Error migrating topic category: %s', $topic_category_id->get_error_message() ) );
+			return;
+		}
+
 		foreach ( $raw_topics as $topic ) {
 			$topic_data = [
 				'cat_name'             => $topic->name,
 				'category_description' => $topic->description,
 				'category_nicename'    => $topic->id,
-				'category_parent'      => 0,
+				'category_parent'      => $topic_category_id,
 			];
 
 			$migrated_topic = $this->taxonomy_logic->get_or_create_category(
@@ -720,6 +733,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 					continue;
 				}
 			}
+
+			// Update topic's parent.
+			wp_update_term( $migrated_topic, 'category', [ 'parent' => $topic_category_id ] );
 
 			$migrated_topics[ $topic->oid ] = $migrated_topic;
 			$logger->info( sprintf( 'Migrated topic %s with ID %d', $topic->name, $migrated_topic ) );
@@ -1392,7 +1408,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Add sponsor to post.
 			$sponsor_logic->add_sponsor_to_post( $sponsor_id, $existing_post_id );
 
-			$logger->info( sprintf( 'Migrated sponsor %s with ID %d to post %d', $sponsor_id, $existing_post_id ) );
+			$logger->info( sprintf( 'Set sponsor %s to post %d', $sponsor_id, $existing_post_id ) );
 		}
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
