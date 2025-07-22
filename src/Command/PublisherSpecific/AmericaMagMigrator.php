@@ -2985,7 +2985,14 @@ wp newspack-post-image-downloader import-images
 		// @todo should we turn this on for images with the same filenames?
 		// how are these store in drupal? in wordpress the same filename could be used if in different /year/mon/ folders...
 		// but what about if the import was restarted...will images be fetched again and given unique -abc at the end?
-		// import_duplicates = 1;
+		
+		$options['import_duplicates'] = 1;
+		// just deleting the old file url will not stop "merging"...must also change GUIDs too.
+		// must also change post_name too! - actually post_name might not need to change?
+
+
+
+
 
 		return $options;
 	}
