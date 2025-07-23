@@ -139,6 +139,10 @@ class NNEImageHelper {
 			$this->has_editorial_key = true;
 		}
 
+		if ( empty( NNENonJPGList::$list ) ) {
+			NNENonJPGList::get_instance( trailingslashit( $local_search_directory ) . '/nonjpgfiles.csv' );
+		}
+
 		$archive_site_url_parts = wp_parse_url( $this->archive_site_url );
 		if ( ! isset( $archive_site_url_parts['scheme'] ) ) {
 			$archive_site_url_parts['scheme'] = 'https';
