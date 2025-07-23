@@ -585,7 +585,10 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		// phpcs:ignore WordPress.NamingConventions.ValidVariableName.UsedPropertyNotSnakeCase
-		if ( str_starts_with( $article_object->InnerBody, '<webBody>' ) || str_starts_with( $article_object->InnerBody, '<body>' ) ) {
+		if (
+			str_starts_with( $article_object->InnerBody, '<webBody>' ) ||
+			str_starts_with( $article_object->InnerBody, '<webbody>' ) ||
+			str_starts_with( $article_object->InnerBody, '<body>' ) ) {
 			$inner_body_dom = new DOMDocument( '1.0', 'ISO-8859-1' );
 			// $inner_body_dom->encoding = 'ISO-8859-1';
 
