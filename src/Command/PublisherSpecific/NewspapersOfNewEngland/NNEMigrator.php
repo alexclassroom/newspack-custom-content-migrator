@@ -701,7 +701,6 @@ class NNEMigrator implements RegisterCommandInterface {
 			$post_data['post_name'] = substr( $post_data['post_name'], 1 );
 		}
 
-		// TODO how should we handle images that are checksums and don't have dataId?
 		if ( ! isset( $article_object->{'File02'} ) ) {
 			$article_object->{'File02'} = '';
 		}
