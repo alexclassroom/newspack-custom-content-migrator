@@ -1280,6 +1280,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				'post_modified_gmt' => $last_modified->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
 				'post_content'      => $slideshow->description,
 				'post_category'     => $slideshow_categories,
+				'tags_input'        => $slideshow->tags ?? [],
 				'comment_status'    => 'members only' === $slideshow->commentStatus ? 'open' : 'close',
 			];
 
