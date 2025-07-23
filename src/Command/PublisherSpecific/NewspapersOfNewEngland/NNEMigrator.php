@@ -1340,8 +1340,13 @@ class NNEMigrator implements RegisterCommandInterface {
 	 * @return array{ string, bool }
 	 */
 	private function get_list_of_existing_required_paths(): array {
-		$this->path_to_images = $this->naming_map->get_directory_path( $this->publisher ) . '/images';
-		$this->path_to_xmls   = $this->naming_map->get_directory_path( $this->publisher ) . "/$this->year/xmls";
+		if ( defined( 'ATOMIC_SITE_ID' ) && ATOMIC_SITE_ID ) {
+			$this->path_to_images = '/tmp/images';
+		} else {
+			$this->path_to_images = $this->naming_map->get_directory_path( $this->publisher ) . '/images';
+		}
+
+		$this->path_to_xmls = $this->naming_map->get_directory_path( $this->publisher ) . "/$this->year/xmls";
 
 		$required_paths = [
 			$this->path_to_images => null,
