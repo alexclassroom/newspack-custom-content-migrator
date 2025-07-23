@@ -106,28 +106,14 @@ class NNEImageHelper {
 	protected bool $exists_in_media_library = false;
 
 	/**
-	 * The `jpg` extension is the most commonly used one. But if that doesn't exist, we want to go down the extension
-	 * list until, hopefully, we find one that works.
-	 *
-	 * @var array|string[] $extensions List of known image extensions used by the NNE team.
-	 */
-	protected array $extensions = [
-		'jpg',
-		'jpeg',
-		'JPG',
-		'JPEG',
-		'png',
-		'gif',
-		'tiff',
-	];
-
-	/**
 	 * Constructor.
 	 *
 	 * @param string      $file_attachment File attachment field value.
 	 * @param string      $publisher_site_url URL of the publisher's site.
 	 * @param string      $local_search_directory Local search directory for images.
 	 * @param string|null $editorial_key Editorial key of the image.
+	 *
+	 * @throws \Exception If the file path is not provided or is not a valid file path.
 	 */
 	public function __construct( string $file_attachment, string $publisher_site_url, string $local_search_directory, ?string $editorial_key = null ) {
 		$this->original_value         = $file_attachment;
@@ -168,50 +154,40 @@ class NNEImageHelper {
 	 * @return void
 	 */
 	private function initialize(): void {
-		foreach ( $this->extensions as $extension ) {
-			if ( ! str_contains( $this->original_value, 'dataId' ) ) {
-				// File attachment is a checksum value.
-				$this->has_checksum_key = true;
-				$this->file_name        = strtolower( $this->original_value ) . '.' . $extension;
-				$this->site_identifier  = substr( $this->file_name, 0, 2 );
+		if ( ! str_contains( $this->original_value, 'dataId' ) ) {
+			// File attachment is a checksum value.
+			$this->has_checksum_key = true;
+			if ( array_key_exists( strtoupper( $this->original_value ), NNENonJPGList::$list ) ) {
+				$this->file_name = NNENonJPGList::$list[ $this->original_value ]['file_name'];
 			} else {
-				$this->from_data_id = true;
-				$value              = str_replace( '@attachment=', '', $this->original_value );
-				// Do we need to make sure $value is a valid URL?
-
-				preg_match( '/dataId=(\d+)\|/i', $value, $matches );
-				if ( ! empty( $matches ) ) {
-					$this->data_id         = $matches[1];
-					$this->file_name       = "{$this->data_id}.$extension";
-					$this->site_identifier = substr( $this->data_id, -2 );
-				}
+				$this->file_name = strtolower( $this->original_value ) . '.jpg';
 			}
 
-			$this->exists_in_media_library = file_exists( $this->get_full_local_file_path() );
-			if ( $this->exists_in_media_library() ) {
-				break;
-			} else {
-				$search = glob( "{$this->local_search_directory}/*/{$this->file_name}" );
-				if ( $search ) {
-					$this->full_file_path          = $search[0];
-					$this->exists_in_media_library = true;
-					break;
-				}
-			}
+			$this->site_identifier = substr( $this->file_name, 0, 2 );
 
-			// If the image doesn't exist in the media library, and it's a checksum value, we need to check if it exists on the site.
-			if ( $this->has_checksum_key() ) {
-				if ( $this->exists_on_site() ) {
-					break;
-				} else {
-					$this->exists_on_site = null;
-				}
+			if ( ! isset( $this->full_file_path ) ) {
+				$this->full_file_path = "$this->local_search_directory/$this->site_identifier/$this->file_name";
+			}
+		} else {
+			$this->from_data_id = true;
+			$value              = str_replace( '@attachment=', '', $this->original_value );
+			// Do we need to make sure $value is a valid URL?
+
+			preg_match( '/dataId=(\d+)\|/i', $value, $matches );
+			if ( ! empty( $matches ) ) {
+				$this->data_id         = $matches[1];
+				$this->file_name       = "{$this->data_id}.jpg";
+				$this->site_identifier = substr( $this->data_id, -2 );
 			}
 		}
 
-		// If you've come this far, the image probably doesn't exist on the site or the media library.
-		if ( null === $this->exists_on_site ) {
-			$this->exists_on_site = false;
+		$this->exists_in_media_library = file_exists( $this->get_full_local_file_path() );
+		if ( ! $this->exists_in_media_library() && $this->has_data_id() ) {
+			$search = glob( "{$this->local_search_directory}/*/{$this->file_name}" );
+			if ( $search ) {
+				$this->full_file_path          = $search[0];
+				$this->exists_in_media_library = true;
+			}
 		}
 	}
 
