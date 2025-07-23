@@ -227,11 +227,20 @@ class NNEMigrator implements RegisterCommandInterface {
 			$this->paywall_term = $paywall_term;
 		}
 
-		foreach ( scandir( $this->path_to_xmls ) as $xml_file ) {
+		$xml_files                    = scandir( $this->path_to_xmls );
+		$count_of_xml_files           = count( $xml_files );
+		$formatted_count_of_xml_files = number_format( $count_of_xml_files );
+		foreach ( $xml_files as $index => $xml_file ) {
 			if ( '.' === $xml_file || '..' === $xml_file ) {
 				continue;
 			}
-
+			@ob_flush();
+			$percent = number_format( ( ( $index + 1 ) / $count_of_xml_files ) * 100, 2 );
+			ConsoleColor::white( 'Processing XML File:' )
+						->bright_white( "$this->path_to_xmls/$xml_file" )
+						->white( '(' . number_format( $index + 1 ) . " of $formatted_count_of_xml_files)" )
+						->cyan( "[$percent%]" )
+						->output();
 			$this->migrate_xml_file( "$this->path_to_xmls/$xml_file", $update_existing_posts );
 		}
 	}
