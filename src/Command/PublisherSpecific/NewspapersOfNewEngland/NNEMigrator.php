@@ -20,6 +20,7 @@ use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngla
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEImageHelper;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEImportMetaEnum;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEInternalPublisherNamingMap;
+use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNENonJPGList;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEPublisherEnum;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNETagMap;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
@@ -216,6 +217,8 @@ class NNEMigrator implements RegisterCommandInterface {
 		if ( ! $can_proceed ) {
 			WP_CLI::error( 'Please ensure that the required directory paths exist before attempting to migrate content.' );
 		}
+
+		NNENonJPGList::get_instance( trailingslashit( $this->path_to_images ) . '/nonjpgfiles.csv' );
 
 		$paywall_term = NNECategoryMap::get_term_by_name( 'Paywall', 'post_tag' );
 		if ( null === $paywall_term ) {
