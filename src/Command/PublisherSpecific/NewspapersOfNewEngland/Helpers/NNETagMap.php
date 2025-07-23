@@ -444,7 +444,7 @@ class NNETagMap {
 		],
 		'Dartmouth College'                       => [
 			'category' => [
-				'name'   => 'Dartmouth',
+				'name' => 'Dartmouth News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
@@ -1415,7 +1415,7 @@ class NNETagMap {
 		],
 		'dartmouth'                               => [
 			'category' => [
-				'name'   => 'Dartmouth',
+				'name' => 'Dartmouth News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
@@ -1595,7 +1595,7 @@ class NNETagMap {
 		],
 		'hunt'                                    => [
 			'category' => [
-				'name'   => 'Outdoors',
+				'name' => 'Outdoors Sports',
 				'parent' => 'Sports',
 			],
 			'tags'     => [
@@ -3192,7 +3192,7 @@ class NNETagMap {
 		'recipes'                                 => [
 			'category' => [
 				'name'   => 'Home & Garden',
-				'parent' => 'Arts & Entertainment',
+				'parent' => 'Arts & Life',
 			],
 			'tags'     => null,
 		],
