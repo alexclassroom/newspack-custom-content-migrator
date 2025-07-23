@@ -839,10 +839,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 					'bluesky'     => $contributor->blueskyUrl,
 				],
 			];
+
+			// Cache flush is necessary for GuestContributorsHelper::create_or_get_contributor to work without the occasional "Sorry, that username already exists!" error.
+			wp_cache_flush();
+
 			$migrated_contributor = GuestContributorsHelper::create_or_get_contributor( $contributor_data, $contributor->oid );
 
 			if ( is_wp_error( $migrated_contributor ) ) {
-				$logger->error( sprintf( 'Error migrating contributor %s: %s', $contributor->oid, $migrated_contributor->get_error_message() ) );
+				$logger->error( sprintf( "Error migrating contributor.oid %s, error: %s. Contributor data: %s", $contributor->oid, $migrated_contributor->get_error_message(), wp_json_encode( $contributor_data ) ) );
 				continue;
 			}
 
