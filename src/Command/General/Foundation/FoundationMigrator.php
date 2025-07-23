@@ -1784,6 +1784,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 				'bluesky'               => $foundation_user->blueskyUrl ?? '',
 			],
 		];
+
+		// Cache flush is necessary for UsersHelper::create_or_get_user to work without the occasional error "Error migrating user {ID} ({ROLE}): Sorry, that username already exists!"
+		wp_cache_flush();
+
 		$migrated_user = UsersHelper::create_or_get_user( $user_data, $foundation_user->oid );
 
 		if ( is_wp_error( $migrated_user ) ) {
