@@ -743,7 +743,7 @@ class NNEMigrator implements RegisterCommandInterface {
 				}
 			}
 
-			if ( null !== $maybe_attachment_id ) {
+			if ( null !== $maybe_attachment_id && ! is_wp_error( $maybe_attachment_id ) ) {
 				$post_data['meta_input']['_thumbnail_id']                      = $maybe_attachment_id;
 				$post_data['meta_input']['newspack_featured_image_position']   = 'hidden';
 				$post_data['meta_input']['_newspack_featured_image_is_hidden'] = true;
