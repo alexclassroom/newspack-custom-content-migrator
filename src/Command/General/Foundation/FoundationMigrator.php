@@ -54,7 +54,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 *
 	 * @var array
 	 */
-	const WIDE_LAYOUTS_LIST = [ 'Content - Full Width', 'Content - Manual Full Width', 'Content Full Width', 'Content - Sponsor Full Width', 'Content - Full Margin Width' ];
+	const WIDE_LAYOUTS_LIST = [ 'Content - Full Width', 'Content - Manual Full Width', 'Content Full Width', 'Content - Sponsor Full Width', 'Content - Full Margin Width', 'Custom - PM', 'Content - Insider', 'Content - Insider VG', 'Content - Longform', 'Content - Good To-Go Vermont', 'Content - Shopping landing' ];
 
 	/**
 	 * JSON iterator.
@@ -944,6 +944,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$release_date = new \DateTime( $post->releaseDate );
 			$updated_date = new \DateTime( $post->updateDate );
 
+			// Tags.
+			$tags = $post->tags ?? [];
+
+			if ( isset( $post->features ) && ! empty( $post->features ) ) {
+				$tags = array_merge( $tags, $post->features );
+			}
+
 			$post_data = [
 				'post_type'         => 'post',
 				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $post->headline ) ),
@@ -956,7 +963,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				'post_modified_gmt' => $updated_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
 				'post_content'      => $post->body,
 				'post_category'     => $post_categories,
-				'tags_input'        => $post->tags ?? [],
+				'tags_input'        => $tags,
 				'comment_status'    => in_array( $post->commentStatus, [ 'open', 'members only' ] ) ? 'open' : 'close',
 			];
 
