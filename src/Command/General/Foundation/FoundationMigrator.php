@@ -19,6 +19,7 @@ use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\JsonIterator;
+use Newspack\MigrationTools\Util\CsvIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use Newspack\MigrationTools\Util\CsvWriter;
 use Newspack\MigrationTools\Util\CustomRedirectGenerator;
@@ -62,6 +63,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @var null|SJsonIterator
 	 */
 	private JsonIterator $json_iterator;
+
+	/**
+	 * CSV iterator.
+	 *
+	 * @var null|CsvIterator
+	 */
+	private CsvIterator $csv_iterator;
 
 	/**
 	 * Taxonomy logic.
@@ -132,6 +140,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 */
 	public function __construct() {
 		$this->json_iterator             = new JsonIterator();
+		$this->csv_iterator              = new CsvIterator();
 		$this->taxonomy_logic            = new Taxonomy();
 		$this->simple_local_avatars      = new SimpleLocalAvatars();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
@@ -605,6 +614,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'redirect-csv-files',
+						'description' => 'Paths to the CSV files containing the redirects separated by comma (e.g. `redirects.csv`).',
+						'optional'    => true,
+						'repeating'   => true,
+					],
 				],
 			]
 		);
@@ -824,7 +840,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate contributors.
 		foreach ( $raw_contributors as $contributor ) {
-			$contributor_data     = [
+			$contributor_data = [
 				'user_login'   => $contributor->username,
 				'user_email'   => $contributor->email,
 				'display_name' => $this->clean_display_name( $contributor->displayName ),
@@ -846,7 +862,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$migrated_contributor = GuestContributorsHelper::create_or_get_contributor( $contributor_data, $contributor->oid );
 
 			if ( is_wp_error( $migrated_contributor ) ) {
-				$logger->error( sprintf( "Error migrating contributor.oid %s, error: %s. Contributor data: %s", $contributor->oid, $migrated_contributor->get_error_message(), wp_json_encode( $contributor_data ) ) );
+				$logger->error( sprintf( 'Error migrating contributor.oid %s, error: %s. Contributor data: %s', $contributor->oid, $migrated_contributor->get_error_message(), wp_json_encode( $contributor_data ) ) );
 				continue;
 			}
 
@@ -953,6 +969,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			if ( isset( $post->features ) && ! empty( $post->features ) ) {
 				$tags = array_merge( $tags, $post->features );
+			}
+
+			if ( isset( $post->specialPlacement ) && ! empty( $post->specialPlacement ) ) {
+				$tags = array_merge( $tags, $post->specialPlacement );
 			}
 
 			$post_data = [
@@ -1734,11 +1754,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 	public function cmd_migrate_legacy_redirects( array $args, array $assoc_args ): void {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
-		$post_json_file   = $assoc_args['post-json-file'];
-		$publisher_domain = $assoc_args['publisher-domain'];
+		$post_json_file     = $assoc_args['post-json-file'];
+		$redirect_csv_files = isset( $assoc_args['redirect-csv-files'] ) ? explode( ',', $assoc_args['redirect-csv-files'] ) : [];
+		$publisher_domain   = $assoc_args['publisher-domain'];
 
 		$raw_posts      = $this->json_iterator->items( $post_json_file );
 		$migrated_posts = $this->load_posts();
+
+		$raw_redirects_list = array_map(
+			function ( $redirect_csv_file ) {
+				return $this->csv_iterator->items_without_headers( $redirect_csv_file, ',' );
+			},
+			$redirect_csv_files
+		);
 
 		foreach ( $raw_posts as $post ) {
 			if ( ! array_key_exists( $post->oid, $migrated_posts ) ) {
@@ -1752,6 +1780,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$logger->info( sprintf( 'Migrating legacy redirect for post %s', $post->oid ) );
 				$post_relative_permalink = rtrim( wp_make_link_relative( get_permalink( $migrated_post_id ) ), '/' );
 
+				// Migrate legacy redirects.
 				foreach ( $post->legacyURL as $legacy_url ) {
 					// remove domain from the legacy URL.
 					$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $legacy_url ), '/' );
@@ -1761,6 +1790,30 @@ class FoundationMigrator implements RegisterCommandInterface {
 						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
 					}
 				}
+
+				// Migrate different permalink.
+				if ( isset( $post->permalink ) && ! empty( $post->permalink ) ) {
+					$logger->info( sprintf( 'Migrating different permalink for post %s (%s => %s)', $post->oid, $post->permalink, $post_relative_permalink ) );
+					$this->custom_redirect_generator->add_redirect( $post->permalink, $post_relative_permalink );
+				}
+			}
+		}
+
+		foreach ( $raw_redirects_list as $raw_redirects ) {
+			foreach ( $raw_redirects as $redirect ) {
+				$from = $redirect[0];
+				$to   = $redirect[1];
+
+				if ( ! str_contains( $from, $publisher_domain ) ) {
+					$logger->warning( sprintf( 'Skipping redirect "%s" because it does not contain the publisher domain %s', $from, $publisher_domain ) );
+					continue;
+				}
+
+				$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $from ), '/' );
+				$new_url    = trim( $to, '/' );
+
+				$logger->info( sprintf( 'Adding a custom redirect (%s => %s)', $legacy_url, $new_url ) );
+				$this->custom_redirect_generator->add_redirect( $legacy_url, $new_url );
 			}
 		}
 
@@ -1778,7 +1831,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return int|bool Migrated user ID or false if error.
 	 */
 	private function migrate_to_wp_user( object $foundation_user, string $role, $logger ): int|bool {
-		$user_data     = [
+		$user_data = [
 			'role'          => $role,
 			'user_login'    => $foundation_user->username,
 			'user_email'    => $foundation_user->email,
