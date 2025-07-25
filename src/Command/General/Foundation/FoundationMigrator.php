@@ -487,14 +487,28 @@ class FoundationMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'start-from',
+						'name'        => 'issue-start-from',
+						'description' => 'Start from the issue with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'issue-end-at',
+						'description' => 'End at the issue with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-start-from',
 						'description' => 'Start from the post with the index specified.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'end-at',
+						'name'        => 'post-end-at',
 						'description' => 'End at the post with the index specified.',
 						'optional'    => true,
 						'repeating'   => false,
@@ -1631,11 +1645,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
 		$csv_writer->set_header( [ 'oid', 'post_id', 'post_url' ] );
 		
-		$issue_json_file = $assoc_args['issue-json-file'];
-		$post_json_file  = $assoc_args['post-json-file'];
-		$update_content  = $assoc_args['update-content'] ?? false;
-		$start_from      = $assoc_args['start-from'] ?? 0;
-		$end_at          = $assoc_args['end-at'] ?? 0;
+		$issue_json_file  = $assoc_args['issue-json-file'];
+		$post_json_file   = $assoc_args['post-json-file'];
+		$update_content   = $assoc_args['update-content'] ?? false;
+		$issue_start_from = $assoc_args['issue-start-from'] ?? 0;
+		$issue_end_at     = $assoc_args['issue-end-at'] ?? 0;
+		$post_start_from  = $assoc_args['post-start-from'] ?? 0;
+		$post_end_at      = $assoc_args['post-end-at'] ?? 0;
 
 		$raw_issues = $this->json_iterator->items( $issue_json_file );
 
@@ -1645,7 +1661,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate Issues to Collections.
 		foreach ( $raw_issues as $index => $issue ) {
-			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+			if ( $index < ( $issue_start_from - 1 ) || ( $issue_end_at > 0 && $index >= $issue_end_at ) ) {
 				continue;
 			}
 
@@ -1815,6 +1831,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 
 		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $post_start_from - 1 ) || ( $post_end_at > 0 && $index >= $post_end_at ) ) {
+				continue;
+			}
+
 			$logger->info( sprintf( 'Processing Post [post-%d] (index %d)', (int) $post->oid, $index ) );
 
 			if ( ! isset( $migrated_posts[ $post->oid ] ) ) {
@@ -1834,7 +1854,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
-			if ( ! empty( $post->features ) && in_array( 'Cover Story', $post->features ) ) {
+			if (
+				( ! empty( $post->features ) && in_array( 'Cover Story', $post->features ) )
+				|| ( ! empty( $post->specialPlacement ) && in_array( 'Cover Story', $post->specialPlacement ) )
+			) {
 				update_post_meta( $migrated_posts[ $post->oid ], 'newspack_collection_is_cover_story', 1 );
 			} else {
 				delete_post_meta( $migrated_posts[ $post->oid ], 'newspack_collection_is_cover_story' );
