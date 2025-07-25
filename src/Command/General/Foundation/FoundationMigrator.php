@@ -44,6 +44,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 	const MIGRATED_RELATED_SLIDESHOWS_META_KEY = 'newspack_migrated_related_slideshows';
 
 	/**
+	 * Meta key to mark posts with migrated related events.
+	 *
+	 * @var string
+	 */
+	const MIGRATED_RELATED_EVENTS_META_KEY = 'newspack_migrated_related_events';
+
+	/**
 	 * Meta key to mark comments with migrated comments.
 	 *
 	 * @var string
@@ -662,6 +669,51 @@ class FoundationMigrator implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-migrate-events',
+			self::get_command_closure( 'cmd_migrate_events' ),
+			[
+				'shortdesc' => 'Migrates Foundation events received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'publisher-domain',
+						'description' => 'The domain of the publisher (e.g. `www.okgazette.com`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json` or `Slideshow.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -1089,6 +1141,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Since we regenerated the post content, we need to regenerate the post content for related posts.
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_POSTS_META_KEY );
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_SLIDESHOWS_META_KEY );
+			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_EVENTS_META_KEY );
 
 			// Migrate brand.
 			if ( isset( $post->brand ) && ! empty( $post->brand ) ) {
@@ -1441,6 +1494,77 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$sponsor_logic->add_sponsor_to_post( $sponsor_id, $existing_post_id );
 
 			$logger->info( sprintf( 'Set sponsor %s to post %d', $sponsor_id, $existing_post_id ) );
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Migrates Foundation events received from their export.
+	 * Callable for 'newspack-content-migrator foundation-migrate-events' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_migrate_events( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file   = $assoc_args['post-json-file'];
+		$publisher_domain = str_replace( 'www.', '', $assoc_args['publisher-domain'] );
+		$start_from       = $assoc_args['start-from'] ?? 0;
+		$end_at           = $assoc_args['end-at'] ?? 0;
+		$oid_to_migrate   = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
+				continue;
+			}
+
+			// If the post doesn't have Events or Location data, skip it.
+			if ( ! isset( $post->relatedEvents ) || ! isset( $post->relatedLocations ) ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				continue;
+			}
+
+			// Check if the post has already migrated related events.
+			if ( get_post_meta( $existing_post_id, self::MIGRATED_RELATED_EVENTS_META_KEY, true ) ) {
+				continue;
+			}
+
+			// Migrate events.
+			if ( ! empty( $post->relatedEvents ) ) {
+				$post_content = get_post_field( 'post_content', $existing_post_id );
+				$content      = $this->migrate_event_or_location_markers( 'event', $publisher_domain, $post->oid, $existing_post_id, $post_content, $post->relatedEvents );
+			}
+
+			// Migrate location.
+			if ( ! empty( $post->relatedLocations ) ) {
+				$post_content = get_post_field( 'post_content', $existing_post_id );
+				$content      = $this->migrate_event_or_location_markers( 'location', $publisher_domain, $post->oid, $existing_post_id, $post_content, $post->relatedLocations );
+			}
+
+			if ( $content !== $post_content ) {
+				// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update( $wpdb->posts, [ 'post_content' => $content ], [ 'ID' => $existing_post_id ] );
+
+				// Mark the post as migrated related events.
+				update_post_meta( $existing_post_id, self::MIGRATED_RELATED_EVENTS_META_KEY, true );
+
+				$logger->info( sprintf( 'Migrated related events for post %d with ID %d', $post->oid, $existing_post_id ) );
+			}
 		}
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
@@ -2339,6 +2463,99 @@ class FoundationMigrator implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Migrate events markers.
+	 *
+	 * Events markers in the content are in the format: [event-N] where N is a 1-based index.
+	 * For example: [event-1] refers to the first event, [event-2] to the second, etc.
+	 * This method converts these 1-based indices to 0-based indices for array access.
+	 *
+	 * @param string $type             Type of content to migrate.
+	 * @param string $publisher_domain Publisher domain.
+	 * @param string $post_oid         Post OID.
+	 * @param int    $post_id          Post ID.
+	 * @param string $content          Post content.
+	 * @param array  $post_event_ids   Post event IDs.
+	 *
+	 * @return string Post content with embed markers replaced by Gutenberg blocks.
+	 */
+	private function migrate_event_or_location_markers( string $type, string $publisher_domain, string $post_oid, int $post_id, string $content, array $post_event_ids ): string {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		if ( empty( $post_event_ids ) ) {
+			return $content;
+		}
+
+		if ( ! in_array( $type, [ 'event', 'location' ], true ) ) {
+			$logger->error( sprintf( 'Invalid type %s for post %s', $type, $post_oid ) );
+			return $content;
+		}
+
+		$marker_pattern = sprintf( '/\[%s-(\d+)\]/', $type );
+
+		// If the content contains [event-N]|[location-N] markers, we need to migrate the events or locations in their place.
+		// If not, we need to add a event or location block to the end of the content.
+		if ( ! preg_match( $marker_pattern, $content ) ) {
+			$content_blocks = [];
+			foreach ( $post_event_ids as $event_id ) {
+				$events_data = $this->get_events_or_locations_data( $type, $publisher_domain, $event_id );
+
+				if ( is_wp_error( $events_data ) ) {
+					$logger->error( sprintf( 'Error getting event data for event %s: %s', $event_id, $events_data->get_error_message() ) );
+					continue;
+				}
+
+				foreach ( $events_data as $event_data ) {
+					$content_blocks[] = $this->generate_content_event_block( $event_data, $post_id, $logger );
+				}
+			}
+
+			if ( empty( $content_blocks ) ) {
+				return $content;
+			}
+
+			$related_content_title = serialize_block( $this->gutenberg_block_generator->get_heading( sprintf( 'Related %s', $type ), 'h2' ) );
+
+			return $content . $related_content_title . implode( '', $content_blocks );
+		}
+
+		$content = preg_replace_callback(
+			$marker_pattern,
+			function ( $matches ) use ( $post_oid, $logger, $publisher_domain, $post_event_ids, $post_id, $type ) {
+				$index = (int) $matches[1] - 1; // Convert to 0-based index.
+				if ( ! isset( $post_event_ids[ $index ] ) ) {
+					$logger->warning( sprintf( '%s %d not found in post %s for post %s', $type, (int) $matches[1], $post_oid ) );
+					return $matches[0];
+				}
+				$event_or_location_id = $post_event_ids[ $index ];
+				$events_data          = $this->get_events_or_locations_data( $type, $publisher_domain, $event_or_location_id );
+
+				if ( is_wp_error( $events_data ) ) {
+					$logger->error( sprintf( 'Error getting event data for event %s: %s', $event_or_location_id, $events_data->get_error_message() ) );
+					return $matches[0];
+				}
+
+				if ( 1 === count( $events_data ) ) {
+					$event_or_location_data           = $events_data[0];
+					$migrated_event_or_location_block = $this->generate_content_event_block( $event_or_location_data, $post_id, $logger );
+
+					if ( is_wp_error( $migrated_event_or_location_block ) ) {
+						$logger->error( sprintf( 'Error migrating %s %s for post %s: %s', $type, $matches[1], $post_oid, $migrated_event_or_location_block->get_error_message() ) );
+						return $matches[0];
+					}
+
+					return $migrated_event_or_location_block;
+				}
+
+				$logger->warning( sprintf( '%s %d not found in raw %s for post %s', $type, (int) $matches[1], $type, $post_oid ) );
+				return $matches[0];
+			},
+			$content
+		);
+
+		return $content;
+	}
+
+	/**
 	 * Migrate audio markers.
 	 *
 	 * Audio markers in the content are in the format: [audio-N] where N is a 1-based index.
@@ -2570,6 +2787,297 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$attrs
 			)
 		);
+	}
+
+	/**
+	 * Get event data.
+	 *
+	 * @param string $type Type of content to get data for.
+	 * @param string $publisher_domain Publisher domain.
+	 * @param string $event_or_location_id Event or location ID.
+	 *
+	 * @return array|\WP_Error Event data or WP_Error.
+	 */
+	private function get_events_or_locations_data( string $type, string $publisher_domain, string $event_or_location_id ): array|\WP_Error {
+		return $this->get_data_from_api(
+			sprintf(
+				'https://posting.%s/gyrobase/API/%s?oid=%s',
+				$publisher_domain,
+				'event' === $type ? 'EventSearch' : 'LocationSearch',
+				$event_or_location_id
+			)
+		);
+	}
+
+	/**
+	 * Get location data.
+	 *
+	 * @param string $publisher_domain Publisher domain.
+	 * @param string $location_id Location ID.
+	 *
+	 * @return array|\WP_Error Location data or WP_Error.
+	 */
+	private function get_location_data( string $publisher_domain, string $location_id ): array|\WP_Error {
+		$endpoint = sprintf( 'https://posting.%s/gyrobase/API/LocationSearch?oid=%s', $publisher_domain, $location_id );
+
+		return $this->get_data_from_api( $endpoint );
+	}
+
+	/**
+	 * Get events data from the API.
+	 *
+	 * @param string $endpoint Endpoint.
+	 *
+	 * @return array|\WP_Error Event data or WP_Error.
+	 */
+	private function get_data_from_api( string $endpoint ): array|\WP_Error {
+		$request = new \WP_Http();
+		// Append format parameter to get JSON representation for post.
+		$query_args = array( 'format' => 'json' );
+		$url        = add_query_arg( $query_args, $endpoint );
+
+		/*
+		 * If user agent is left empty the server will refuse the request.
+		 * This occurs when this importer is invoked from CLI with wxr-converter.php script.
+		 */
+
+		$response = $request->get( $url );
+
+		if ( is_wp_error( $response ) ) {
+			return $response;
+		}
+
+		if ( 200 !== $response['response']['code'] ) {
+			return new \WP_Error( 'get_post_json', __( 'Failed to retrieve post JSON' ) );
+		}
+
+		return json_decode( $response['body'] );
+	}
+
+	/**
+	 * Generate content event block.
+	 *
+	 * @param object   $event_data Event data.
+	 * @param int      $post_id    Post ID.
+	 * @param MultiLog $logger     MultiLog.
+	 *
+	 * @return string Event block.
+	 */
+	private function generate_content_event_block( object $event_data, int $post_id, MultiLog $logger ): string {
+		$teaser_id = null;
+		if ( isset( $event_data->teaser ) && isset( $event_data->teaser->url ) ) {
+			$teaser_id = $this->migrate_raw_attachment( $event_data->teaser, $post_id, );
+
+			if ( is_wp_error( $teaser_id ) ) {
+				$logger->error( sprintf( 'Error migrating teaser image for event %s (%s): %s', $event_data->oid, $event_data->teaser->url, $image_id->get_error_message() ) );
+			}
+		}
+		$columns = [];
+
+		// Teaser image.
+		if ( $teaser_id ) {
+			$image_attachment_post = get_post( $teaser_id );
+			$columns[]             = $this->gutenberg_block_generator->get_column(
+				[
+					$this->gutenberg_block_generator->get_image( $image_attachment_post, 'large', false, null, null, null, true ),
+				],
+				'25%',
+				[
+					'verticalAlignment' => 'top',
+					'className'         => 'is-vertically-aligned-top',
+				],
+			);
+		}
+
+		// Event content.
+		$columns[] = $this->gutenberg_block_generator->get_column(
+			[
+				$this->gutenberg_block_generator->get_group(
+					[
+						$this->gutenberg_block_generator->get_group(
+							[
+								$this->gutenberg_block_generator->get_heading( $event_data->title, 'h3' ),
+								$this->gutenberg_block_generator->get_group(
+									[
+										$this->gutenberg_block_generator->get_paragraph(
+											$event_data->time,
+											'',
+											'medium-gray',
+											'small',
+											[],
+											[
+												'metadata' => [
+													'name' => 'Meta',
+												],
+												'style'    => [
+													'elements' => [
+														'link' => [
+															'color' => [
+																'text' => 'var:preset|color|medium-gray',
+															],
+														],
+													],
+												],
+												'textColor' => 'medium-gray',
+												'fontSize' => 'small',
+											]
+										),
+										$this->gutenberg_block_generator->get_paragraph(
+											sprintf( 'Location: %s', $this->generate_location_text( $event_data->location ) ),
+											'',
+											'medium-gray',
+											'small',
+											[],
+											[
+												'metadata' => [
+													'name' => 'Meta',
+												],
+												'style'    => [
+													'elements' => [
+														'link' => [
+															'color' => [
+																'text' => 'var:preset|color|medium-gray',
+															],
+														],
+													],
+												],
+												'textColor' => 'medium-gray',
+												'fontSize' => 'small',
+											]
+										),
+									],
+									[ 'has-small-font-size' ],
+									[
+										'fontSize' => 'small',
+										'layout'   => [
+											'type'        => 'flex',
+											'orientation' => 'vertical',
+										],
+									]
+								),
+							],
+							[],
+							[
+								'layout' => [
+									'type'               => 'grid',
+									'columnCount'        => 1,
+									'minimumColumnWidth' => null,
+								],
+							]
+						),
+						$this->gutenberg_block_generator->get_buttons(
+							[
+								$this->gutenberg_block_generator->get_button(
+									'View on Community Site',
+									$event_data->url,
+									[ 'has-custom-width', 'wp-block-button__width-100' ],
+									[ 'has-white-color', 'has-primary-background-color', 'has-text-color', 'has-background', 'has-link-color' ],
+									[
+										'backgroundColor' => 'primary',
+										'textColor'       => 'white',
+										'width'           => 100,
+										'style'           => [
+											'elements' => [
+												'link' => [
+													'color' => [
+														'text' => 'var:preset|color|white',
+													],
+												],
+											],
+										],
+									]
+								),
+							],
+							[],
+							[
+								'style'  => [
+									'spacing' => [
+										'padding' => [
+											'top' => 'var:preset|spacing|40',
+										],
+									],
+								],
+								'layout' => [
+									'type' => 'flex',
+								],
+							]
+						),
+					],
+					[ 'community-card__content' ],
+					[
+						'metadata' => [
+							'name' => 'Content',
+						],
+						'layout'   => [
+							'type'              => 'flex',
+							'orientation'       => 'vertical',
+							'justifyContent'    => 'stretch',
+							'verticalAlignment' => 'space-between',
+						],
+					]
+				),
+			],
+			$teaser_id ? '75%' : '100%',
+			[
+				'verticalAlignment' => 'stretch',
+				'className'         => 'is-vertically-aligned-stretch',
+			],
+		);
+
+		return serialize_block(
+			$this->gutenberg_block_generator->get_group_constrained(
+				[
+					$this->gutenberg_block_generator->get_columns(
+						$columns,
+						'',
+						true,
+						[ 'className' => 'community-card--wide' ]
+					),
+				],
+				[ 'is-style-border' ],
+				[
+					'metadata' => [
+						'name' => 'Community (Wide Card)',
+					],
+					'style'    => [
+						'spacing' => [
+							'padding' => [
+								'top'    => 'var:preset|spacing|50',
+								'bottom' => 'var:preset|spacing|50',
+								'left'   => 'var:preset|spacing|50',
+								'right'  => 'var:preset|spacing|50',
+							],
+						],
+					],
+				],
+				'padding-top:var(--wp--preset--spacing--50);padding-right:var(--wp--preset--spacing--50);padding-bottom:var(--wp--preset--spacing--50);padding-left:var(--wp--preset--spacing--50)',
+			)
+		);
+	}
+
+	/**
+	 * Generate location text.
+	 *
+	 * @param object $location Location.
+	 *
+	 * @return string Location text.
+	 */
+	private function generate_location_text( object $location ): string {
+		$location_parts = [];
+
+		if ( ! empty( $location->name ) ) {
+			$location_parts[] = $location->name;
+		}
+
+		if ( ! empty( $location->address ) ) {
+			$location_parts[] = $location->address;
+		}
+
+		if ( ! empty( $location->city ) ) {
+			$location_parts[] = $location->city;
+		}
+
+		return implode( ', ', $location_parts );
 	}
 
 	/**

@@ -91,6 +91,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\TimesOfSanDiegoMigrator::class,
 		Command\General\Foundation\FoundationMigrator::class,
 		Command\General\Foundation\FoundationDataValidation::class,
+		Command\General\Foundation\FoundationFixes::class,
 	]
 );
 
