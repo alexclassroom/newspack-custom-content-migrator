@@ -62,7 +62,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 *
 	 * @var array
 	 */
-	const WIDE_LAYOUTS_LIST = [ 'Content - Full Width', 'Content - Manual Full Width', 'Content Full Width', 'Content - Sponsor Full Width', 'Content - Full Margin Width', 'Custom - PM', 'Content - Insider', 'Content - Insider VG', 'Content - Longform', 'Content - Good To-Go Vermont', 'Content - Shopping landing' ];
+	const WIDE_LAYOUTS_LIST = [ 'Content - Full Width', 'Content - Manual Full Width', 'Content Full Width', 'Content - Sponsor Full Width', 'Content - Full Margin Width', 'Content - PM', 'Content - Insider', 'Content - Insider VG', 'Content - Longform', 'Content - Good To-Go Vermont', 'Content - Shopping landing' ];
 
 	/**
 	 * JSON iterator.
@@ -1544,16 +1544,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 				continue;
 			}
 
+			$post_content = get_post_field( 'post_content', $existing_post_id );
+			$content      = $post_content;
+
 			// Migrate events.
 			if ( ! empty( $post->relatedEvents ) ) {
-				$post_content = get_post_field( 'post_content', $existing_post_id );
-				$content      = $this->migrate_event_or_location_markers( 'event', $publisher_domain, $post->oid, $existing_post_id, $post_content, $post->relatedEvents );
+				$content = $this->migrate_event_or_location_markers( 'event', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedEvents );
 			}
 
 			// Migrate location.
 			if ( ! empty( $post->relatedLocations ) ) {
-				$post_content = get_post_field( 'post_content', $existing_post_id );
-				$content      = $this->migrate_event_or_location_markers( 'location', $publisher_domain, $post->oid, $existing_post_id, $post_content, $post->relatedLocations );
+				$content = $this->migrate_event_or_location_markers( 'location', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedLocations );
 			}
 
 			if ( $content !== $post_content ) {
@@ -2505,7 +2506,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				}
 
 				foreach ( $events_data as $event_data ) {
-					$content_blocks[] = $this->generate_content_event_block( $event_data, $post_id, $logger );
+					$content_blocks[] = $this->generate_content_event_block( $type, $event_data, $post_id, $logger );
 				}
 			}
 
@@ -2513,7 +2514,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				return $content;
 			}
 
-			$related_content_title = serialize_block( $this->gutenberg_block_generator->get_heading( sprintf( 'Related %s', $type ), 'h2' ) );
+			$related_content_title = serialize_block( $this->gutenberg_block_generator->get_heading( sprintf( 'Related %ss', $type ), 'h3' ) );
 
 			return $content . $related_content_title . implode( '', $content_blocks );
 		}
@@ -2536,7 +2537,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				if ( 1 === count( $events_data ) ) {
 					$event_or_location_data           = $events_data[0];
-					$migrated_event_or_location_block = $this->generate_content_event_block( $event_or_location_data, $post_id, $logger );
+					$migrated_event_or_location_block = $this->generate_content_event_block( $type, $event_or_location_data, $post_id, $logger );
 
 					if ( is_wp_error( $migrated_event_or_location_block ) ) {
 						$logger->error( sprintf( 'Error migrating %s %s for post %s: %s', $type, $matches[1], $post_oid, $migrated_event_or_location_block->get_error_message() ) );
@@ -2857,16 +2858,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 	/**
 	 * Generate content event block.
 	 *
+	 * @param string   $type       Type of content to generate block for.
 	 * @param object   $event_data Event data.
 	 * @param int      $post_id    Post ID.
 	 * @param MultiLog $logger     MultiLog.
 	 *
 	 * @return string Event block.
 	 */
-	private function generate_content_event_block( object $event_data, int $post_id, MultiLog $logger ): string {
+	private function generate_content_event_block( string $type, object $event_data, int $post_id, MultiLog $logger ): string {
 		$teaser_id = null;
 		if ( isset( $event_data->teaser ) && isset( $event_data->teaser->url ) ) {
-			$teaser_id = $this->migrate_raw_attachment( $event_data->teaser, $post_id, );
+			$teaser_id = $this->migrate_raw_attachment( $event_data->teaser, $post_id );
 
 			if ( is_wp_error( $teaser_id ) ) {
 				$logger->error( sprintf( 'Error migrating teaser image for event %s (%s): %s', $event_data->oid, $event_data->teaser->url, $image_id->get_error_message() ) );
@@ -2878,9 +2880,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		if ( $teaser_id ) {
 			$image_attachment_post = get_post( $teaser_id );
 			$columns[]             = $this->gutenberg_block_generator->get_column(
-				[
-					$this->gutenberg_block_generator->get_image( $image_attachment_post, 'large', false, null, null, null, true ),
-				],
+				[ $this->gutenberg_block_generator->get_image( $image_attachment_post, 'large', false, 'newspack-event-teaser-image', null, null, true ) ],
 				'25%',
 				[
 					'verticalAlignment' => 'top',
@@ -2890,119 +2890,159 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		// Event content.
+		$block_title = 'event' === $type ? $event_data->title : $event_data->name;
+
+		$sub_title_blocks = [];
+
+		if ( 'event' === $type ) {
+			$this->gutenberg_block_generator->get_paragraph(
+				$event_data->time,
+				'',
+				'medium-gray',
+				'small',
+				[],
+				[
+					'metadata'  => [
+						'name' => 'Meta',
+					],
+					'style'     => [
+						'elements' => [
+							'link' => [
+								'color' => [
+									'text' => 'var:preset|color|medium-gray',
+								],
+							],
+						],
+					],
+					'textColor' => 'medium-gray',
+					'fontSize'  => 'small',
+				]
+			);
+		}
+
+		$location = 'event' === $type ? $event_data->location : $event_data;
+
+		$sub_title_blocks[] = $this->gutenberg_block_generator->get_paragraph(
+			sprintf( '%s%s', 'event' === $type ? 'Location: ' : '', $this->generate_location_text( $location, 'location' === $type ) ),
+			'',
+			'medium-gray',
+			'small',
+			[],
+			[
+				'metadata'  => [
+					'name' => 'Meta',
+				],
+				'style'     => [
+					'elements' => [
+						'link' => [
+							'color' => [
+								'text' => 'var:preset|color|medium-gray',
+							],
+						],
+					],
+				],
+				'textColor' => 'medium-gray',
+				'fontSize'  => 'small',
+			]
+		);
+
+		if ( 'location' === $type && isset( $event_data->phone ) ) {
+			$sub_title_blocks[] = $this->gutenberg_block_generator->get_paragraph(
+				$event_data->phone,
+				'',
+				'medium-gray',
+				'small',
+				[],
+				[
+					'metadata'  => [
+						'name' => 'Meta',
+					],
+					'style'     => [
+						'elements' => [
+							'link' => [
+								'color' => [
+									'text' => 'var:preset|color|medium-gray',
+								],
+							],
+						],
+					],
+					'textColor' => 'medium-gray',
+					'fontSize'  => 'small',
+				]
+			);
+		}
+
+		$right_column_blocks = [
+			$this->gutenberg_block_generator->get_group(
+				[
+					$this->gutenberg_block_generator->get_heading( $block_title, 'h3' ),
+					$this->gutenberg_block_generator->get_group(
+						$sub_title_blocks,
+						[ 'has-small-font-size' ],
+						[
+							'fontSize' => 'small',
+							'layout'   => [
+								'type'        => 'flex',
+								'orientation' => 'vertical',
+							],
+						]
+					),
+				],
+				[],
+				[
+					'layout' => [
+						'type'               => 'grid',
+						'columnCount'        => 1,
+						'minimumColumnWidth' => null,
+					],
+				]
+			),
+		];
+
+		if ( 'event' === $type && isset( $event_data->url ) ) {
+			$right_column_blocks[] = $this->gutenberg_block_generator->get_buttons(
+				[
+					$this->gutenberg_block_generator->get_button(
+						'View on Community Site',
+						$event_data->url,
+						[ 'has-custom-width', 'wp-block-button__width-100' ],
+						[ 'has-white-color', 'has-primary-background-color', 'has-text-color', 'has-background', 'has-link-color' ],
+						[
+							'backgroundColor' => 'primary',
+							'textColor'       => 'white',
+							'width'           => 100,
+							'style'           => [
+								'elements' => [
+									'link' => [
+										'color' => [
+											'text' => 'var:preset|color|white',
+										],
+									],
+								],
+							],
+						]
+					),
+				],
+				[],
+				[
+					'style'  => [
+						'spacing' => [
+							'padding' => [
+								'top' => 'var:preset|spacing|40',
+							],
+						],
+					],
+					'layout' => [
+						'type' => 'flex',
+					],
+				]
+			);
+		}
+
 		$columns[] = $this->gutenberg_block_generator->get_column(
 			[
 				$this->gutenberg_block_generator->get_group(
-					[
-						$this->gutenberg_block_generator->get_group(
-							[
-								$this->gutenberg_block_generator->get_heading( $event_data->title, 'h3' ),
-								$this->gutenberg_block_generator->get_group(
-									[
-										$this->gutenberg_block_generator->get_paragraph(
-											$event_data->time,
-											'',
-											'medium-gray',
-											'small',
-											[],
-											[
-												'metadata' => [
-													'name' => 'Meta',
-												],
-												'style'    => [
-													'elements' => [
-														'link' => [
-															'color' => [
-																'text' => 'var:preset|color|medium-gray',
-															],
-														],
-													],
-												],
-												'textColor' => 'medium-gray',
-												'fontSize' => 'small',
-											]
-										),
-										$this->gutenberg_block_generator->get_paragraph(
-											sprintf( 'Location: %s', $this->generate_location_text( $event_data->location ) ),
-											'',
-											'medium-gray',
-											'small',
-											[],
-											[
-												'metadata' => [
-													'name' => 'Meta',
-												],
-												'style'    => [
-													'elements' => [
-														'link' => [
-															'color' => [
-																'text' => 'var:preset|color|medium-gray',
-															],
-														],
-													],
-												],
-												'textColor' => 'medium-gray',
-												'fontSize' => 'small',
-											]
-										),
-									],
-									[ 'has-small-font-size' ],
-									[
-										'fontSize' => 'small',
-										'layout'   => [
-											'type'        => 'flex',
-											'orientation' => 'vertical',
-										],
-									]
-								),
-							],
-							[],
-							[
-								'layout' => [
-									'type'               => 'grid',
-									'columnCount'        => 1,
-									'minimumColumnWidth' => null,
-								],
-							]
-						),
-						$this->gutenberg_block_generator->get_buttons(
-							[
-								$this->gutenberg_block_generator->get_button(
-									'View on Community Site',
-									$event_data->url,
-									[ 'has-custom-width', 'wp-block-button__width-100' ],
-									[ 'has-white-color', 'has-primary-background-color', 'has-text-color', 'has-background', 'has-link-color' ],
-									[
-										'backgroundColor' => 'primary',
-										'textColor'       => 'white',
-										'width'           => 100,
-										'style'           => [
-											'elements' => [
-												'link' => [
-													'color' => [
-														'text' => 'var:preset|color|white',
-													],
-												],
-											],
-										],
-									]
-								),
-							],
-							[],
-							[
-								'style'  => [
-									'spacing' => [
-										'padding' => [
-											'top' => 'var:preset|spacing|40',
-										],
-									],
-								],
-								'layout' => [
-									'type' => 'flex',
-								],
-							]
-						),
-					],
+					$right_column_blocks,
 					[ 'community-card__content' ],
 					[
 						'metadata' => [
@@ -3062,10 +3102,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 *
 	 * @return string Location text.
 	 */
-	private function generate_location_text( object $location ): string {
+	private function generate_location_text( object $location, bool $skip_name = false ): string {
 		$location_parts = [];
 
-		if ( ! empty( $location->name ) ) {
+		if ( ! empty( $location->name ) && ! $skip_name ) {
 			$location_parts[] = $location->name;
 		}
 

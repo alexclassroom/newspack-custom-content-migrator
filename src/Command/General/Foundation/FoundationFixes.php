@@ -107,6 +107,37 @@ class FoundationFixes implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-fix-post-wide-templates',
+			self::get_command_closure( 'cmd_fix_post_wide_templates' ),
+			[
+				'shortdesc' => 'Fixes the post wide templates for posts received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -134,7 +165,7 @@ class FoundationFixes implements RegisterCommandInterface {
 			$existing_slideshow_id = Posts::get_post_by_unique_identifier( $slideshow->oid );
 
 			if ( ! $existing_slideshow_id ) {
-				$logger->error( sprintf( 'Slideshow %d not migrated', $slideshow->oid ) );
+				$logger->error( sprintf( '[%d] Slideshow %d not migrated', $index, $slideshow->oid ) );
 				continue;
 			}
 
@@ -145,7 +176,7 @@ class FoundationFixes implements RegisterCommandInterface {
 			if ( ! empty( $tags ) ) {
 				wp_set_post_tags( $existing_slideshow_id, $tags );
 
-				$logger->info( sprintf( 'Set tags %s to slideshow %d', implode( ', ', $tags ), $existing_slideshow_id ) );
+				$logger->info( sprintf( '[%d] Set tags %s to slideshow %d', $index, implode( ', ', $tags ), $existing_slideshow_id ) );
 			}
 		}
 
@@ -177,7 +208,7 @@ class FoundationFixes implements RegisterCommandInterface {
 			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
 
 			if ( ! $existing_post_id ) {
-				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				$logger->error( sprintf( '[%d] Post %d not migrated', $index, $post->oid ) );
 				continue;
 			}
 
@@ -187,7 +218,7 @@ class FoundationFixes implements RegisterCommandInterface {
 			if ( ! empty( $feature_tags ) ) {
 				wp_set_post_tags( $existing_post_id, $feature_tags, true );
 
-				$logger->info( sprintf( 'Added featurestags "%s" to post %d', implode( ', ', $feature_tags ), $existing_post_id ) );
+				$logger->info( sprintf( '[%d] Added featurestags "%s" to post %d', $index, implode( ', ', $feature_tags ), $existing_post_id ) );
 			}
 
 			// Add posts special placement as tags.
@@ -196,7 +227,45 @@ class FoundationFixes implements RegisterCommandInterface {
 			if ( ! empty( $special_placement_tags ) ) {
 				wp_set_post_tags( $existing_post_id, $special_placement_tags, true );
 
-				$logger->info( sprintf( 'Added special placement tags "%s" to post %d', implode( ', ', $special_placement_tags ), $existing_post_id ) );
+				$logger->info( sprintf( '[%d] Added special placement tags "%s" to post %d', $index, implode( ', ', $special_placement_tags ), $existing_post_id ) );
+			}
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Fixes the post wide templates for posts received from their export.
+	 * Callable for 'newspack-content-migrator foundation-fix-post-wide-templates' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_post_wide_templates( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file = $assoc_args['post-json-file'];
+		$start_from     = $assoc_args['start-from'] ?? 0;
+		$end_at         = $assoc_args['end-at'] ?? 0;
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				continue;
+			}
+
+			if ( in_array( $post->layout, FoundationMigrator::WIDE_LAYOUTS_LIST, true ) ) {
+				update_post_meta( $existing_post_id, '_wp_page_template', 'single-feature.php' );
+				update_post_meta( $existing_post_id, 'newspack_featured_image_position', 'above' );
+
+				$logger->info( sprintf( '[%d] Post %d has post wide layout %s', $index, $existing_post_id, $post->layout ) );
 			}
 		}
 
