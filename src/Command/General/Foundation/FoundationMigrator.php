@@ -108,13 +108,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 	private CustomRedirectGenerator $custom_redirect_generator;
 
 	/**
-	 * Instance of Collections Helper.
-	 *
-	 * @var null|CollectionsHelper
-	 */
-	private CollectionsHelper $collections_helper;
-
-	/**
 	 * Local path to the media files.
 	 *
 	 * @var string
@@ -167,7 +160,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$this->simple_local_avatars      = new SimpleLocalAvatars();
 		$this->gutenberg_block_generator = new GutenbergBlockGenerator();
 		$this->custom_redirect_generator = new CustomRedirectGenerator();
-		$this->collections_helper        = new CollectionsHelper();
 	}
 
 	/**
@@ -480,7 +472,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			[
 				'shortdesc' => 'Migrates Foundation collections received from their export.',
 				'synopsis'  => [
-     				[
+					[
 						'type'        => 'assoc',
 						'name'        => 'issue-json-file',
 						'description' => 'Path to the JSON file containing the issues (e.g. `Issue.json`).',
@@ -999,8 +991,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$mapped_authors    = $this->map_authors( $post->authors );
 			$mapped_categories = $this->map_categories( $post->categories );
 			$mapped_topics     = $this->map_categories( $post->topics );
-			
-			$post_categories   = array_values( array_merge( $mapped_categories, $mapped_topics ) );
+
+			$post_categories = array_values( array_merge( $mapped_categories, $mapped_topics ) );
 
 			// Check if the post has non migrated authors.
 			if ( count( $mapped_authors ) !== count( array_unique( $post->authors ) ) ) {
@@ -1787,7 +1779,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	/**
 	 * Migrates Foundation Issues received from their export.
 	 * Callable for `newspack-content-migrator foundation-migrate-collections` command.
-	 * 
+	 *
 	 * @param array $args       Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 */
@@ -1797,7 +1789,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$logger     = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
 		$csv_writer->set_header( [ 'oid', 'post_id', 'post_url' ] );
-		
+		$collections_helper = new CollectionsHelper();
+
 		$issue_json_file  = $assoc_args['issue-json-file'];
 		$post_json_file   = $assoc_args['post-json-file'];
 		$update_content   = $assoc_args['update-content'] ?? false;
@@ -1833,7 +1826,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 					$collection_start_date->format( 'M j, Y' ),
 					$collection_end_date->format( 'M j, Y' ),
 				);
-			} else if ( $collection_start_date->format( 'M' ) !== $collection_end_date->format( 'M' ) ) {
+			} elseif ( $collection_start_date->format( 'M' ) !== $collection_end_date->format( 'M' ) ) {
 				$period = sprintf(
 					'%s - %s',
 					$collection_start_date->format( 'M j' ),
@@ -1850,11 +1843,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$issue_created_date  = new \DateTime( $issue->releaseDate );
 			$issue_modified_date = new \DateTime( $issue->lastModified );
 
-			$collection_id = $this->collections_helper->get_or_create_collection( [
-				'post_title'    => $issue->title ?: $period,
-				'post_date'     => $issue_created_date->format( 'Y-m-d H:i:s' ),
-				'post_date_gmt' => $issue_created_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
-			], $issue->oid );
+			$collection_id = $collections_helper->get_or_create_collection(
+				[
+					'post_title'    => $issue->title ?: $period,
+					'post_date'     => $issue_created_date->format( 'Y-m-d H:i:s' ),
+					'post_date_gmt' => $issue_created_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
+				],
+				$issue->oid
+			);
 
 			if ( is_wp_error( $collection_id ) ) {
 				$logger->error( sprintf( 'Failed to get or create collection for issue post ID %d: %s', $issue->oid, $collection_id->get_error_message() ) );
@@ -1871,15 +1867,18 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$thumbnail_id = null;
 			}
 
-			$update_result = wp_update_post( [
-				'ID'                => $collection_id,
-				'post_title'        => $issue->title ?: $period,
-				'post_content'      => $issue->description,
-				'post_date'         => $issue_created_date->format( 'Y-m-d H:i:s' ),
-				'post_date_gmt'     => $issue_created_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
-				'post_status'       => $this->map_post_status( $issue->status ),
-				'post_modified_gmt' => $issue->lastModified,
-			], true );
+			$update_result = wp_update_post(
+				[
+					'ID'                => $collection_id,
+					'post_title'        => $issue->title ?: $period,
+					'post_content'      => $issue->description,
+					'post_date'         => $issue_created_date->format( 'Y-m-d H:i:s' ),
+					'post_date_gmt'     => $issue_created_date->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
+					'post_status'       => $this->map_post_status( $issue->status ),
+					'post_modified_gmt' => $issue->lastModified,
+				],
+				true
+			);
 
 			if ( is_wp_error( $update_result ) ) {
 				$logger->error( sprintf( 'Error updating issue %d: %s', $issue->oid, $update_result->get_error_message() ) );
@@ -1910,7 +1909,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'type'  => 'link',
 						'label' => 'Digital Edition',
 						'url'   => $issue->digitalEditionURL,
-					]
+					],
 				];
 			}
 
@@ -1925,13 +1924,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 							'type'  => 'link',
 							'label' => 'Digital Edition',
 							'url'   => wp_get_attachment_url( $collection_file_id ),
-						]
+						],
 					];
 				}
 			}
 
 			// Update collection metadata
-			$this->collections_helper->update_collection_metadata( $collection_id, $collection_metadata );
+			$collections_helper->update_collection_metadata( $collection_id, $collection_metadata );
 
 			update_post_meta( $collection_id, 'foundation_post_source', $issue->source );
 			update_post_meta( $collection_id, 'foundation_post_site', $issue->site );
@@ -1939,11 +1938,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Add Collection Category.
 			if ( ! empty( $issue->specialPlacement ) ) {
 				foreach ( $issue->specialPlacement as $issue_category ) {
-					$collection_category_id = $this
-						->collections_helper
-						->get_or_create_collection_category( [
-							'name' => $issue_category,
-						], $issue_category );
+					$collection_category_id = $collections_helper
+						->get_or_create_collection_category(
+							[
+								'name' => $issue_category,
+							],
+							$issue_category
+						);
 
 					if ( is_wp_error( $collection_category_id ) ) {
 						$logger->error( sprintf( 'Error importing collection category %s: %s', $issue_category, $collection_category_id->get_error_message() ) );
@@ -1954,19 +1955,21 @@ class FoundationMigrator implements RegisterCommandInterface {
 					wp_set_post_terms(
 						$collection_id,
 						[
-							intval( $collection_category_id->term_id )
+							intval( $collection_category_id->term_id ),
 						],
-						$this->collections_helper->get_collection_category_taxonomy(),
+						$collections_helper->get_collection_category_taxonomy(),
 						true
 					);
 				}
 			}
 
-			$csv_writer->put( [
-				$issue->oid,
-				$collection_id,
-				get_permalink( $collection_id )
-			] );
+			$csv_writer->put(
+				[
+					$issue->oid,
+					$collection_id,
+					get_permalink( $collection_id ),
+				]
+			);
 
 			$logger->info( sprintf( '[%d] Migrated collection %d with ID %d', $index + 1, $issue->oid, $collection_id ) );
 		}
@@ -2016,7 +2019,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				delete_post_meta( $migrated_posts[ $post->oid ], 'newspack_collection_is_cover_story' );
 			}
 
-			$this->collections_helper->assign_post_to_collections_posts( $migrated_posts[ $post->oid ], $collection_id );
+			$collections_helper->assign_post_to_collections_posts( $migrated_posts[ $post->oid ], $collection_id );
 
 			$logger->info( '— Collection successfully associated with Post!' );
 		}
