@@ -138,6 +138,44 @@ class FoundationFixes implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-get-posts-with-cropped-images',
+			self::get_command_closure( 'cmd_get_posts_with_cropped_images' ),
+			[
+				'shortdesc' => 'Gets the posts with cropped images.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'image-json-file',
+						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -268,6 +306,58 @@ class FoundationFixes implements RegisterCommandInterface {
 				$logger->info( sprintf( '[%d] Post %d has post wide layout %s', $index, $existing_post_id, $post->layout ) );
 			}
 		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Gets the posts with cropped images.
+	 * Callable for 'newspack-content-migrator foundation-get-posts-with-cropped-images' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_get_posts_with_cropped_images( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file                = $assoc_args['post-json-file'];
+		$image_json_file               = $assoc_args['image-json-file'];
+		$start_from                    = $assoc_args['start-from'] ?? 0;
+		$end_at                        = $assoc_args['end-at'] ?? 0;
+		$post_oids_with_cropped_images = [];
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				continue;
+			}
+
+			foreach ( $post->imageLinks as $post_image_oid ) {
+				$possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $image_json_file, 'oid', $post_image_oid ) );
+
+				$raw_image = null;
+
+				if ( 1 === count( $possible_raw_images ) ) {
+					$raw_image = $possible_raw_images[0];
+
+					if ( isset( $raw_image->cropCoords ) && ! empty( $raw_image->cropCoords ) ) {
+						if ( ! in_array( $existing_post_id, $post_oids_with_cropped_images, true ) ) {
+							$post_oids_with_cropped_images[] = $existing_post_id;
+							$logger->info( sprintf( 'Post %d has cropped image %s', $existing_post_id, $post_image_oid ) );
+						}
+					}
+				}
+			}
+		}
+
+		$logger->info( sprintf( 'Post OIDs with cropped images: %s', implode( ', ', $post_oids_with_cropped_images ) ) );
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 	}

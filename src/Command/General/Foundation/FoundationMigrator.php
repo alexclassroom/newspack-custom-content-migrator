@@ -1124,7 +1124,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Seven Days have their subtitles in the description field.
 			if ( str_contains( $publisher_domain, 'sevendaysvt.com' ) ) {
-				update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->description ?? '' );
+				if ( isset( $post->subHeadline ) && ! empty( $post->subHeadline ) ) {
+					update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline );
+				} else {
+					update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->description ?? '' );
+				}
 			} else {
 				update_post_meta( $migrated_post_id, 'newspack_post_subtitle', $post->subHeadline ?? '' );
 			}
@@ -2585,7 +2589,22 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
 
-				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
+				$crop_coords             = null;
+				$raw_image['cropCoords'] = 'blog: 0,600 1597,1664';
+				if ( isset( $raw_image['cropCoords'] ) && ! empty( $raw_image['cropCoords'] ) ) {
+					// cropCoords is in the format of "blog: 0,600 1597,1664".
+					preg_match( '/blog: (\d+),(\d+) (\d+),(\d+)/', $raw_image['cropCoords'], $crop_coords_matches );
+					if ( ! empty( $crop_coords_matches ) ) {
+						$crop_coords = [
+							'x'      => intval( $crop_coords_matches[1] ),
+							'y'      => intval( $crop_coords_matches[2] ),
+							'width'  => intval( $crop_coords_matches[3] ) - intval( $crop_coords_matches[1] ),
+							'height' => intval( $crop_coords_matches[4] ) - intval( $crop_coords_matches[2] ),
+						];
+					}
+				}
+
+				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false, $crop_coords ) );
 				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
 
 				return $replacement;
