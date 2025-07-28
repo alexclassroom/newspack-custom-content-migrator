@@ -54,6 +54,13 @@ class MetroMigrator implements RegisterCommandInterface {
 	 * See InterfaceCommand::register_commands.
 	 */
 	public static  function register_commands(): void {
+
+		/**
+		 * Note, this migrator presently expects to have the export folder be "./621" in public root.
+		 * That's because "mappings" folder and files are hardcoded to path ./621 via constructor.
+		 * Improvement idea -- decouple these "mappings" from the constructor, and change `--files-folder` params to be path to the exports folder.
+		 */
+
 		WP_CLI::add_command( 'newspack-content-migrator metro-import-sections',
 			self::get_command_closure( 'cmd_metro_import_sections' ),
 			[
