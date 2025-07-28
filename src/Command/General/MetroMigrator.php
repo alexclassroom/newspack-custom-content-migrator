@@ -2,11 +2,14 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Logic\Attachments;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Attachments;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use WP_CLI;
 
-class MetroMirgator implements InterfaceCommand {
+class MetroMigrator implements RegisterCommandInterface {
+
+	use WpCliCommandTrait;
 
 	private $ids_mappings;
 	private $mappings_folder;
@@ -25,9 +28,7 @@ class MetroMirgator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
 	public static function get_instance() {
 		$class = get_called_class();
@@ -712,10 +713,6 @@ HTML;
 		$local_links_pattern = '/"(http(?:s)?:\/\/(?:www\.)?indyweek\.com(?:.)*?)"/m';
 
 		$found = preg_match_all( $local_links_pattern, $slot->embed_code, $local_links );
-
-		if ( $found ) {
-			$attachments_logic = new Attachments();
-		}
 
 		foreach ( $local_links[1] as $local_link ) {
 			$file           = end( explode( '/', $local_link ) );

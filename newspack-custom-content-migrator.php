@@ -2,42 +2,39 @@
 /**
  * Plugin Name: Newspack Custom Content Migrator
  * Description: A set of tools in CLI environment to assist during a Newspack site content migration.
- * Plugin URI:  https://newspack.blog/
+ * Plugin URI:  https://newspack.com
  * Author:      Automattic
- * Author URI:  https://newspack.blog/
- * Version:     1.0.2
+ * Author URI:  https://newspack.com
+ * Version:     1.8.2
  *
  * @package  Newspack_Custom_Content_Migrator
  */
 
 namespace NewspackCustomContentMigrator;
 
-require __DIR__ . '/vendor/autoload.php';
+use Newspack\MigrationTools\NMT;
 
 // Don't do anything outside WP CLI.
 if ( ! defined( 'WP_CLI' ) || ! WP_CLI ) {
 	return;
 }
 
-require_once ABSPATH . 'wp-settings.php';
+require __DIR__ . '/vendor/autoload.php';
+NMT::setup();
 
-PluginSetup::setup_wordpress_importer();
-PluginSetup::register_migrators(
-	array(
-		// General.
-		Command\General\PostsMigrator::class,
-		Command\General\MetaToContentMigrator::class,
-		Command\General\MenusMigrator::class,
-		Command\General\CssMigrator::class,
-		Command\General\ContentConverterPluginMigrator::class,
-		Command\General\SettingsMigrator::class,
-		Command\General\WooCommMigrator::class,
+$error_reporting_level = false !== defined( 'NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL' ) ? NEWSPACK_CUSTOM_CONTENT_MIGRATOR_ERROR_REPORTING_LEVEL : 'dev';
+PluginSetup::configure_error_reporting( $error_reporting_level );
+PluginSetup::register_ticker();
+PluginSetup::add_hooks();
+
+PluginSetup::register_command_classes(
+	[
 		Command\General\ReaderRevenueMigrator::class,
-		Command\General\CampaignsMigrator::class,
 		Command\General\ListingsMigrator::class,
 		Command\General\InlineFeaturedImageMigrator::class,
 		Command\General\SubtitleMigrator::class,
 		Command\General\CoAuthorPlusMigrator::class,
+		Command\General\CoAuthorPlusDataFixingMigrator::class,
 		Command\General\CPTMigrator::class,
 		Command\General\AdsMigrator::class,
 		Command\General\NewslettersMigrator::class,
@@ -45,6 +42,7 @@ PluginSetup::register_migrators(
 		Command\General\ReusableBlocksMigrator::class,
 		Command\General\SportsPressMigrator::class,
 		Command\General\FeaturedImagesMigrator::class,
+		Command\General\FixMissingMedia::class,
 		Command\General\ContentDiffMigrator::class,
 		Command\General\WooCommOrdersAndSubscriptionsMigrator::class,
 		Command\General\NextgenGalleryMigrator::class,
@@ -57,25 +55,47 @@ PluginSetup::register_migrators(
 		Command\General\ContentFixerMigrator::class,
 		Command\General\XMLMigrator::class,
 		Command\General\PrelaunchSiteQAMigrator::class,
-		Command\General\MetroMirgator::class,
+		Command\General\VillageMediaCMSMigrator::class,
+		Command\General\MetroMigrator::class,
+		Command\General\ProfilePressMigrator::class,
+		Command\General\RasMigrator::class,
+		Command\General\TownNewsMigrator::class,
+		Command\General\UsersMigrator::class,
+		Command\General\EmbarcaderoMigrator::class,
+		Command\General\ChorusCmsMigrator::class,
+		Command\General\LedeMigrator::class,
+		Command\General\DownloadMissingImages::class,
+		Command\General\MigrationHelper::class,
+		Command\General\PaidMembershipsPro2WooCommMigrator::class,
+		Command\General\MolonguiAutorship::class,
+		Command\General\MediumMigrator::class,
+		Command\General\CreativeCircleMigrator::class,
+		Command\General\PostDateMigrator::class,
+		Command\General\MediaCreditPluginMigrator::class,
+		Command\General\SimplyGuestAuthorNameMigrator::class,
+		Command\General\TagDivThemesPluginsMigrator::class,
+		Command\General\GhostCMSMigrator::class,
+		Command\General\Multibranded::class,
 
-		// Publisher specific.
-		Command\PublisherSpecific\GadisMigrator::class,
-		Command\PublisherSpecific\ElLiberoMigrator::class,
-		Command\PublisherSpecific\NoozhawkMigrator::class,
-		Command\PublisherSpecific\CharlottesvilleTodayMigrator::class,
-		Command\PublisherSpecific\VoiceOfSanDiegoMigrator::class,
-		Command\PublisherSpecific\BethesdaMagMigrator::class,
-		Command\PublisherSpecific\SearchLightNMMigrator::class,
-		Command\PublisherSpecific\CalMattersMigrator::class,
-		Command\PublisherSpecific\NewsroomCoNzMigrator::class,
-		Command\PublisherSpecific\MassterlistMigrator::class,
-		Command\PublisherSpecific\ColoradoSunMigrator::class,
-		Command\PublisherSpecific\MustangNewsMigrator::class,
-		Command\PublisherSpecific\LkldNowMigrator::class,
-		Command\PublisherSpecific\RetroReportMigrator::class,
-		Command\PublisherSpecific\BillyPennMigrator::class,
-		Command\PublisherSpecific\IndyWeekMigrator::class,
-		Command\PublisherSpecific\Moco360Migrator::class,
-	)
+		// Publisher specific commands. Remove from below when launched.
+		Command\PublisherSpecific\JEPBailiwickMigrator::class,
+		Command\PublisherSpecific\ArkansasTimesMigrator::class,
+		Command\PublisherSpecific\MiradorProvincialMigrator::class,
+		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
+		Command\PublisherSpecific\UgObserver::class,
+		Command\PublisherSpecific\RoughDraftAtlantaMigrator::class,
+		Command\PublisherSpecific\SanDiegoVoiceAndViewpointMigrator::class,
+		Command\PublisherSpecific\OrthopedicsThisWeekMigrator::class,
+		Command\PublisherSpecific\BridgeMIMigrator::class,
+		Command\PublisherSpecific\County17Migrator::class,
+		Command\PublisherSpecific\TimesOfSanDiegoMigrator::class,
+		Command\PublisherSpecific\NewPinePlainsHeraldMigrator::class,
+	]
+);
+
+PluginSetup::register_migrators(
+	[
+	// If you need support for classes that are in the ./publisher-specific-archive/ directory, you can try adding them here temporarily.
+	// Ideally the class you put there should be refactored to implement the RegisterCommandInterface, and then you can include it (temporarily) in the array above.
+	]
 );

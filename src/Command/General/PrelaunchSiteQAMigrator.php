@@ -8,22 +8,17 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Exception;
-use NewspackCustomContentMigrator\Command\InterfaceCommand;
-use NewspackCustomContentMigrator\Command\General\AttachmentsMigrator;
-use NewspackCustomContentMigrator\Utils\Logger;
-use \WP_CLI;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Util\Log\Logger;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use WP_CLI;
 
 /**
  * General Prelaunch QA migrator
  */
-class PrelaunchSiteQAMigrator implements InterfaceCommand {
+class PrelaunchSiteQAMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance of the class
-	 * 
-	 * @var null|InterfaceCommand
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * Instance of Logger
@@ -74,26 +69,12 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator prelaunchsiteqamigrator-run-qa',
-			[ $this, 'cmd_run_qa' ],
+			self::get_command_closure( 'cmd_run_qa' ),
 			[
 				'shortdesc' => 'Run all QA commands to make sure everything is correct before launching.',
 				'synopsis'  => [
@@ -288,29 +269,9 @@ class PrelaunchSiteQAMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Create a unified log file name prefix for the command, with a timestamp. Also creates a directory is possible
-	 * 
-	 * @param string $command_name The name of the commande.
-	 * 
-	 * @return string The log file name prefix, with the folder. For example: qa_check_broken_images_logs/qa_2022-08-28_00-00-00_check_broken_images
-	 */
-	public function get_log_file_name( $command_name ) {
-		$log_file_prefix = sprintf( 'qa_%s_%s', gmdate( 'Y-m-d_H-i-s' ), $command_name );
-		$log_folder_name = $this->logger->get_le_log_path();
-
-		// Append the LE log folder to the filename.
-		$log_file_prefix = $log_folder_name . '/' . $log_file_prefix;
-		return $log_file_prefix;
-	}
-
-	/**
 	 * Wrapper function for calling the check_broken_images command
 	 */
 	public function call_check_broken_images() {
-		$assoc_args = array(
-			'log-file-prefix' => $this->get_log_file_name( 'check_broken_images' ),
-		);
-
 		if ( $this->is_dry_run_mode() ) {
 			$assoc_args['dry-run'] = true;
 		}

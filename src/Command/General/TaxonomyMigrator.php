@@ -2,20 +2,19 @@
 
 namespace NewspackCustomContentMigrator\Command\General;
 
-use \NewspackCustomContentMigrator\Command\InterfaceCommand;
-use \NewspackCustomContentMigrator\Logic\Posts;
-use \NewspackCustomContentMigrator\Logic\Taxonomy;
+use InvalidArgumentException;
+use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Logic\Taxonomy;
+use Newspack\MigrationTools\Util\Log\CliLog;
+use Newspack\MigrationTools\Util\Log\PlainFileLog;
+use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use stdClass;
-use \WP_CLI;
+use WP_CLI;
 
-class TaxonomyMigrator implements InterfaceCommand {
+class TaxonomyMigrator implements RegisterCommandInterface {
 
-	/**
-	 * Instance.
-	 *
-	 * @var null|InterfaceCommand Instance.
-	 */
-	private static $instance = null;
+	use WpCliCommandTrait;
 
 	/**
 	 * @var Posts $posts_logic
@@ -27,7 +26,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 *
 	 * @var Taxonomy $taxonomy_logic Taxonomy logic class.
 	 */
-	private $taxonomy_logic;
+	private Taxonomy $taxonomy_logic;
 
 	/**
 	 * List of taxonomy values recognized by WordPress.
@@ -49,26 +48,12 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Singleton get_instance().
-	 *
-	 * @return InterfaceCommand|null
+	 * {@inheritDoc}
 	 */
-	public static function get_instance() {
-		$class = get_called_class();
-		if ( null === self::$instance ) {
-			self::$instance = new $class();
-		}
-
-		return self::$instance;
-	}
-
-	/**
-	 * See InterfaceCommand::register_commands.
-	 */
-	public function register_commands() {
+	public static function register_commands(): void {
 		WP_CLI::add_command(
 			'newspack-content-migrator terms-with-taxonomy-to-categories',
-			array( $this, 'cmd_terms_with_taxonomy_to_categories' ),
+			self::get_command_closure( 'cmd_terms_with_taxonomy_to_categories' ),
 			[
 				'shortdesc' => 'Converts Terms with a specified Taxonomy to Categories, and assigns these Categories to belonging post records of all post_types (not just Posts and Pages).',
 				'synopsis'  => [
@@ -88,8 +73,29 @@ class TaxonomyMigrator implements InterfaceCommand {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'parent-category-id',
+						'description' => 'Category ID to use as parent for all newly created categories. Cannot be used together with create-parent-category.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'term_ids',
 						'description' => 'CSV of Terms IDs. If provided, the command will only convert these specific Terms.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'delete-old-terms',
+						'description' => 'If this flag is set, the original taxonomy terms will be deleted after successful conversion to categories.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'replace-uncategorized',
+						'description' => 'If this flag is set, posts that only have the "uncategorized" category will have it replaced with the newly converted category.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -98,7 +104,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 		WP_CLI::add_command(
 			'newspack-content-migrator terms-with-taxonomy-to-tags',
-			array( $this, 'cmd_terms_with_taxonomy_to_tags' ),
+			self::get_command_closure( 'cmd_terms_with_taxonomy_to_tags' ),
 			[
 				'shortdesc' => 'Converts Terms with a specified Taxonomy to Tags, and assigns these Tags to belonging post records of all post_types (not just Posts and Pages).',
 				'synopsis'  => [
@@ -122,7 +128,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator fix-taxonomy-count',
-			[ $this, 'cmd_fix_taxonomy_count' ],
+			self::get_command_closure( 'cmd_fix_taxonomy_count' ),
 			[
 				'shortdesc' => 'This command will fix wp_term_taxonomy.count for given taxonomies.',
 				'synopsis'  => [
@@ -146,7 +152,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator fix-category-and-tag-count',
-			[ $this, 'cmd_fix_category_and_tag_count' ],
+			self::get_command_closure( 'cmd_fix_category_and_tag_count' ),
 			[
 				'shortdesc' => 'This command will fix wp_term_taxonomy.count for categories and tags.',
 				'synopsis'  => [
@@ -163,7 +169,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator cull-low-value-tags',
-			[ $this, 'cmd_cull_low_value_tags' ],
+			self::get_command_closure( 'cmd_cull_low_value_tags' ),
 			[
 				'shortdesc' => 'This command will delete any tags which are below a certain threshold.',
 				'synopsis'  => [
@@ -187,8 +193,30 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator delete-terms-assigned-to-max-posts',
+			self::get_command_closure( 'cmd_delete_terms_assigned_to_max_posts' ),
+			[
+				'shortdesc' => 'Will delete terms that are assigned to X or less posts.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'taxonomy',
+						'description' => 'The taxonomy to delete from. Eg. "post_tag" for tags.',
+						'optional'    => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'max-posts-assigned',
+						'description' => 'Any term assigned to equal or fewer posts than this number will be deleted',
+						'optional'    => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator merge-terms',
-			[ $this, 'merge_terms_driver' ],
+			self::get_command_closure( 'merge_terms_driver' ),
 			[
 				'shortdesc' => 'Will merge any two terms into one record.',
 				'synopsis'  => [
@@ -242,7 +270,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		WP_CLI::add_command(
 			'newspack-content-migrator move-category-tree',
-			[ $this, 'cmd_move_category_tree' ],
+			self::get_command_closure( 'cmd_move_category_tree' ),
 			[
 				'shortdesc' => 'Will take a category tree (any Category, either root category or some child category, together with its child categories) and completely move it under a different parent. Any content belonging to categories in that tree get updated.',
 				'synopsis'  => [
@@ -265,11 +293,18 @@ class TaxonomyMigrator implements InterfaceCommand {
 		);
 
 		WP_CLI::add_command(
-			'newspack-content-migrator move-content-from-one-category-to-another',
-			[ $this, 'cmd_move_content_from_one_category_to_another' ],
+			'newspack-content-migrator move-content-from-one-term-to-another',
+			self::get_command_closure( 'cmd_move_content_from_one_term_to_another' ),
 			[
-				'shortdesc' => 'Moves all content from one category to a different one.',
+				'shortdesc' => 'Moves all content from one term to a different one on the same taxonomy.',
 				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'taxonomy',
+						'description' => 'Taxonomy.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 					[
 						'type'        => 'assoc',
 						'name'        => 'source-term-id',
@@ -282,6 +317,78 @@ class TaxonomyMigrator implements InterfaceCommand {
 						'name'        => 'destination-term-id',
 						'description' => 'term_id of destination category.',
 						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator split-duplicate-term-slugs',
+			self::get_command_closure( 'cmd_split_duplicate_term_slugs' ),
+			[
+				'shortdesc' => 'Splits duplicate term slugs into separate terms.',
+				'synopsis'  => [
+					[
+						'type'        => 'flag',
+						'name'        => 'display',
+						'description' => 'Display the terms that will be split only. No further execution nor changes will be made.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'interactive',
+						'description' => 'Ask for confirmation before proceeding with any change.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'flag',
+						'name'        => 'show-taxonomies',
+						'description' => 'Show the taxonomies for each term.',
+						'optional'    => true,
+						'repeating'   => false,
+						'default'     => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator set-posts-primary-category',
+			self::get_command_closure( 'cmd_set_posts_primary_category' ),
+			[
+				'shortdesc' => 'Set specified posts primary category.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'primary-categry-id',
+						'description' => 'term_id of primary category.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-ids',
+						'description' => 'CSV post/page IDs to set their primary categories.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'posts-per-batch',
+						'description' => 'Posts per batch, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => -1,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'batch',
+						'description' => 'Batch number, if we\'re planning to run this in batches.',
+						'optional'    => true,
+						'default'     => 1,
 						'repeating'   => false,
 					],
 				],
@@ -325,35 +432,99 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
-	 * Callable for `newspack-content-migrator move-content-from-one-category-to-another`.
+	 * Callable for `newspack-content-migrator move-content-from-one-term-to-another`.
 	 *
 	 * @param array $pos_args   Positional arguments.
 	 * @param array $assoc_args Associative arguments.
 	 *
 	 * @return void
 	 */
-	public function cmd_move_content_from_one_category_to_another( $pos_args, $assoc_args ) {
+	public function cmd_move_content_from_one_term_to_another( $pos_args, $assoc_args ) {
 		$source_term_id      = $assoc_args['source-term-id'];
 		$destination_term_id = $assoc_args['destination-term-id'];
+		$taxonomy            = $assoc_args['taxonomy'] ?? 'category';
 
 		// Check IDs.
-		$source_category      = get_category( $source_term_id );
-		$destination_category = get_category( $destination_term_id );
-		if ( is_null( $source_category ) ) {
-			WP_CLI::error( 'Wrong source category ID.' );
+		$source_term      = get_term( $source_term_id, $taxonomy );
+		$destination_term = get_term( $destination_term_id, $taxonomy );
+		if ( ! $source_term instanceof \WP_Term ) {
+			WP_CLI::error( 'Wrong source term ID.' );
 		}
-		if ( is_null( $destination_category ) ) {
-			WP_CLI::error( 'Wrong destination category ID.' );
+		if ( ! $destination_term instanceof \WP_Term ) {
+			WP_CLI::error( 'Wrong destination term ID.' );
 		}
 		if ( $source_term_id == $destination_term_id ) {
 			WP_CLI::error( 'Source and destination categories are the same. No changes made.' );
 		}
 
-
-		$this->taxonomy_logic->reassign_all_content_from_one_category_to_another( $source_term_id, $destination_term_id );
+		$this->taxonomy_logic->reassign_all_content_from_one_taxonomy_to_another( $taxonomy, $source_term_id, $destination_term_id );
 
 		// Update category count.
 		$this->update_counts_for_taxonomies( $this->get_unsynced_taxonomy_rows() );
+
+		wp_cache_flush();
+		WP_CLI::success( "Successfully moved posts from $taxonomy $source_term_id to $destination_term_id" );
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator set-posts-primary-category`.
+	 *
+	 * @param array $pos_args   Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 */
+	public function cmd_set_posts_primary_category( $pos_args, $assoc_args ) {
+		$primary_categry_id = $assoc_args['primary-categry-id'];
+		$post_ids_csv       = isset( $assoc_args['post-ids'] ) ? explode( ',', $assoc_args['post-ids'] ) : null;
+		$posts_per_batch    = $assoc_args['posts-per-batch'] ?? 1000;
+		$batch              = $assoc_args['batch'] ?? 1;
+
+		// Check Primary category existance.
+		$primary_categry = get_category( $primary_categry_id );
+		if ( is_null( $primary_categry ) ) {
+			WP_CLI::error( 'Wrong main category ID.' );
+		}
+
+		if ( ! $post_ids_csv ) {
+			WP_CLI::confirm( sprintf( 'This will set "%s" as primary category to all the published posts, are you sure?', $primary_categry->name ) );
+		}
+
+		$query_base = [
+			'post_type'     => 'post',
+			'post_status'   => 'any',
+			'fields'        => 'ids',
+			'no_found_rows' => true,
+		];
+
+		if ( $post_ids_csv ) {
+			$query_base['post__in'] = $post_ids_csv;
+		}
+
+		$total_query = new \WP_Query( array_merge( $query_base, [ 'posts_per_page' => -1 ] ) );
+
+		WP_CLI::warning( sprintf( 'Total posts: %d', count( $total_query->posts ) ) );
+
+		$query = new \WP_Query(
+			array_merge(
+				$query_base,
+				[
+					'paged'          => $batch,
+					'posts_per_page' => $posts_per_batch,
+				]
+			)
+		);
+
+		$posts = $query->get_posts();
+
+		foreach ( $posts as $post_id ) {
+			$post_categories = wp_get_post_categories( $post_id );
+			if ( ! in_array( $primary_categry_id, $post_categories ) ) {
+				WP_CLI::warning( sprintf( "Can't set '%s' as primary category for the post #%d, it needs to be set as a category to the post first.", $primary_categry->name, $post_id ) );
+				continue;
+			}
+			update_post_meta( $post_id, '_yoast_wpseo_primary_category', $primary_categry_id );
+		}
 
 		wp_cache_flush();
 		WP_CLI::success( 'Done.' );
@@ -362,8 +533,8 @@ class TaxonomyMigrator implements InterfaceCommand {
 	/**
 	 * Callable for terms-with-taxonomy-to-categories command.
 	 *
-	 * @param $args
-	 * @param $assoc_args
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_terms_with_taxonomy_to_categories( $args, $assoc_args ) {
 		$taxonomy = isset( $assoc_args['taxonomy'] ) ? $assoc_args['taxonomy'] : null;
@@ -372,18 +543,31 @@ class TaxonomyMigrator implements InterfaceCommand {
 		}
 
 		$create_parent_category = isset( $assoc_args['create-parent-category'] ) ? true : false;
+		$parent_category_id     = isset( $assoc_args['parent-category-id'] ) ? intval( $assoc_args['parent-category-id'] ) : 0;
+		$delete_old_terms       = isset( $assoc_args['delete-old-terms'] );
+		$replace_uncategorized  = isset( $assoc_args['replace-uncategorized'] );
+
+		// Validate that both parent options are not used together.
+		if ( $create_parent_category && $parent_category_id > 0 ) {
+			WP_CLI::error( 'Cannot use both --create-parent-category and --parent-category-id parameters together.' );
+		}
 
 		$term_ids_for_conversion = isset( $assoc_args['term_ids'] ) ? explode( ',', $assoc_args['term_ids'] ) : [];
 
 		WP_CLI::line( sprintf( 'Converting Terms with Taxonomy %s to Categories...', $taxonomy ) );
 
-		// Create Parent Category if so specified.
+		// Create Parent Category if so specified, or get existing parent category.
 		$parent_category = null;
 		if ( $create_parent_category ) {
 			$parent_category = $this->create_category_from_taxonomy( $taxonomy );
 			if ( is_wp_error( $parent_category ) || null === $parent_category ) {
 				$err_msg = is_wp_error( $parent_category ) ? $parent_category->get_error_message() : 'null';
 				WP_CLI::error( sprintf( 'Error creating Category from Taxonomy %s: %s', $taxonomy, $err_msg ) );
+			}
+		} elseif ( $parent_category_id > 0 ) {
+			$parent_category = get_category( $parent_category_id );
+			if ( ! $parent_category ) {
+				WP_CLI::error( sprintf( 'Parent category with ID %d not found.', $parent_category_id ) );
 			}
 		}
 
@@ -405,6 +589,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			exit;
 		}
 
+		$converted_terms = [];
 		foreach ( $terms as $term ) {
 			// If `term_ids` argument is provided, only convert those Terms.
 			if ( ! empty( $term_ids_for_conversion ) && ! in_array( $term->term_id, $term_ids_for_conversion ) ) {
@@ -427,8 +612,34 @@ class TaxonomyMigrator implements InterfaceCommand {
 			// Add Category to post objects.
 			WP_CLI::line( sprintf( "Adding Category '%s' to all post objects...", $category->name ) );
 			foreach ( $posts as $post ) {
+				if ( $replace_uncategorized ) {
+					$post_categories = wp_get_post_categories( $post->ID );
+					if ( count( $post_categories ) === 1 && in_array( 1, $post_categories ) ) { // 1 is the ID of uncategorized
+						// Remove uncategorized and set only the new category
+						wp_set_post_terms( $post->ID, [ $category->term_id ], 'category', false );
+						WP_CLI::line( sprintf( "Replaced 'uncategorized' with '%s' for post ID %d.", $category->name, $post->ID ) );
+						continue;
+					}
+				}
+
+				// Add the new category while keeping existing ones.
 				wp_set_post_terms( $post->ID, [ $category->term_id ], 'category', true );
 				WP_CLI::line( sprintf( "Updated ID %d with Category '%s.'", $post->ID, $category->name ) );
+			}
+
+			$converted_terms[] = $term;
+		}
+
+		// Delete old terms if requested.
+		if ( $delete_old_terms && ! empty( $converted_terms ) ) {
+			WP_CLI::line( 'Deleting old taxonomy terms...' );
+			foreach ( $converted_terms as $term ) {
+				$result = wp_delete_term( $term->term_id, $taxonomy );
+				if ( is_wp_error( $result ) ) {
+					WP_CLI::warning( sprintf( "Failed to delete term '%s': %s", $term->name, $result->get_error_message() ) );
+				} else {
+					WP_CLI::line( sprintf( "Deleted term '%s'", $term->name ) );
+				}
 			}
 		}
 
@@ -508,7 +719,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @param array $assoc_args WP CLI Optional arguments.
 	 */
 	public function cmd_fix_category_and_tag_count( $args, $assoc_args ) {
-
 		$dry_run = $assoc_args['dry-run'] ?? null;
 
 		if ( ! $dry_run ) {
@@ -527,7 +737,6 @@ class TaxonomyMigrator implements InterfaceCommand {
 	 * @param array $assoc_args Associative arguments.
 	 */
 	public function cmd_fix_taxonomy_count( $pos_args, $assoc_args ) {
-
 		$dry_run    = $assoc_args['dry-run'] ?? null;
 		$taxonomies = explode( ',', $assoc_args['taxonomies-csv'] ) ?? null;
 
@@ -558,6 +767,41 @@ class TaxonomyMigrator implements InterfaceCommand {
 		}
 
 		$progress_bar->finish();
+	}
+
+	/**
+	 * Deletes terms that are assigned to X or fewer posts.
+	 *
+	 * @param array $pos_args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws \Exception If anything goes wrong.
+	 */
+	public function cmd_delete_terms_assigned_to_max_posts( array $pos_args, array $assoc_args ): void {
+		$max_assigned_to_posts = $assoc_args['max-posts-assigned'];
+		$taxonomy              = $assoc_args['taxonomy'];
+		if ( ! is_numeric( $max_assigned_to_posts ) || $max_assigned_to_posts < 0 ) {
+			// phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+			wp_die( sprintf( 'Argument "max-posts-assigned" (%s) is not a number or is negative', $max_assigned_to_posts ) );
+		}
+
+		try {
+			$terms = $this->taxonomy_logic->get_terms_assigned_to_max_num_posts( $taxonomy, $max_assigned_to_posts );
+		} catch ( InvalidArgumentException $e ) {
+			wp_die( esc_html( $e->getMessage() ) );
+		}
+
+		$cli_log            = CliLog::get_logger( __FUNCTION__ . ':' . $taxonomy );
+		$plain_file_loggger = PlainFileLog::get_logger( 'delete-terms', sprintf( 'deleted-%s-ids.log', $taxonomy ) );
+
+		$term_count = count( $terms );
+		$cli_log->info( sprintf( 'Found %d terms to delete:', $term_count ) );
+		foreach ( $terms as $idx => $term_id ) {
+			wp_delete_term( $term_id, $taxonomy );
+			$cli_log->info( sprintf( '(%d of %d) deleted term ID %d', ++$idx, $term_count, $term_id ) );
+			$plain_file_loggger->info( $term_id );
+		}
 	}
 
 	/**
@@ -596,11 +840,11 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		$results = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT 
-       				term_taxonomy_id, 
-       				term_id 
-				FROM $wpdb->term_taxonomy 
-				WHERE taxonomy = 'post_tag' 
+				"SELECT
+       				term_taxonomy_id,
+       				term_id
+				FROM $wpdb->term_taxonomy
+				WHERE taxonomy = 'post_tag'
 				  AND count <= %d",
 				$tag_limit
 			)
@@ -611,7 +855,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		$term_taxonomy_count = 0;
 		foreach ( $results as $row ) {
-			$term_taxonomy_count ++;
+			++$term_taxonomy_count;
 			$term_taxonomy_ids[] = $row->term_taxonomy_id;
 			$term_ids[]          = $row->term_id;
 		}
@@ -631,14 +875,14 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			$term_ids           = implode( ',', $term_ids );
 			$affected_term_rows = $wpdb->get_results(
-				"SELECT 
-                    t.term_id, 
+				"SELECT
+                    t.term_id,
                     COUNT(tt.term_taxonomy_id) as counter
-				FROM $wpdb->terms t 
-				    LEFT JOIN $wpdb->term_taxonomy tt 
-				        ON t.term_id = tt.term_id 
-				WHERE t.term_id IN ($term_ids) 
-				GROUP BY t.term_id 
+				FROM $wpdb->terms t
+				    LEFT JOIN $wpdb->term_taxonomy tt
+				        ON t.term_id = tt.term_id
+				WHERE t.term_id IN ($term_ids)
+				GROUP BY t.term_id
 				HAVING counter = 0"
 			);
 
@@ -674,25 +918,25 @@ class TaxonomyMigrator implements InterfaceCommand {
 		global $wpdb;
 
 		return $wpdb->get_results(
-			"SELECT 
-	            tt.term_taxonomy_id, 
+			"SELECT
+	            tt.term_taxonomy_id,
        			t.term_id,
        			t.name,
        			t.slug,
        			tt.taxonomy,
-	            tt.count, 
-	            sub.counter 
+	            tt.count,
+	            sub.counter
 			FROM $wpdb->term_taxonomy tt LEFT JOIN (
-			    SELECT 
-			           term_taxonomy_id, 
-			           COUNT(object_id) as counter 
-			    FROM $wpdb->term_relationships 
+			    SELECT
+			           term_taxonomy_id,
+			           COUNT(object_id) as counter
+			    FROM $wpdb->term_relationships
 			    GROUP BY term_taxonomy_id
-			    ) as sub 
-			ON tt.term_taxonomy_id = sub.term_taxonomy_id 
+			    ) as sub
+			ON tt.term_taxonomy_id = sub.term_taxonomy_id
 			LEFT JOIN $wpdb->terms t ON t.term_id = tt.term_id
-			WHERE sub.counter IS NOT NULL 
-			  AND tt.count <> sub.counter 
+			WHERE sub.counter IS NOT NULL
+			  AND tt.count <> sub.counter
 			  AND tt.taxonomy IN ('category', 'post_tag')"
 		);
 	}
@@ -749,7 +993,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$catarr = array(
 				'cat_name'             => $term->name,
 				'category_nicename'    => $term->slug,
-				'category_description' => $term->description,
+				'category_description' => wp_strip_all_tags( strip_shortcodes( $term->description ) ),
 			);
 			if ( $parent_category ) {
 				$catarr['category_parent'] = $parent_category->term_id;
@@ -789,6 +1033,188 @@ class TaxonomyMigrator implements InterfaceCommand {
 	}
 
 	/**
+	 * Main driver command for handling terms with duplicate slugs.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_split_duplicate_term_slugs( array $args, array $assoc_args ) {
+		// Create query for all duplicate term slugs
+		// If any exist, they must be split, one by one, for however many times they are duplicate - 1.
+
+		$duplicate_slugs = $this->taxonomy_logic->get_duplicate_term_slugs();
+
+		if ( ! $duplicate_slugs ) {
+			WP_CLI::success( 'No duplicate term slugs found.' );
+
+			return;
+		}
+
+		$assoc_args['show-taxonomies'] = $assoc_args['show-taxonomies'] ?? false;
+
+		if ( isset( $assoc_args['display'] ) && $assoc_args['display'] ) {
+			$duplicate_slugs = $this->show_taxonomies_column( $duplicate_slugs, $assoc_args['show-taxonomies'] ?? false );
+
+			WP_CLI\Utils\format_items( 'table', $duplicate_slugs, array_keys( (array) $duplicate_slugs[0] ) );
+			return;
+		}
+
+		$interactive = $assoc_args['interactive'] ?? false;
+		$response    = 'a';
+		foreach ( $duplicate_slugs as $duplicate_slug ) {
+			// If a duplicate slug has term_id_count > 1, then it has multiple terms with the same slug.
+			// In this case, a simple renaming of other slugs will work.
+			// If a duplicate slug has term_id_count == 1, then it has multiple term_taxonomy_ids with the same slug.
+			// In this case, we need to split the term_taxonomy_id into a new term.
+
+			$taxonomies = '';
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$taxonomies = $duplicate_slug->taxonomies;
+				unset( $duplicate_slug->taxonomies );
+			}
+
+			WP_CLI\Utils\format_items( 'table', [ $duplicate_slug ], array_keys( (array) $duplicate_slug ) );
+
+			if ( isset( $assoc_args['show-taxonomies'] ) && ! $assoc_args['show-taxonomies'] ) {
+				$duplicate_slug->taxonomies = $taxonomies;
+			}
+
+			$duplicate_slug->taxonomies = explode( ', ', $duplicate_slug->taxonomies );
+
+			if ( $interactive ) {
+				$terms = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+
+				WP_CLI\Utils\format_items( 'table', $terms, array_keys( (array) $terms[0] ) );
+
+				$option = $duplicate_slug->term_id_count > 1 ? 're(n)ame slug' : 's(p)lit term and rename slug';
+
+				$response = $this->ask_prompt( "What would you like to do with this slug? $option, (s)kip, return to (a)uto, or (q)uit?" );
+			}
+
+			if ( 's' === $response ) {
+				$this->output( 'Skipping...' );
+				continue;
+			}
+
+			if ( 'q' === $response ) {
+				$this->output( 'Quitting...' );
+				return;
+			}
+
+			if ( 'a' === $response ) {
+				$interactive = false;
+			}
+
+			if ( ! in_array( $response, [ 'n', 'p', 'a' ], true ) ) {
+				$this->output( 'Invalid response. Skipping...' );
+				continue;
+			}
+
+			if ( $duplicate_slug->term_id_count > 1 ) {
+				// Multiple terms with the same slug.
+				// Rename all other slugs to be unique.
+				$this->output( 'Renaming duplicate term slugs...' );
+				$this->rename_duplicate_term_slugs( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+			} else {
+				// Multiple term_taxonomy_ids with the same slug.
+				// Split the term_taxonomy_id into a new term.
+				$this->output( 'Splitting term...' );
+				$this->split_duplicate_term_slug( $duplicate_slug->slug, $duplicate_slug->taxonomies );
+			}
+		}
+	}
+
+	/**
+	 * Function to rename a duplicate term slug into a new term.
+	 *
+	 * @param string $slug The slug to split.
+	 * @param array  $taxonomies The taxonomy of the slug.
+	 */
+	public function rename_duplicate_term_slugs( string $slug, array $taxonomies ) {
+		// Get all terms with the same slug.
+		$terms = get_terms(
+			[
+				'taxonomy'   => $taxonomies,
+				'hide_empty' => false,
+				'slug'       => $slug,
+			]
+		);
+
+		array_shift( $terms ); // Remove the first term, which will remain the original slug.
+
+		// Rename all terms with the same slug.
+		foreach ( $terms as $key => $term ) {
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $term->slug, $key + 1 );
+
+			wp_update_term( $term->term_id, $term->taxonomy, [ 'slug' => $new_slug ] );
+		}
+	}
+
+	/**
+	 * Function to split a duplicate term slug into a new term.
+	 *
+	 * @param string $slug The slug to split.
+	 * @param array  $taxonomies The taxonomy of the slug.
+	 */
+	public function split_duplicate_term_slug( string $slug, array $taxonomies ) {
+		$taxonomic_records = $this->taxonomy_logic->get_terms_and_taxonomies_by_slug( $slug, $taxonomies );
+
+		// Get the first term_taxonomy_id, which will remain the original slug.
+		array_shift( $taxonomic_records );
+
+		global $wpdb;
+
+		// Split all other term_taxonomy_ids into new terms.
+		foreach ( $taxonomic_records as $key => $taxonomy ) {
+			$new_slug = $this->taxonomy_logic->get_new_term_slug( $taxonomy->slug, $key + 1 );
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+			$result = $wpdb->insert(
+				$wpdb->terms,
+				[
+					'name'       => $taxonomy->name,
+					'slug'       => $new_slug,
+					'term_group' => 0,
+				]
+			);
+
+			if ( is_int( $result ) ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$new_term_id = $wpdb->get_var(
+					$wpdb->prepare(
+						"SELECT term_id FROM $wpdb->terms WHERE slug = %s",
+						$new_slug
+					)
+				);
+
+				if ( ! is_numeric( $new_term_id ) ) {
+					WP_CLI::error( 'Could not get new term_id.' );
+					return;
+				}
+
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->term_taxonomy,
+					[
+						'term_id' => $new_term_id,
+					],
+					[
+						'term_taxonomy_id' => $taxonomy->term_taxonomy_id,
+					]
+				);
+
+				// Duplicate term meta records.
+				$term_meta = get_term_meta( $taxonomy->term_id );
+				foreach ( $term_meta as $meta_key => $meta_value ) {
+					foreach ( $meta_value as $value ) {
+						add_term_meta( $new_term_id, $meta_key, $value );
+					}
+				}
+			}
+		}
+	}
+
+	/**
 	 * Function to merge wp_term_relationships records.
 	 *
 	 * @param int $main_term_taxonomy_id Main term_taxonomy_id to merge relationship records into.
@@ -811,7 +1237,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 		if ( ! empty( $dupes ) ) {
 			$object_ids = array_map(
-				function( $dupe ) {
+				function ( $dupe ) {
 					return $dupe->object_id;
 				},
 				$dupes
@@ -912,9 +1338,15 @@ class TaxonomyMigrator implements InterfaceCommand {
 			}
 
 			WP_CLI::line( "Adding count: $taxonomy_record->count to main count: $first_taxonomy_record->count" );
-			$update_count_sql = "UPDATE $wpdb->term_taxonomy SET count = count + $taxonomy_record->count WHERE term_taxonomy_id = $first_taxonomy_record->term_taxonomy_id";
-			$this->output_sql( $update_count_sql );
-			$update_count = $wpdb->query( $update_count_sql );
+			$update_count = $wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'count' => $first_taxonomy_record->count + $taxonomy_record->count,
+				],
+				[
+					'term_taxonomy_id' => $first_taxonomy_record->term_taxonomy_id,
+				]
+			);
 
 			if ( false !== $update_count ) {
 				$this->output( 'Count updated.', '%C' );
@@ -978,10 +1410,10 @@ class TaxonomyMigrator implements InterfaceCommand {
 	public function delete_loose_terms( array $term_ids = [] ) {
 		global $wpdb;
 		$imploded_term_ids  = implode( ', ', $term_ids );
-		$loose_term_ids_sql = "SELECT * FROM $wpdb->terms t 
-    		LEFT JOIN $wpdb->term_taxonomy wtt on t.term_id = wtt.term_id 
-			WHERE t.term_id IN ($imploded_term_ids) AND wtt.term_taxonomy_id IS NULL";
-		$this->output_sql( $imploded_term_ids );
+		$loose_term_ids_sql = "SELECT t.term_id, wtt.term_taxonomy_id FROM $wpdb->terms t
+    		LEFT JOIN $wpdb->term_taxonomy wtt on t.term_id = wtt.term_id
+			WHERE t.term_id IN ( $imploded_term_ids ) AND wtt.term_taxonomy_id IS NULL";
+		$this->output_sql( $loose_term_ids_sql );
 		$loose_term_ids = $wpdb->get_results( $loose_term_ids_sql );
 
 		if ( ! empty( $loose_term_ids ) ) {
@@ -989,12 +1421,18 @@ class TaxonomyMigrator implements InterfaceCommand {
 
 			$this->output( 'Deleting loose term_ids: ' . implode( ', ', $loose_term_ids ) );
 			foreach ( $loose_term_ids as $loose_term_id ) {
-				$wpdb->delete(
+				$result = $wpdb->delete(
 					$wpdb->terms,
 					[
 						'term_id' => $loose_term_id,
 					]
 				);
+
+				if ( ! $result ) {
+					$this->output( "Unable to delete term_id: $loose_term_id" );
+				} else {
+					$this->output( "Deleted term_id: $loose_term_id" );
+				}
 			}
 		}
 	}
@@ -1179,7 +1617,7 @@ class TaxonomyMigrator implements InterfaceCommand {
 		$this->setup();
 
 		$main_term_id       = intval( $assoc_args['main-term-id'] );
-		$other_term_ids     = intval( $assoc_args['other-term-ids'] );
+		$other_term_ids     = $assoc_args['other-term-ids'];
 		$include_taxonomies = $assoc_args['include-taxonomies'] ?? [];
 		$exclude_taxonomies = $assoc_args['exclude-taxonomies'] ?? [];
 		$new_taxonomy       = $assoc_args['new-taxonomy'];
@@ -1193,8 +1631,9 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$exclude_taxonomies = explode( ',', $exclude_taxonomies );
 		}
 
-		if ( ! is_array( $other_term_ids ) ) {
-			$other_term_ids = [ $other_term_ids ];
+		if ( ! empty( $other_term_ids ) ) {
+			$other_term_ids = explode( ',', $other_term_ids );
+			$other_term_ids = array_map( fn( $other_term_id ) => intval( $other_term_id ), $other_term_ids );
 		}
 
 		$this->merge_terms(
@@ -1204,6 +1643,28 @@ class TaxonomyMigrator implements InterfaceCommand {
 			$exclude_taxonomies,
 			$new_taxonomy,
 			$parent_term_id
+		);
+	}
+
+	/**
+	 * Convenience function to remove $taxonomies property from $duplicate_slugs array.
+	 *
+	 * @param array $duplicate_slugs Array of taxonomic records with duplicate slugs.
+	 * @param bool  $show_taxonomies_column Boolean flag to show taxonomies column.
+	 *
+	 * @returns array
+	 * */
+	private function show_taxonomies_column( array $duplicate_slugs, bool $show_taxonomies_column = false ) {
+		if ( $show_taxonomies_column ) {
+			return $duplicate_slugs;
+		}
+
+		return array_map(
+			function ( $duplicate_slug ) {
+				unset( $duplicate_slug->taxonomies );
+				return $duplicate_slug;
+			},
+			$duplicate_slugs
 		);
 	}
 

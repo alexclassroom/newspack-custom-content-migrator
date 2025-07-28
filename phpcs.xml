@@ -7,11 +7,14 @@
 	<rule ref="WordPress-VIP-Go" />
 
 	<rule ref="WordPress">
-		<exclude name="Generic.Arrays.DisallowShortArraySyntax.Found" />
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax.Found" />
+		<exclude name="WordPress.Files.FileName.NotHyphenatedLowercase" />
+		<exclude name="WordPress.Files.FileName.InvalidClassFileName" />
+		<exclude name="Squiz.Commenting.ClassComment.Missing" />
 	</rule>
 
 	<rule ref="PHPCompatibilityWP"/>
-	<config name="testVersion" value="7.4"/>
+	<config name="testVersion" value="8.3"/>
 
 	<arg name="extensions" value="php"/>
 
@@ -19,7 +22,7 @@
 	<arg value="s"/>
 
 	<!-- Allow invoking just `phpcs` on command line without assuming STDIN for file input. -->
-	<file>.</file>
+	<file>src</file>
+	<file>tests</file>
 
-	<exclude-pattern>*/vendor/*</exclude-pattern>
 </ruleset>
