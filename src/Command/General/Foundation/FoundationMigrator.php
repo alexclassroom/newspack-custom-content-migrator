@@ -1826,7 +1826,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		// Migrate Issues to Collections.
 		foreach ( $raw_issues as $index => $issue ) {
 			// Flush memory every 50 steps, with 1 seconds of sleeping time.
-			MemoryCleanupHook::cleanup( 1, $index, 50 );
+			MemoryCleanupHook::cleanup( 3, $index, 50 );
 
 			if ( $index < ( $issue_start_from - 1 ) || ( $issue_end_at > 0 && $index >= $issue_end_at ) ) {
 				continue;
@@ -2017,6 +2017,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$csv_writer->close();
 
 		$logger->info( '🟢 Completed Issues Migration' );
+
+		wp_cache_flush();
 
 		$logger->info( '🟢 Start Posts association with Collections' );
 
