@@ -24,6 +24,7 @@ use Newspack\MigrationTools\Util\CsvIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
 use Newspack\MigrationTools\Util\CsvWriter;
 use Newspack\MigrationTools\Util\CustomRedirectGenerator;
+use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use WP_CLI;
 
 class FoundationMigrator implements RegisterCommandInterface {
@@ -974,6 +975,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$skipped_posts  = [];
 
 		foreach ( $raw_posts as $index => $post ) {
+
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
