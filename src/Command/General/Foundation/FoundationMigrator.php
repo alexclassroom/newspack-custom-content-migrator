@@ -2415,7 +2415,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	/**
 	 * Migrate images tray and featured image.
 	 *
-	 * The featured image is the image with "Teaser" placement, if not it's the one with "Magnum" placement. The "first" image is also the default Teaser if a Teaser isn't set.
+	 * The featured image is the image with "Magnum" placement, if not it's the one with "Teaser" placement. The "first" image is also the default Teaser if a Teaser isn't set.
 	 *
 	 * @param int    $post_id      Post ID.
 	 * @param array  $post_image_oids  Post image OIDs.
@@ -2504,10 +2504,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		// Set the featured image.
-		if ( ! empty( $possible_teaser_image_ids ) ) {
-			set_post_thumbnail( $post_id, $possible_teaser_image_ids[0] );
-		} elseif ( ! empty( $possible_magnum_image_ids ) ) {
+		if ( ! empty( $possible_magnum_image_ids ) ) {
 			set_post_thumbnail( $post_id, $possible_magnum_image_ids[0] );
+		} elseif ( ! empty( $possible_teaser_image_ids ) ) {
+			set_post_thumbnail( $post_id, $possible_teaser_image_ids[0] );
 		} elseif ( ! empty( $migrated_images ) ) {
 			$first_image = current( $migrated_images );
 			set_post_thumbnail( $post_id, $first_image['attachment_id'] );
