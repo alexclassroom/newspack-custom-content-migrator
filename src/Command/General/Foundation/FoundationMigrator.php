@@ -1354,6 +1354,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$release_date  = new \DateTime( $slideshow->releaseDate );
 			$last_modified = new \DateTime( $slideshow->lastModified );
 
+			$tags   = $slideshow->tags ?? [];
+			$tags[] = 'Slideshow Gallery';
+
 			$post_data = [
 				'post_type'         => 'post',
 				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $slideshow->title ) ),
@@ -1365,7 +1368,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				'post_modified_gmt' => $last_modified->setTimezone( new \DateTimeZone( 'UTC' ) )->format( 'Y-m-d H:i:s' ),
 				'post_content'      => $slideshow->description,
 				'post_category'     => $slideshow_categories,
-				'tags_input'        => $slideshow->tags ?? [],
+				'tags_input'        => $tags,
 				'comment_status'    => 'members only' === $slideshow->commentStatus ? 'open' : 'close',
 			];
 
@@ -2589,22 +2592,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
 
-				$crop_coords             = null;
-				$raw_image['cropCoords'] = 'blog: 0,600 1597,1664';
-				if ( isset( $raw_image['cropCoords'] ) && ! empty( $raw_image['cropCoords'] ) ) {
-					// cropCoords is in the format of "blog: 0,600 1597,1664".
-					preg_match( '/blog: (\d+),(\d+) (\d+),(\d+)/', $raw_image['cropCoords'], $crop_coords_matches );
-					if ( ! empty( $crop_coords_matches ) ) {
-						$crop_coords = [
-							'x'      => intval( $crop_coords_matches[1] ),
-							'y'      => intval( $crop_coords_matches[2] ),
-							'width'  => intval( $crop_coords_matches[3] ) - intval( $crop_coords_matches[1] ),
-							'height' => intval( $crop_coords_matches[4] ) - intval( $crop_coords_matches[2] ),
-						];
-					}
-				}
-
-				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false, $crop_coords ) );
+				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false ) );
 				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
 
 				return $replacement;
@@ -2650,7 +2638,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 					$logger->warning( sprintf( 'Pullquote %d not found in post pullquotes for post %s', (int) $matches[1], $post_oid ) );
 					return $matches[0];
 				}
-				return serialize_block( $this->gutenberg_block_generator->get_quote( $post_pullquotes[ $pullquote_index ] ) );
+				$quote = str_replace( '<span>', '', $post_pullquotes[ $pullquote_index ] );
+				return serialize_block( $this->gutenberg_block_generator->get_quote( $quote ) );
 			},
 			$content
 		);

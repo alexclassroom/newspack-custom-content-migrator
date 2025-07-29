@@ -384,10 +384,15 @@ class FoundationFixes implements RegisterCommandInterface {
 				continue;
 			}
 
-			foreach ( $post->imageLinks as $post_image_oid ) {
-				$possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $image_json_file, 'oid', $post_image_oid ) );
+			$all_possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $image_json_file, 'oid', $post->imageLinks ) );
 
-				$raw_image = null;
+			foreach ( $post->imageLinks as $post_image_oid ) {
+				$possible_raw_images = array_filter(
+					$all_possible_raw_images,
+					function ( $raw_image ) use ( $post_image_oid ) {
+						return $raw_image->oid === $post_image_oid;
+					}
+				);
 
 				if ( 1 === count( $possible_raw_images ) ) {
 					$raw_image = $possible_raw_images[0];
