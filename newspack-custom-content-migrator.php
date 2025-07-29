@@ -92,6 +92,7 @@ PluginSetup::register_command_classes(
 		Command\General\Foundation\FoundationMigrator::class,
 		Command\General\Foundation\FoundationDataValidation::class,
 		Command\General\Foundation\FoundationFixes::class,
+		Command\PublisherSpecific\NewPinePlainsHeraldMigrator::class,
 	]
 );
 
