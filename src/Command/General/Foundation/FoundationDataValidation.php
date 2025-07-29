@@ -149,6 +149,13 @@ class FoundationDataValidation implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'issue-json-file',
+						'description' => 'Path to the JSON file containing the issues (e.g. `Issue.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -241,12 +248,14 @@ class FoundationDataValidation implements RegisterCommandInterface {
 		$page_json_file      = $assoc_args['page-json-file'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
 		$comment_json_file   = $assoc_args['comment-json-file'];
+		$issue_json_file     = $assoc_args['issue-json-file'];
 
 		$posts      = $this->json_iterator->count_json_array_entries( $post_json_file );
 		$pages      = $this->json_iterator->count_json_array_entries( $page_json_file );
 		$slideshows = $this->json_iterator->count_json_array_entries( $slideshow_json_file );
 		$comments   = $this->json_iterator->count_json_array_entries( $comment_json_file );
+		$issues     = $this->json_iterator->count_json_array_entries( $issue_json_file );
 
-		$this->logger->info( sprintf( 'Found %d posts, %d pages, %d slideshows and %d comments.', $posts, $pages, $slideshows, $comments ) );
+		$this->logger->info( sprintf( 'Found %d posts, %d pages, %d issues, %d slideshows and %d comments.', $posts, $pages, $issues, $slideshows, $comments ) );
 	}
 }
