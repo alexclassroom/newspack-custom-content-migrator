@@ -1825,6 +1825,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		// Migrate Issues to Collections.
 		foreach ( $raw_issues as $index => $issue ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $issue_start_from - 1 ) || ( $issue_end_at > 0 && $index >= $issue_end_at ) ) {
 				continue;
 			}
@@ -1878,23 +1881,32 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			add_filter( 'intermediate_image_sizes_advanced', '__return_null' );
 
-			if ( ! empty( $issue->image ) ) {
-				$thumbnail_id = Attachments::import_external_file( $issue->image );
-			} else if ( ! empty( $issue->defaultImage ) ) {
-				$thumbnail_id = Attachments::import_external_file( $issue->defaultImage );
-			} else {
-				$thumbnail_id = null;
-			}
+			$image_option_keys = [
+				'image',
+				'defaultImage',
+			];
 
-			if ( is_wp_error( $thumbnail_id ) ) {
-				$logger->error( sprintf( 'Error importing thumbnail for collection %s: %s', $issue->oid, $thumbnail_id->get_error_message() ) );
+			$thumbnail_id = null;
 
-				$thumbnail_id = null;
+			// Add Collection image with fallback support.
+			foreach ( $image_option_keys as $image_option_key ) {
+				if ( ! empty( $issue->$image_option_key ) ) {
+					$thumbnail_id = Attachments::import_external_file( $issue->$image_option_key );
+
+					if ( is_wp_error( $thumbnail_id ) ) {
+						$logger->error( sprintf( 'Error importing image (%s) for collection %s: %s', $image_option_key, $issue->oid, $thumbnail_id->get_error_message() ) );
+
+						$thumbnail_id = null;
+					} else {
+						break;
+					}
+				}
 			}
 
 			$update_result = wp_update_post(
 				[
 					'ID'                => $collection_id,
+					'post_author'       => 0,
 					'post_title'        => $issue->title ?: $period,
 					'post_content'      => $issue->description,
 					'post_date'         => $issue_created_date->format( 'Y-m-d H:i:s' ),
@@ -1999,7 +2011,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				]
 			);
 
-			$logger->info( sprintf( '[%d] Migrated collection %d with ID %d', $index + 1, $issue->oid, $collection_id ) );
+			$logger->info( sprintf( '[Memory Usage: %s] [%d] Migrated collection %d with ID %d', size_format( memory_get_usage() ), $index + 1, $issue->oid, $collection_id ) );
 		}
 
 		$csv_writer->close();
@@ -2015,6 +2027,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 
 		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $post_start_from - 1 ) || ( $post_end_at > 0 && $index >= $post_end_at ) ) {
 				continue;
 			}
