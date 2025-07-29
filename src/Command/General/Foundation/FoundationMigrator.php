@@ -1867,7 +1867,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			add_filter( 'intermediate_image_sizes_advanced', '__return_null' );
 
-			$thumbnail_id = Attachments::import_external_file( $issue->image );
+			if ( ! empty( $issue->image ) ) {
+				$thumbnail_id = Attachments::import_external_file( $issue->image );
+			} else if ( ! empty( $issue->defaultImage ) ) {
+				$thumbnail_id = Attachments::import_external_file( $issue->defaultImage );
+			} else {
+				$thumbnail_id = null;
+			}
+
 			if ( is_wp_error( $thumbnail_id ) ) {
 				$logger->error( sprintf( 'Error importing thumbnail for collection %s: %s', $issue->oid, $thumbnail_id->get_error_message() ) );
 
@@ -1904,11 +1911,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 			);
 
 			$collection_metadata = [
-				'thumbnail_id' => $thumbnail_id,
-				'volume'       => $issue->volume,
-				'number'       => $issue->number,
-				'period'       => $period,
+				'volume' => $issue->volume,
+				'number' => $issue->number,
+				'period' => $period,
 			];
+
+			if ( ! empty( $thumbnail_id ) ) {
+				$collection_metadata['thumbnail_id'] = $thumbnail_id;
+			}
 
 			if ( ! empty( $issue->digitalEditionURL ) ) {
 				$collection_metadata['ctas'] = [
