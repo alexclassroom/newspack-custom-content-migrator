@@ -983,23 +983,23 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$collection_sections = $wpdb->get_results(
 			"SELECT
-				tm.term_id,
-				t.name,
-				t.slug,
-				ttfd.weight
+				`tm`.`term_id`,
+				`t`.`name`,
+				`t`.`slug`,
+				`ttfd`.`weight`
 			FROM
-				wp_termmeta tm
-				JOIN wp_terms t ON t.`term_id` = tm.term_id
-				JOIN taxonomy_term_field_data ttfd ON ttfd.`tid` = tm.meta_value
-				AND ttfd.vid = 'sections'
+				`$wpdb->termmeta` `tm`
+				JOIN `$wpdb->terms` `t` ON `t`.`term_id` = `tm`.`term_id`
+				JOIN `taxonomy_term_field_data` `ttfd` ON `ttfd`.`tid` = `tm`.`meta_value`
+				AND `ttfd`.`vid` = 'sections'
 			WHERE
-				tm.meta_key = '_fgd2wp_old_taxonomy_id'
+				`tm`.`meta_key` = '_fgd2wp_old_taxonomy_id'
 			ORDER BY
-				t.slug;"
+				`t`.`slug`;"
 		);
 
 		foreach ( $collection_sections as $collection_section ) {
-			$this->logger->info( '-- Collection Section Category ID: ' . $collection_section->term_id );
+			$this->logger->info( '[Memory Usage: ' . size_format( memory_get_usage( true ) ) . ']-- Collection Section Category ID: ' . $collection_section->term_id );
 	
 			$collection_section_wp_term = $this->collections_helper->get_or_create_collection_section( [
 				'name' => $collection_section->name,
@@ -1019,7 +1019,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					'post_type'        => 'post',
 					'post_status'      => 'any',
 					'suppress_filters' => true, // phpcs:ignore WordPressVIPMinimum.Performance.WPQueryParams.SuppressFilters_suppress_filters -- Suppress filters is needed here.
-					'category'         => $collection_section->term_id
+					'category'         => $collection_section->term_id,
+					'tax_query'        => [
+						[
+							'taxonomy' => $this->collections_helper->get_collection_section_taxonomy(),
+							'terms'    => [ $collection_section_wp_term->term_id ],
+							'operator' => 'NOT IN',
+						]
+					]
 				]
 			);
 
