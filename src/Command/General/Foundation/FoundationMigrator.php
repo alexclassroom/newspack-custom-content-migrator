@@ -2445,8 +2445,15 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$possible_teaser_image_ids = [];
 		$possible_magnum_image_ids = [];
 
+		$all_possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $raw_images_file, 'oid', $post_image_oids ) );
+
 		foreach ( $post_image_oids as $index => $post_image_oid ) {
-			$possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $raw_images_file, 'oid', $post_image_oid ) );
+			$possible_raw_images = array_filter(
+				$all_possible_raw_images,
+				function ( $raw_image ) use ( $post_image_oid ) {
+					return $raw_image->oid === $post_image_oid;
+				}
+			);
 
 			$raw_image = null;
 
