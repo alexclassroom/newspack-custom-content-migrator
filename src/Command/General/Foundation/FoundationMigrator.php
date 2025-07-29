@@ -1875,7 +1875,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			if ( ! empty( $issue->image ) ) {
 				$thumbnail_id = Attachments::import_external_file( $issue->image );
-			} else if ( ! empty( $issue->defaultImage ) ) {
+			} elseif ( ! empty( $issue->defaultImage ) ) {
 				$thumbnail_id = Attachments::import_external_file( $issue->defaultImage );
 			} else {
 				$thumbnail_id = null;
@@ -2776,8 +2776,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$marker_pattern = sprintf( '/\[%s-(\d+)\]/', $type );
 
 		// If the content contains [event-N]|[location-N] markers, we need to migrate the events or locations in their place.
-		// If not, we need to add a event or location block to the end of the content.
-		if ( ! preg_match( $marker_pattern, $content ) ) {
+		// If not, we need to add a event only (no location) block to the end of the content.
+		if ( ! preg_match( $marker_pattern, $content ) && 'event' === $type ) {
 			$content_blocks = [];
 			foreach ( $post_event_ids as $event_id ) {
 				$events_data = $this->get_events_or_locations_data( $type, $publisher_domain, $event_id );
