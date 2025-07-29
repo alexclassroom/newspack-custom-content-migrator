@@ -296,7 +296,9 @@ class MetroMigrator implements RegisterCommandInterface {
 			)
 		);
 
-		foreach ( $posts as $post ) {
+		foreach ( $posts as $key_post => $post ) {
+			WP_CLI::line( sprintf( '(%d)/(%d) Fixing post #%d...', $key_post + 1, count( $posts ), $post->ID ) );
+
 			$fixed_content = $post->post_content;
 			preg_match_all( '/"(?P<url>[^"]+jpe)"/', $post->post_content, $jpe_links_matches );
 
