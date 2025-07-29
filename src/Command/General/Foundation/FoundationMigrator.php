@@ -1144,6 +1144,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_SLIDESHOWS_META_KEY );
 			delete_post_meta( $migrated_post_id, self::MIGRATED_RELATED_EVENTS_META_KEY );
 
+			// Update tags and categories if needed.
+			if ( $update_content ) {
+				wp_set_post_tags( $migrated_post_id, $tags );
+				wp_set_post_categories( $migrated_post_id, $post_categories );
+			}
+
 			// Migrate brand.
 			if ( isset( $post->brand ) && ! empty( $post->brand ) ) {
 				// Check if the brand term exists, if not create it.
