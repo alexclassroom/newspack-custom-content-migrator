@@ -24,7 +24,9 @@ use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngla
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNEPublisherEnum;
 use NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers\NNETagMap;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
+use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 use NewspackCustomContentMigrator\Utils\ConsoleColor;
+use NewspackCustomContentMigrator\Utils\ConsoleTable;
 use stdClass;
 use WP_CLI;
 use WP_CLI\ExitException;
@@ -188,6 +190,73 @@ class NNEMigrator implements RegisterCommandInterface {
 			[
 				'shortdesc' => 'Tags were migrated as-is from the XMLs, this command updates the tags to mapped values provided by the NNE Team',
 			],
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newspapers-of-new-england-set-vetted-authors',
+			self::get_command_closure( 'cmd_set_vetted_authors' ),
+			[
+				'shortdesc' => 'Sets/creates new users/authors from vetted list',
+				'synopsis'  => [
+					[
+						'name'     => 'nne-user-list',
+						'type'     => 'assoc',
+						'desc'     => 'Path to the CSV file containing the author information.',
+						'optional' => false,
+					],
+					[
+						'name'     => 'existing-vetted-user-list',
+						'type'     => 'assoc',
+						'desc'     => 'Path to the CSV file containing vetted user information created on sister sites.',
+						'optional' => false,
+					],
+					[
+						'name'     => 'publisher-name',
+						'type'     => 'assoc',
+						'desc'     => 'Name of the publisher.',
+						'optional' => true,
+						'options'  => array_map( fn( $pub ) => $pub->value, NNEPublisherEnum::cases() ),
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newspapers-of-new-england-merge-duplicate-user-accounts',
+			self::get_command_closure( 'cmd_merge_duplicate_user_accounts' ),
+			[
+				'shortdesc' => 'Merges duplicate user accounts created after the vetted user list process',
+				'synopsis'  => [
+					[
+						'name'     => 'nne-user-list',
+						'type'     => 'assoc',
+						'desc'     => 'Path to the CSV file containing the author information.',
+						'optional' => false,
+					],
+					[
+						'name'     => 'last-name-only',
+						'type'     => 'flag',
+						'desc'     => 'Use last name only to merge users.',
+						'optional' => true,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator newspapers-of-new-england-process-updated-timestamps',
+			self::get_command_closure( 'cmd_process_updated_timestamps' ),
+			[
+				'shortdesc' => 'Updates post_modified timestamps based off a CSV file provided by the NNE Team',
+				'synopsis'  => [
+					[
+						'name'     => 'csv-file',
+						'type'     => 'positional',
+						'desc'     => 'Path to the CSV file containing article_id,updated_timestamp pairs.',
+						'optional' => false,
+					],
+				],
+			]
 		);
 	}
 
@@ -457,6 +526,391 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		ConsoleColor::green( 'Tag migration completed.' )->output();
+	}
+
+	/**
+	 * Using a CSV file vetted by NNE, this command will create the required users on the site, and ensure that
+	 * their passwords match on each site they're created on.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception If the CSV files cannot be found or cannot be read.
+	 */
+	public function cmd_set_vetted_authors( array $args, array $assoc_args ): void {
+		$nne_user_list             = ( new FileImportFactory() )->get_file( $assoc_args['nne-user-list'] );
+		$existing_vetted_user_list = ( new FileImportFactory() )->get_file( $assoc_args['existing-vetted-user-list'] );
+
+		$publisher = $assoc_args['publisher-name'] ?? 'all-sites';
+
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- old school approach
+		$user_list = fopen( 'user_list.csv', 'w' );
+		fputcsv( $user_list, [ 'Email', 'Password' ] );
+
+		foreach ( $nne_user_list->getIterator() as $row ) {
+			echo "\n";
+			ConsoleColor::white( 'Publisher' )
+						->bright_yellow( $row['site'] )
+						->white( 'Email:' )
+						->bright_yellow( $row['email'] )
+						->white( 'Display Name:' )
+						->bright_yellow( $row['display_name'] )
+						->white( 'Role:' )
+						->bright_yellow( ! empty( $row['role'] ) ? $row['role'] : 'AUTHOR' )
+						->output();
+			if ( 'all-sites' === $row['site'] || $publisher === $row['site'] || ! empty( $row['role'] ) ) {
+				ConsoleColor::cyan( 'CREATING' )->output();
+
+				$user_pass = wp_generate_password( 16, true );
+				foreach ( $existing_vetted_user_list->getIterator() as $vetted_user ) {
+					if ( $vetted_user['Email'] === $row['email'] ) {
+						$user_pass = $vetted_user['Password'];
+					}
+				}
+
+				$email_exists = get_user_by( 'email', $row['email'] );
+
+				if ( $email_exists ) {
+					ConsoleColor::magenta( "User with email `{$row['email']}` already exists." )->output();
+					wp_update_user(
+						[
+							'ID'        => $email_exists->ID,
+							'user_pass' => $user_pass,
+						]
+					);
+					fputcsv(
+						$user_list,
+						[
+							$email_exists->user_email,
+							$user_pass,
+						]
+					);
+					ConsoleColor::green( 'Password updated.' )->output();
+					continue;
+				}
+
+				$role = 'author';
+				switch ( strtolower( $row['role'] ) ) {
+					case 'editor':
+						$role = 'editor';
+						break;
+					case 'admin':
+					case 'administrator':
+						$role = 'administrator';
+						break;
+					default:
+						break;
+				}
+
+				$user = UsersHelper::create_or_get_user(
+					[
+						'user_email'   => $row['email'],
+						'display_name' => $row['display_name'],
+						'user_pass'    => $user_pass,
+						'role'         => $role,
+						'first_name'   => $row['first_name'],
+						'last_name'    => $row['last_name'],
+					],
+					sha1( $row['email'] . $row['display_name'] )
+				);
+				delete_user_meta( $user->ID, '_nmt_user_uniqid' );
+
+				fputcsv(
+					$user_list,
+					[
+						$row['email'],
+						$user_pass,
+					]
+				);
+			}
+		}
+		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fclose -- old school approach
+		fclose( $user_list );
+	}
+
+	/**
+	 * When adding the vetted users to the NNE network, it turned out that some of the users already had similar accounts
+	 * created as part of the migration process. This script helps to take over the dummy account which was created
+	 * during the migration process and replace it with the vetted user's account.
+	 *
+	 * @param array $args Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 *
+	 * @return void
+	 * @throws Exception If the CSV file cannot be found or cannot be read.
+	 */
+	public function cmd_merge_duplicate_user_accounts( array $args, array $assoc_args ): void {
+		$csv            = ( new FileImportFactory() )->get_file( $assoc_args['nne-user-list'] );
+		$last_name_mode = $assoc_args['last-name-only'] ?? false;
+
+		foreach ( $csv->getIterator() as $row ) {
+			@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+			ConsoleColor::white( 'Email:' )
+						->bright_yellow( $row['email'] )
+						->white( 'Display Name:' )
+						->bright_yellow( $row['display_name'] )
+						->white( 'Role:' )
+						->bright_yellow( ! empty( $row['role'] ) ? $row['role'] : 'AUTHOR' )
+						->output();
+			$user_email = $row['email'];
+			$first_name = $row['first_name'];
+			$last_name  = $row['last_name'];
+
+			$new_account = get_user_by( 'email', $user_email );
+
+			if ( ! $new_account ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleColor::red( 'No new account found for user with email ' . $user_email . 'and last name ' . $last_name . '.' )->output();
+				continue;
+			}
+
+			global $wpdb;
+
+			if ( $last_name_mode ) {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$existing_accounts = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_email <> %s",
+						'%' . $wpdb->esc_like( $last_name ) . '%',
+						$user_email
+					)
+				);
+			} else {
+				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+				$existing_accounts = $wpdb->get_results(
+					$wpdb->prepare(
+						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_nicename LIKE %s AND user_email <> %s",
+						'%' . $wpdb->esc_like( $first_name ) . '%',
+						'%' . $wpdb->esc_like( $last_name ) . '%',
+						$user_email
+					)
+				);
+			}
+
+			if ( ! empty( $existing_accounts ) ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleTable::output_data( $existing_accounts, [], 'Existing Accounts' );
+			}
+
+			if ( count( $existing_accounts ) > 1 ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleColor::yellow( 'Multiple accounts found for user with email ' . $user_email . ' and last name ' . $last_name . '.' )->output();
+				continue;
+			} elseif ( empty( $existing_accounts ) ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleColor::red( 'No accounts found for user with email ' . $user_email . ' and last name ' . $last_name . '.' )->output();
+				continue;
+			}
+
+			$existing_accounts = $existing_accounts[0];
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$author_term = $wpdb->get_results(
+				$wpdb->prepare(
+					"SELECT t.term_id, t.slug, t.name, tt.taxonomy, tt.description 
+						FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
+						WHERE tt.taxonomy = 'author' 
+						  AND t.slug = ( SELECT CONCAT( 'cap-', user_nicename ) FROM $wpdb->users WHERE ID = %d )",
+					$existing_accounts->ID
+				)
+			);
+
+			if ( ! empty( $author_term ) ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleTable::output_data( $author_term, [], 'Author Terms' );
+			}
+
+			if ( count( $author_term ) > 1 ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleColor::magenta( 'Multiple author terms found for user with ID ' . $existing_accounts->ID . '.' )->output();
+				continue;
+			} elseif ( empty( $author_term ) ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				ConsoleColor::magenta( 'No author term found for user with ID ' . $existing_accounts->ID . '.' )->output();
+				continue;
+			}
+
+			$author_term = $author_term[0];
+
+			$response = $this->ask_prompt( 'Are you sure you want to merge this user with the new account? (y)es/(n)o/(h)alt' );
+
+			if ( 'n' === $response ) {
+				continue;
+			} elseif ( 'h' === $response ) {
+				die();
+			}
+
+			$update_posts = sprintf( "UPDATE $wpdb->posts SET post_author = %d WHERE post_author = %d", $new_account->ID, $existing_accounts->ID );
+			$output       = ConsoleColor::white( $update_posts );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_posts_table_updated = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_author' => $new_account->ID,
+				],
+				[
+					'ID' => $existing_accounts->ID,
+				]
+			);
+
+			if ( false === $maybe_posts_table_updated ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->red( 'Failed' )->output();
+			} else {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->green( 'Success' )->output();
+			}
+
+			$user_nicename = $existing_accounts->user_nicename;
+
+			$update_user_nicename_one = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename, $new_account->ID );
+			$output                   = ConsoleColor::white( $update_user_nicename_one );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_usernicename_udpated = $wpdb->update(
+				$wpdb->users,
+				[
+					'user_nicename' => $user_nicename,
+				],
+				[
+					'ID' => $new_account->ID,
+				]
+			);
+
+			if ( false === $maybe_usernicename_udpated ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->red( 'Failed' )->output();
+			} else {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->green( 'Success' )->output();
+			}
+
+			$update_user_nicename_two = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename . '-move', $existing_accounts->ID );
+			$output                   = ConsoleColor::white( $update_user_nicename_two );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_usernicename_udpated_two = $wpdb->update(
+				$wpdb->users,
+				[
+					'user_nicename' => $user_nicename . '-move',
+				],
+				[
+					'ID' => $existing_accounts->ID,
+				]
+			);
+			if ( false === $maybe_usernicename_udpated_two ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->red( 'Failed' )->output();
+			} else {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->green( 'Success' )->output();
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$description = $wpdb->get_var(
+				$wpdb->prepare(
+					"SELECT CONCAT(display_name, ' ', display_name, ' ', ID, ' ', user_email) FROM $wpdb->users WHERE ID = %d",
+					$new_account->ID
+				)
+			);
+
+			$update_description_query = sprintf( "UPDATE $wpdb->term_taxonomy SET description = '%s' WHERE term_id = %d", $description, $author_term->term_id );
+			$output                   = ConsoleColor::white( $update_description_query );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_term_updated = $wpdb->update(
+				$wpdb->term_taxonomy,
+				[
+					'description' => $description,
+				],
+				[
+					'term_id' => $author_term->term_id,
+				]
+			);
+
+			if ( false === $maybe_term_updated ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->red( 'Failed' )->output();
+			} else {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->green( 'Success' )->output();
+			}
+
+			$delete_user_query = sprintf( "DELETE FROM $wpdb->users WHERE ID = %d", $existing_accounts->ID );
+			$output            = ConsoleColor::white( $delete_user_query );
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_user_deleted = $wpdb->delete(
+				$wpdb->users,
+				[
+					'ID' => $existing_accounts->ID,
+				]
+			);
+			if ( false === $maybe_user_deleted ) {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->red( 'Failed' )->output();
+			} else {
+				@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- logging doesn't work on some of the NNE sites unless we flush manually.
+				$output->green( 'Success' )->output();
+			}
+		}
+	}
+
+	/**
+	 * Goes through a CSV provided by NNE with updated timestamps and updates the post_modified timestamp.
+	 *
+	 * @param array $args Positional arguments.
+	 *
+	 * @return void
+	 * @throws Exception If the CSV file cannot be read.
+	 */
+	public function cmd_process_updated_timestamps( array $args ): void {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+		$imported_posts = $wpdb->get_results(
+			$wpdb->prepare(
+				"SELECT 
+    					pm.meta_value as legacy_id,
+    					p.ID, 
+    					p.post_date, 
+    					p.post_modified
+					FROM $wpdb->posts p 
+					    INNER JOIN $wpdb->postmeta pm 
+					        ON p.ID = pm.post_id 
+					WHERE pm.meta_key = %s",
+				NNEImportMetaEnum::ARTICLE_ID_KEY->value
+			),
+			OBJECT_K
+		);
+
+		if ( empty( $imported_posts ) ) {
+			ConsoleColor::yellow( 'No imported posts found.' )->output();
+
+			return;
+		}
+
+		$csv = ( new FileImportFactory() )->get_file( $args[0] );
+
+		foreach ( $csv->getIterator() as $row ) {
+			if ( ! array_key_exists( $row['GN4Id'], $imported_posts ) ) {
+				continue;
+			}
+
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
+			$maybe_updated = $wpdb->update(
+				$wpdb->posts,
+				[
+					'post_modified' => DateTime::createFromFormat( 'Y-m-d H:i:s', $row['ModificationDate'] )->format( 'Y-m-d H:i:' ),
+				],
+				[
+					'ID' => $imported_posts[ $row['GN4Id'] ]->ID,
+				]
+			);
+
+			if ( false === $maybe_updated ) {
+				ConsoleColor::red( 'Failed to update post with ID ' . $imported_posts[ $row['GN4Id'] ]->ID )->output();
+			} else {
+				ConsoleColor::green( 'Updated post with ID ' . $imported_posts[ $row['GN4Id'] ]->ID )->output();
+			}
+		}
 	}
 
 	/**
@@ -1587,5 +2041,22 @@ class NNEMigrator implements RegisterCommandInterface {
 		}
 
 		return $count_of_posts === $count_of_successful_inserts;
+	}
+
+	/**
+	 * Quick little helper function to help with prompting the user for input.
+	 *
+	 * @param string $question Question to ask the user.
+	 *
+	 * @return string
+	 */
+	private function ask_prompt( string $question ) {
+		if ( str_contains( $question, '%n' ) ) {
+			echo WP_CLI::colorize( "$question: " ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
+		} else {
+			fwrite( STDOUT, "$question: " ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+		}
+
+		return strtolower( trim( fgets( STDIN ) ) );
 	}
 }
