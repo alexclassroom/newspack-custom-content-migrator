@@ -2466,14 +2466,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$possible_raw_images = array_filter(
 				$all_possible_raw_images,
 				function ( $raw_image ) use ( $post_image_oid ) {
-					return $raw_image->oid === $post_image_oid;
+					return intval( $raw_image->oid ) === $post_image_oid;
 				}
 			);
 
 			$raw_image = null;
 
 			if ( 1 === count( $possible_raw_images ) ) {
-				$raw_image = $possible_raw_images[0];
+				$raw_image = current( $possible_raw_images );
 			} elseif ( isset( $image_urls[ $index ] ) ) {
 				// If we can't find the image in the raw images file, we use the image URL from the images list.
 				$raw_image = (object) [
@@ -2619,6 +2619,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
+
+				// Add crop coords if available. They are in the format of "blog: 0,600 1597,1664". with the first pair being the x and y coordinates of the top left corner, and the second pair being the x and y coordinates of the bottom right corner.
+				$crop_coords = null;
+				if ( isset( $raw_image['cropCoords'] ) && ! empty( $raw_image['cropCoords'] ) ) {
+					preg_match( '/blog: (\d+),(\d+) (\d+),(\d+)/', $raw_image['cropCoords'], $crop_coords_matches );
+					if ( ! empty( $crop_coords_matches ) ) {
+						$crop_coords = [
+							'x'      => intval( $crop_coords_matches[1] ),
+							'y'      => intval( $crop_coords_matches[2] ),
+							'width'  => intval( $crop_coords_matches[3] ) - intval( $crop_coords_matches[1] ),
+							'height' => intval( $crop_coords_matches[4] ) - intval( $crop_coords_matches[2] ),
+						];
+					}
+				}
 
 				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false ) );
 				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
@@ -3136,7 +3150,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		if ( 200 !== $response['response']['code'] ) {
-			return new \WP_Error( 'get_post_json', __( 'Failed to retrieve post JSON' ) );
+			return new \WP_Error( 'get_post_json', sprintf( 'Failed to retrieve post JSON from %s (Response code: %s): %s', $endpoint, $response['response']['code'], $response['response']['message'] ) );
 		}
 
 		return json_decode( $response['body'] );

@@ -451,7 +451,6 @@ class FoundationFixes implements RegisterCommandInterface {
 			}
 
 			$possible_magnum_image_ids = [];
-			$possible_teaser_image_ids = [];
 
 			$all_possible_raw_images = iterator_to_array( $this->json_iterator->filtered_items( $image_json_file, 'oid', $post->imageLinks ) );
 
@@ -459,16 +458,12 @@ class FoundationFixes implements RegisterCommandInterface {
 				$possible_raw_images = array_filter(
 					$all_possible_raw_images,
 					function ( $raw_image ) use ( $post_image_oid ) {
-						return $raw_image->oid === $post_image_oid;
+						return intval( $raw_image->oid ) === $post_image_oid;
 					}
 				);
 
 				if ( 1 === count( $possible_raw_images ) ) {
-					$raw_image = $possible_raw_images[0];
-
-					if ( isset( $raw_image->placements ) && in_array( 'teaser', $raw_image->placements, true ) ) {
-						$possible_teaser_image_ids[] = $raw_image;
-					}
+					$raw_image = current( $possible_raw_images );
 
 					if ( isset( $raw_image->placements ) && in_array( 'magnum', $raw_image->placements, true ) ) {
 						$possible_magnum_image_ids[] = $raw_image;
@@ -487,17 +482,6 @@ class FoundationFixes implements RegisterCommandInterface {
 
 				set_post_thumbnail( $existing_post_id, $attachment_id );
 				$logger->info( sprintf( 'Set featured image for post %s from magnum to %s', $existing_post_id, $attachment_id ) );
-			} elseif ( ! empty( $possible_teaser_image_ids ) ) {
-				$teaser_image  = $possible_teaser_image_ids[0];
-				$attachment_id = $this->migrate_raw_attachment( $teaser_image, $existing_post_id, $media_local_path );
-
-				if ( is_wp_error( $attachment_id ) ) {
-					$logger->error( sprintf( 'Error migrating image %s for post %s from teaser: %s', $post_image_oid, $existing_post_id, $attachment_id->get_error_message() ) );
-					continue;
-				}
-
-				set_post_thumbnail( $existing_post_id, $attachment_id );
-				$logger->info( sprintf( 'Set featured image for post %s from teaser to %s', $existing_post_id, $attachment_id ) );
 			} else {
 				// set the first image as the featured image.
 				$raw_first_image = $post->imageLinks[0];
