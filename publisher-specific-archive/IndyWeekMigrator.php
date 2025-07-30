@@ -7,7 +7,8 @@ use NewspackCustomContentMigrator\Command\InterfaceCommand;
 use WP_CLI;
 
 /**
- * Custom migration scripts for LkldNow.
+ * Custom migration scripts for IndyWeek.
+ * This was a Metro CMS migration -- see MetroMigrator.
  */
 class IndyWeekMigrator implements InterfaceCommand {
 
