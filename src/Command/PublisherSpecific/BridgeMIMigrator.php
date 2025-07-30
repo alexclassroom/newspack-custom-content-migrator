@@ -32,7 +32,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     
     // Live site constants.
     
-    const FEED_TYPES = [ 'articles', 'authors', 'redirects', 'tags', 'topics' ];
+    const FEED_TYPES = [ 'articles', 'authors', 'redirects-v2', 'tags', 'topics' ];
     
     const FEED_URL_ARTICLES  = 'https://www.bridgemi.com/article-export.json';
     const FEED_URL_AUTHORS   = 'https://www.bridgemi.com/authors-export.json';
@@ -555,9 +555,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $feed_url = self::FEED_URL_AUTHORS;
                 $item_callback = [ $this, 'import_json_author' ];
                 break;
-            case 'redirects':
+            case 'redirects-v2':
                 $feed_url = self::FEED_URL_REDIRECTS;
-                $item_callback = [ $this, 'import_json_redirect' ];
+                $item_callback = [ $this, 'import_json_redirect_v2' ];
                 break;
             case 'tags':
                 $feed_url = self::FEED_URL_TAGS;
@@ -925,7 +925,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
             $this->logger->info( sprintf( '------------ JSON index: %d:', $loop_index ) );
 
-            // Log old slug url as unique key for easier debugging.
+            // Log old slug url as unique key for easier debugging.            
             $this->logger->info( sprintf( 'Old slug url: %s', $json_item->url ?? 'missing' ) );
 
             // Generate checksum for this json item for comparison with future imports.
@@ -1141,7 +1141,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
      * @param object $json_item JSON data.
      * @param string $checksum Checksum for comparison with future imports.
      */
-    public function import_json_redirect( object $json_item, string $checksum ): void {
+    public function import_json_redirect_v2( object $json_item, string $checksum ): void {
         
         // Define expected properties and additional validation rules        
         $expected_properties = [
@@ -1159,9 +1159,83 @@ class BridgeMIMigrator implements RegisterCommandInterface {
             $this->logger->notice( 'Skip: Dry run not supported for redirects import.' );
             return;
         }
+
+        // Set vars.
+        $batch_key = 'redirect_v2';
         
+        $from_url = trim( $json_item->from );
+        $this->logger->info( 'From url: ' . $from_url );
+        
+        $to_url = trim( $json_item->to );
+        $this->logger->info( 'To url: ' . $to_url );
+
+        // Remove BrideMI url from front of to url, but off-site urls might still have http.
+        // leave the absolute / in front
+        $to_url = preg_replace( '#^http(s?)://(www\.)?bridgemi.com#', '', $to_url );
+        
+        // must be absolute url (starts with /) but not "//".
+        if( ! preg_match( '#^/[^/]+#', $from_url ) ) {
+            $this->logger->notice( 'Skip: From url not absolute.' );
+            return;            
+        }
+
+        // must be absolute url or http
+        if( ! preg_match( '#^(/|http)#', $to_url ) ) {
+            $this->logger->notice( 'Skip: to url not absolute nor http.' );
+            return;            
+        }
+
+        // test url
+        $from_response = $this->util_get_remote_head( self::LIVE_SITE_URL . $from_url );
+
+        if( is_wp_error( $from_response ) || ! is_array( $from_response ) || empty( $from_response )
+            || empty( $from_response['response']['code'] ) || empty( $from_response['headers']['location'] )
+        ) {
+            $this->logger->notice( 'Skip: From response not set or error.' );
+            return;
+        }
+
+        // Must be a redirect.
+        if( ! preg_match( '/^3\d{2}$/', $from_response['response']['code'] ) ) {
+            $this->logger->notice( 'Skip: From code not 3xx...' );
+            return;            
+        }
+
+        $this->logger->info( 'From header location: ' . $from_response['headers']['location'] );
+
+        // If header location is BridgeMI, then make sure it's an end-state url.
+        // otherwise off-site urls can just be added as-is.
+        if( preg_match( '#^(http(s?):)?//(www\.)?bridgemi.com#', $from_response['headers']['location'] ) ) {
+
+            // Check redirect landing page is same as to_url
+            if( 0 !== strcmp( self::LIVE_SITE_URL . $to_url, $from_response['headers']['location'] ) ) {
+                $this->logger->notice( 'Skip: To url is not same as redirect url.' );
+                return;
+            }
+
+            // Check to url is final state url;
+            $to_response = $this->util_get_remote_head( self::LIVE_SITE_URL . $to_url );
+
+            if( is_wp_error( $to_response ) || ! is_array( $to_response ) || empty( $to_response )
+                || empty( $to_response['response']['code'] )
+            ) {
+                $this->logger->notice( 'Skip: to response not set or error.' );
+                return;
+            }
+
+            // Must be a 200.
+            if( ! preg_match( '/^2\d{2}$/', $to_response['response']['code'] ) ) {
+                $this->logger->notice( 'Skip: to code not 2xx...' );
+                return;            
+            }
+
+        }
+        else {
+            $this->logger->notice( 'Off-site url.' );
+        }
+
         // Set the redirect using the built-in method
-        $this->set_redirect( $json_item->from, $json_item->to, 'redirect' );
+        // $this->set_redirect( $from_url, $to_url, $batch_key );
 
     }
 
@@ -1996,6 +2070,42 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_values( $data ) );
 
     }
+
+    /****************
+     * UTILS
+     ***************/
+
+    function util_get_remote_head( $url, $max_tries = 2 ) {
+
+		$this->logger->info( 'Requesting head: ' . $url );
+
+		$response = wp_remote_head( $url, [ 'timeout' => 60 ] ); // increase timeout to be safe.
+
+		if ( is_wp_error( $response ) ) {
+			
+			// for some reason remote head is ignoring timeout...so if timeout, just try again....
+			// stop infinite loop with max tries.				
+			// message: Connection timeout after
+			// message: Connection timed out
+			if( 'http_request_failed' === $response->get_error_code() 
+				&& str_contains( $response->get_error_message(), 'Connection time' )
+				&& $max_tries > 0
+			) {
+				sleep(3);
+				return $this->util_get_remote_head( $url, --$max_tries );
+			}
+
+			return $response;
+
+		}
+		
+        return $response;
+
+	}
+
+    /******************
+     * VALIDATORS
+     *****************/
 
     /**
      * Validate (and write to log) if an existing item (post, term, or user) exists and then compare the checksum.
