@@ -1161,11 +1161,16 @@ class BridgeMIMigrator implements RegisterCommandInterface {
         }
 
         // Set vars.
-        $batch_key = 'redirect_v2';
-        
         $from_url = trim( $json_item->from );
         $this->logger->info( 'From url: ' . $from_url );
         
+        // short circuit check.
+        if( (new Redirection())->redirect_from_exists( $from_url) ) {
+			$this->logger->notice( 'Skip: short-circuit redirect already exists.' );
+			return;
+		}
+
+        // ok to continue;
         $to_url = trim( $json_item->to );
         $this->logger->info( 'To url: ' . $to_url );
 
@@ -1231,11 +1236,18 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
         }
         else {
+
+            // Check redirect landing page is same as to_url
+            if( 0 !== strcmp( $to_url, $from_response['headers']['location'] ) ) {
+                $this->logger->notice( 'Skip: Off-site url is not same as redirect url.' );
+                return;
+            }
+            
             $this->logger->notice( 'Off-site url.' );
         }
 
         // Set the redirect using the built-in method
-        // $this->set_redirect( $from_url, $to_url, $batch_key );
+        $this->set_redirect( $from_url, $to_url, 'redirects_v2' );
 
     }
 
