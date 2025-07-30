@@ -1,4 +1,8 @@
 <?php
+/** NNEMigrator
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland;
 
@@ -303,7 +307,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			if ( '.' === $xml_file || '..' === $xml_file ) {
 				continue;
 			}
-			@ob_flush();
+			@ob_flush(); // phpcs:ignore WordPress.PHP.NoSilencedErrors.Discouraged -- Some sites don't ouput to console unless we flush buffer.
 			$percent = number_format( ( ( $index + 1 ) / $count_of_xml_files ) * 100, 2 );
 			ConsoleColor::white( 'Processing XML File:' )
 						->bright_white( "$this->path_to_xmls/$xml_file" )
@@ -546,7 +550,14 @@ class NNEMigrator implements RegisterCommandInterface {
 
 		// phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fopen -- old school approach
 		$user_list = fopen( 'user_list.csv', 'w' );
-		fputcsv( $user_list, [ 'Email', 'Password' ] );
+		// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv -- We now create folders in /tmp/ when running migrations. I want the fle in that folder.
+		fputcsv(
+			$user_list,
+			[
+				'Email',
+				'Password',
+			]
+		);
 
 		foreach ( $nne_user_list->getIterator() as $row ) {
 			echo "\n";
@@ -579,6 +590,7 @@ class NNEMigrator implements RegisterCommandInterface {
 							'user_pass' => $user_pass,
 						]
 					);
+					// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv --  We now create folders in /tmp/ when running migrations. I want the fle in that folder.
 					fputcsv(
 						$user_list,
 						[
@@ -616,6 +628,7 @@ class NNEMigrator implements RegisterCommandInterface {
 				);
 				delete_user_meta( $user->ID, '_nmt_user_uniqid' );
 
+				// phpcs:ignore WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fputcsv --  We now create folders in /tmp/ when running migrations. I want the fle in that folder.
 				fputcsv(
 					$user_list,
 					[
@@ -671,7 +684,7 @@ class NNEMigrator implements RegisterCommandInterface {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$existing_accounts = $wpdb->get_results(
 					$wpdb->prepare(
-						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_email <> %s",
+						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_email <> %s", // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 						'%' . $wpdb->esc_like( $last_name ) . '%',
 						$user_email
 					)
@@ -680,7 +693,7 @@ class NNEMigrator implements RegisterCommandInterface {
 				// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 				$existing_accounts = $wpdb->get_results(
 					$wpdb->prepare(
-						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_nicename LIKE %s AND user_email <> %s",
+						"SELECT * FROM $wpdb->users WHERE user_nicename LIKE %s AND user_nicename LIKE %s AND user_email <> %s", // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 						'%' . $wpdb->esc_like( $first_name ) . '%',
 						'%' . $wpdb->esc_like( $last_name ) . '%',
 						$user_email
@@ -711,7 +724,7 @@ class NNEMigrator implements RegisterCommandInterface {
 					"SELECT t.term_id, t.slug, t.name, tt.taxonomy, tt.description 
 						FROM $wpdb->terms t INNER JOIN $wpdb->term_taxonomy tt ON t.term_id = tt.term_id 
 						WHERE tt.taxonomy = 'author' 
-						  AND t.slug = ( SELECT CONCAT( 'cap-', user_nicename ) FROM $wpdb->users WHERE ID = %d )",
+						  AND t.slug = ( SELECT CONCAT( 'cap-', user_nicename ) FROM $wpdb->users WHERE ID = %d )", // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					$existing_accounts->ID
 				)
 			);
@@ -764,11 +777,11 @@ class NNEMigrator implements RegisterCommandInterface {
 
 			$user_nicename = $existing_accounts->user_nicename;
 
-			$update_user_nicename_one = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename, $new_account->ID );
+			$update_user_nicename_one = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename, $new_account->ID ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 			$output                   = ConsoleColor::white( $update_user_nicename_one );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$maybe_usernicename_udpated = $wpdb->update(
-				$wpdb->users,
+				$wpdb->users, // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				[
 					'user_nicename' => $user_nicename,
 				],
@@ -785,11 +798,11 @@ class NNEMigrator implements RegisterCommandInterface {
 				$output->green( 'Success' )->output();
 			}
 
-			$update_user_nicename_two = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename . '-move', $existing_accounts->ID );
+			$update_user_nicename_two = sprintf( "UPDATE $wpdb->users SET user_nicename = '%s' WHERE ID = %d", $user_nicename . '-move', $existing_accounts->ID ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 			$output                   = ConsoleColor::white( $update_user_nicename_two );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$maybe_usernicename_udpated_two = $wpdb->update(
-				$wpdb->users,
+				$wpdb->users, // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				[
 					'user_nicename' => $user_nicename . '-move',
 				],
@@ -808,7 +821,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$description = $wpdb->get_var(
 				$wpdb->prepare(
-					"SELECT CONCAT(display_name, ' ', display_name, ' ', ID, ' ', user_email) FROM $wpdb->users WHERE ID = %d",
+					"SELECT CONCAT(display_name, ' ', display_name, ' ', ID, ' ', user_email) FROM $wpdb->users WHERE ID = %d", // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 					$new_account->ID
 				)
 			);
@@ -834,11 +847,11 @@ class NNEMigrator implements RegisterCommandInterface {
 				$output->green( 'Success' )->output();
 			}
 
-			$delete_user_query = sprintf( "DELETE FROM $wpdb->users WHERE ID = %d", $existing_accounts->ID );
+			$delete_user_query = sprintf( "DELETE FROM $wpdb->users WHERE ID = %d", $existing_accounts->ID ); // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 			$output            = ConsoleColor::white( $delete_user_query );
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 			$maybe_user_deleted = $wpdb->delete(
-				$wpdb->users,
+				$wpdb->users, // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users
 				[
 					'ID' => $existing_accounts->ID,
 				]
@@ -1056,7 +1069,6 @@ class NNEMigrator implements RegisterCommandInterface {
 			str_starts_with( $article_object->InnerBody, '<webbody>' ) ||
 			str_starts_with( $article_object->InnerBody, '<body>' ) ) {
 			$inner_body_dom = new DOMDocument( '1.0', 'ISO-8859-1' );
-			// $inner_body_dom->encoding = 'ISO-8859-1';
 
 			libxml_use_internal_errors( true );
 			$inner_body_dom->loadHTML(
@@ -2054,7 +2066,7 @@ class NNEMigrator implements RegisterCommandInterface {
 		if ( str_contains( $question, '%n' ) ) {
 			echo WP_CLI::colorize( "$question: " ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped
 		} else {
-			fwrite( STDOUT, "$question: " ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite
+			fwrite( STDOUT, "$question: " ); // phpcs:ignore WordPress.WP.AlternativeFunctions.file_system_operations_fwrite,WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite
 		}
 
 		return strtolower( trim( fgets( STDIN ) ) );

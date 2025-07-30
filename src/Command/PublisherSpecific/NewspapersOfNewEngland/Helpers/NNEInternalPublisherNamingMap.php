@@ -1,7 +1,14 @@
 <?php
+/** NNEInternalPublisherNamingMap
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers;
 
+/**
+ * Class NNEInternalPublisherNamingMap
+ */
 class NNEInternalPublisherNamingMap {
 	/**
 	 * Path to the Newspapers of New England migration materials. Environment dependent.

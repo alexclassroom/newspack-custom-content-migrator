@@ -1,9 +1,16 @@
 <?php
+/** NNENonJPGList
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers;
 
 use NewspackCustomContentMigrator\Utils\CommonDataFileIterator\FileImportFactory;
 
+/**
+ * Class NNENonJPGList
+ */
 class NNENonJPGList {
 	/**
 	 * The singleton instance.

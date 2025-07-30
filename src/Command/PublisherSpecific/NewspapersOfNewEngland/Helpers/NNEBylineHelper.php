@@ -1,4 +1,8 @@
 <?php
+/** NNEBylineHelper Class.
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers;
 
@@ -147,7 +151,7 @@ class NNEBylineHelper {
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery,WordPress.DB.DirectDatabaseQuery.NoCaching
 		$user = $wpdb->get_row(
 			$wpdb->prepare(
-				"SELECT * FROM $wpdb->users WHERE display_name = %s",
+				"SELECT * FROM $wpdb->users WHERE display_name = %s", // phpcs:ignore WordPressVIPMinimum.Variables.RestrictedVariables.user_meta__wpdb__users -- I don't want to sanitize the display name. I want to search for the exact value given.
 				$display_name
 			)
 		);

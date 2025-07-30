@@ -1,4 +1,8 @@
 <?php
+/** NNEImportMetaEnum
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers;
 

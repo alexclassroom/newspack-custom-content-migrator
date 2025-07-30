@@ -1,4 +1,8 @@
 <?php
+/** NNETagMap
+ *
+ * @package Newspack Custom Content Migrator
+ */
 
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNewEngland\Helpers;
 
@@ -6,7 +10,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNe
  * Class NNETagMap
  *
  * Provides a static mapping from old tags to new categories, subcategories, and tags
- * based on the old_tag_to_new_heirarchy.csv file.
+ * based on the old_tag_to_new_hierarchy.csv file.
  */
 class NNETagMap {
 	/**
@@ -444,7 +448,7 @@ class NNETagMap {
 		],
 		'Dartmouth College'                       => [
 			'category' => [
-				'name' => 'Dartmouth News',
+				'name'   => 'Dartmouth News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
@@ -1415,7 +1419,7 @@ class NNETagMap {
 		],
 		'dartmouth'                               => [
 			'category' => [
-				'name' => 'Dartmouth News',
+				'name'   => 'Dartmouth News',
 				'parent' => 'News',
 			],
 			'tags'     => null,
@@ -1595,7 +1599,7 @@ class NNETagMap {
 		],
 		'hunt'                                    => [
 			'category' => [
-				'name' => 'Outdoors Sports',
+				'name'   => 'Outdoors Sports',
 				'parent' => 'Sports',
 			],
 			'tags'     => [
