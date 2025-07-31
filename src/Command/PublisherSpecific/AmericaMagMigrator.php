@@ -350,6 +350,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'post',
 				'post-assets-merged',
 				'post-audio-file',
+				'post-featured-captions',
 				'post-thumbnails',
 				'post_tag',
 				'user',
@@ -401,6 +402,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				case 'post-audio-file':
 					$meta_query[] = [ 'key' => 'audio_file', 'compare' => 'EXISTS' ];
 					$db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+					break;
+				case 'post-featured-captions':
+					$meta_query[] = [ 'key' => '_thumbnail_id', 'compare' => 'EXISTS' ];
+					$meta_query[] = [ 'key' => 'image_caption', 'compare' => 'EXISTS' ];
+					$db_items = get_posts( [ 
+						'post_type' => [ 'book', 'book_review', 'issue', 'lectionary_date', 'podcast', 'post', 'profile', 'sponsorship', 'the_word', 'video' ],
+						'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query
+					]);
 					break;
 				case 'post-thumbnails':
 					$meta_query[] = [ 'key' => '_thumbnail_id', 'compare' => 'EXISTS' ];
@@ -454,6 +463,10 @@ class AmericaMagMigrator implements RegisterCommandInterface {
                         break;
 					case 'post-audio-file':
 						$this->clean_up_post_audio_file( $db_id, $logger_slug );
+						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
+						break;	
+					case 'post-featured-captions':
+						$this->clean_up_post_featured_captions( $db_id, $logger_slug );
 						update_post_meta( $db_id, $meta_key_cleaned_item, 'yes' );
 						break;	
 					case 'post-thumbnails':
@@ -1577,6 +1590,46 @@ wp newspack-post-image-downloader import-images
 
 	}
  
+	private function clean_up_post_featured_captions( int $post_id, $logger_slug ): void {
+
+		$thumbnail_id = get_post_meta( $post_id, '_thumbnail_id', true );
+
+		$this->logger->info( 'Thumbnail id: ' . $thumbnail_id );
+		
+		// get current caption - will return boolean on error.
+		$caption = wp_get_attachment_caption( $thumbnail_id );
+		if( ! is_string( $caption) ) {
+			$this->logger->warning( 'Unable to verify current caption for thumbnail id.' );
+			return;
+		}
+		if( strlen( trim( $caption ) ) > 0 ) {
+			$this->logger->notice( 'Caption already set' );
+			return;
+		}
+
+		$image_caption = trim( get_post_meta( $post_id, 'image_caption', true ) );
+		$this->logger->info( 'New caption: ' . $image_caption );
+
+
+		// Update without post date
+		add_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10, 2 );
+
+		$updated_id = wp_update_post([
+			'ID'           => $thumbnail_id,
+			'post_excerpt' => $image_caption
+		]);
+		
+		remove_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10 );
+
+		if( ! is_numeric( $updated_id ) || ! ( $updated_id > 0 ) ) {
+			$this->logger->error( 'Update attachment failure.' );
+			$this->logger->error( json_encode( $updated_id) );
+			exit();
+		} 
+
+	}
+
+
  	/**
 	 * Posts with thumbnail id
 	 */
