@@ -298,6 +298,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_bulk( array $pos_args, array $assoc_args ): void {
 
+		// Logger.
+		$logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+		$this->logger_set( $logger_slug );
+        $this->logger->info( 'Running command: ' . $logger_slug );
+		
 		$this->validate_setup( [ 'skip-acfpro' ] );
 
 		$this->validate_pos_arg( 
@@ -307,13 +312,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'attachment-set-hashes',
 			]
 		);		
-
-        // Logger.
-        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
-        $this->logger_set( $logger_slug );
-
-        // Run command.
-        $this->logger->info( 'Running command: ' . $logger_slug );
 
 		switch( $pos_args[0] ) {
 			case 'attachment-check-hashes':
@@ -335,6 +333,11 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_clean_up( array $pos_args, array $assoc_args ): void {
 
+		// Logger.
+		$logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+		$this->logger_set( $logger_slug );
+		$this->logger->info( 'Running command: ' . $logger_slug );
+
 		$this->validate_setup( [ 'skip-acfpro' ] );
 
 		$this->validate_pos_arg( 
@@ -353,13 +356,6 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'user-assets-merged'
 			]
 		);
-
-        // Logger.
-        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
-        $this->logger_set( $logger_slug );
-
-        // Run command.
-        $this->logger->info( 'Running command: ' . $logger_slug );
                 
 		// Unique key per clean up.
 		$meta_key_cleaned_item = self::META_KEY_CLEANED_ITEM_SLUG . '-' . $pos_args[0];
@@ -1088,6 +1084,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	private function bulk_attachment_check_hashes() {
 
+		die( 'not implemented - due to rebuild' );
+
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type' => 'attachment',
@@ -1130,6 +1128,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 	private function bulk_attachment_set_hashes() {
 
+		die( 'not implemented - due to rebuild' );
+		
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type' => 'attachment',
@@ -1179,6 +1179,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
      * Clean up one attachment
      */
 	private function clean_up_attachment( int $attachment_id, $logger_slug ): void {
+
+		die( 'not implemented - due to rebuild' );
 
 		// $this->clean_up_attachment_capitalized_exts( $attachment_id, $logger_slug );
 		
@@ -1366,6 +1368,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	private function clean_up_issue_assets_merged( int $post_id, $logger_slug ): void {
 
+		die( 'not implemented - due to rebuild' );
+
 		global $wpdb;
 
 		// cover image.
@@ -1508,6 +1512,8 @@ wp newspack-post-image-downloader import-images
      */
     private function clean_up_post_assets_merged( int $post_id, $logger_slug ): void {
 
+		die( 'not implemented - due to rebuild' );
+
 		// get asset urls from in the content.
 		$post_content = get_post_field( 'post_content', $post_id, 'raw' );
 
@@ -1546,6 +1552,8 @@ wp newspack-post-image-downloader import-images
 	 */
 	private function clean_up_post_audio_file( int $post_id, $logger_slug ): void {
 
+		die( 'not implemented - due to rebuild' );
+
 		global $wpdb;
 
 		$file_warning_msg = '';
@@ -1573,6 +1581,8 @@ wp newspack-post-image-downloader import-images
 	 * Posts with thumbnail id
 	 */
 	private function clean_up_post_thumbnails( int $post_id, $logger_slug ): void {
+
+		die( 'not implemented - due to rebuild' );
 
 		global $wpdb;
 
@@ -1743,6 +1753,8 @@ wp newspack-post-image-downloader import-images
 
 	private function clean_up_user_assets_merged( int $user_id, $logger_slug ): void {
 
+		die( 'not implemented - due to rebuild' );
+		
 		global $wpdb;
 
 		// wordpress image via simple local avatars.  This might have errors.
