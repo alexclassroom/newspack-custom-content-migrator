@@ -8,6 +8,7 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific\NewspapersOfNe
 
 use CoAuthors_Plus;
 use DateMalformedStringException;
+use DateTime;
 use DateTimeImmutable;
 use DateTimeZone;
 use DOMDocument;
@@ -911,7 +912,7 @@ class NNEMigrator implements RegisterCommandInterface {
 			$maybe_updated = $wpdb->update(
 				$wpdb->posts,
 				[
-					'post_modified' => DateTime::createFromFormat( 'Y-m-d H:i:s', $row['ModificationDate'] )->format( 'Y-m-d H:i:' ),
+					'post_modified' => DateTime::createFromFormat( 'Y-m-d H:i:sP', $row['ModificationDate'] )->format( 'Y-m-d H:i:s' ),
 				],
 				[
 					'ID' => $imported_posts[ $row['GN4Id'] ]->ID,
