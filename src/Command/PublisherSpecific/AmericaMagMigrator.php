@@ -414,7 +414,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 					$meta_query[] = [ 'key' => 'image_caption', 'compare' => 'EXISTS' ];
 					$db_items = get_posts( [ 
 						'post_type' => [ 'book', 'book_review', 'issue', 'lectionary_date', 'podcast', 'post', 'profile', 'sponsorship', 'the_word', 'video' ],
-						'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query
+						'fields' => 'ids', 'numberposts' => 1000, 'meta_query' => $meta_query
 					]);
 					break;
 				case 'post-thumbnails':
@@ -1688,16 +1688,16 @@ wp newspack-post-image-downloader import-images
 			return;
 		}
 
-		$image_caption = trim( get_post_meta( $post_id, 'image_caption', true ) );
+		// Live site frontend stripped out all html so do the same here.
+		$image_caption = wp_kses( trim( get_post_meta( $post_id, 'image_caption', true ) ), [] );
 		$this->logger->info( 'New caption: ' . $image_caption );
-
 
 		// Update without post date
 		add_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10, 2 );
 
 		$updated_id = wp_update_post([
 			'ID'           => $thumbnail_id,
-			'post_excerpt' => $image_caption
+			'post_excerpt' => $image_caption,
 		]);
 		
 		remove_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10 );
