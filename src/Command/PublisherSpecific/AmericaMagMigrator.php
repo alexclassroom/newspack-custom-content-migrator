@@ -4,8 +4,10 @@ namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
+use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\CollectionsHelper;
 use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\BatchLogic;
 use Newspack\MigrationTools\Util\CsvWriter;
 use Newspack\MigrationTools\Util\FgHelper;
 use Newspack\MigrationTools\Util\Log\CliLog;
@@ -290,6 +292,17 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			self::get_command_closure( 'cmd_migrate_collections_sections' ),
 			[
 				'shortdesc' => 'Migrate Collections Sections.',
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-migrate-legacy-podcasts-links',
+			self::get_command_closure( 'cmd_migrate_legacy_podcasts_links' ),
+			[
+				'shortdesc' => 'Migrate Legacy Podcasts Links.',
+				'synopsis'  => [
+					...BatchLogic::get_batch_args()
+				]
 			]
 		);
 
@@ -1107,6 +1120,158 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		}
 
 		$this->logger->info( 'Done.' ); 
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator america-mag-migrate-legacy-podcasts-links`.
+	 */
+	public function cmd_migrate_legacy_podcasts_links( array $pos_args, array $assoc_args ): void {
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$start_from = $assoc_args['start'] ?? 0;
+		$end_at     = $assoc_args['end'] ?? 0;
+
+		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
+		$csv_writer->set_header( [
+			'#',
+			'Post ID',
+			'Legacy Podcast URL',
+			'Post URL'
+		] );
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		global $wpdb;
+
+		$legacy_podcasts_links = $wpdb->get_results(
+			"SELECT
+				`pm1`.`post_id`,
+				`pm2`.`meta_value`
+			FROM
+				`{$wpdb->postmeta}` `pm1`
+				JOIN `{$wpdb->postmeta}` `pm2` ON `pm2`.`post_id` = `pm1`.`meta_value`
+				AND `pm2`.`meta_key` = '_wp_attached_file'
+			WHERE
+				`pm1`.`meta_key` = 'audio_file'
+			ORDER BY `pm1`.`post_id` ASC"
+		);
+
+		foreach ( $legacy_podcasts_links as $index => $legacy_podcast_data ) {
+			// Flush memory every 50 steps, with 3 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 3, $index, 50 );
+
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$post_id               = $legacy_podcast_data->post_id;
+			$podcast_relative_path = $legacy_podcast_data->meta_value;
+
+			$this->logger->info(
+				sprintf(
+					'[Memory Usage: %s] [%d / %d] Processing Post #%d',
+					size_format( memory_get_usage( true ) ),
+					$index + 1,
+					count( $legacy_podcasts_links ),
+					(int) $post_id
+				)
+			);
+
+			// Podcasts file.
+			$podcast_attachment_id = Attachments::get_attachment_by_filename( $podcast_relative_path );
+			if ( is_null( $podcast_attachment_id ) ) {
+				$this->logger->warning( sprintf( 'Attachment not found for Post #%d, Relative Path - %s', $post_id, $podcast_attachment_id ) );
+
+				continue;
+			}
+
+			$post_content = get_post_field( 'post_content', $post_id );
+			$post_blocks  = parse_blocks( $post_content );
+
+			$embed_exists = array_filter( $post_blocks, function ( $block ) {
+				return $block['blockName'] === 'core/embed'
+					&& str_contains( $block['attrs']['className'], 'newspack-legacy-podcast' );
+			} );
+
+			if ( $embed_exists ) {
+				$this->logger->warning( '— Skipping — Podcast already Exists' );
+
+				continue;
+			}
+
+			$podcast_attachment_url = wp_get_attachment_url( $podcast_attachment_id );
+
+			$block_inner_html = <<<BLOCK
+<figure class="wp-block-embed is-type-rich is-provider-embed-handler wp-block-embed-embed-handler"><div class="wp-block-embed__wrapper">
+{$podcast_attachment_url}
+</div></figure>
+BLOCK;
+
+			$podcast_embed_block = [
+				'blockName' => 'core/embed',
+				'attrs'     => [
+					'url'  	           => $podcast_attachment_url,
+					'type' 	           => 'rich',
+					'providerNameSlug' => 'embed-handler',
+					'className'        => 'newspack-legacy-podcast',
+				],
+				'innerBlocks' => [],
+				'innerHTML' => $block_inner_html,
+				'innerContent' => [
+					$block_inner_html,
+				],
+			];
+
+			if ( count( $post_blocks ) === 0 ) {
+				$post_blocks = [ $podcast_embed_block ];
+			} else if ( count( $post_blocks ) > 0 ) {
+				$post_blocks = [
+					[
+						'blockName'    => NULL,
+						'attrs'        => [],
+						'innerBlocks'  => [],
+						'innerHTML'    => "\r\n",
+						'innerContent' => [ "\r\n" ],
+					],
+					$podcast_embed_block,
+					[
+						'blockName'    => NULL,
+						'attrs'        => [],
+						'innerBlocks'  => [],
+						'innerHTML'    => "\r\n\r\n",
+						'innerContent' => [ "\r\n\r\n" ],
+					],
+					...$post_blocks
+				];
+			}
+
+			wp_save_post_revision( $post_id );
+
+			add_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10, 2 );
+
+			wp_update_post( [
+				'ID'           => $post_id,
+				'post_content' => serialize_blocks( $post_blocks ),
+			] );
+
+			remove_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10 );
+
+			$csv_writer
+				->put( [
+					$index + 1,
+					$post_id,
+					wp_get_attachment_url( $podcast_attachment_id ),
+					get_permalink( $post_id )
+				] );
+		}
+
+		$this->logger->info( 'Done.' );
+
+		$this->logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+		$this->logger->info( sprintf( 'Check the CSV file for migration details: %s', __FUNCTION__ . '.csv' ) );
 
 		wp_cache_flush();
 	}
