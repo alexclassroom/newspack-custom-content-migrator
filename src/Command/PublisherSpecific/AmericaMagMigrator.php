@@ -872,7 +872,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				'order'     => 'ASC',
 			],
 			function( $post ) use ( &$index, $csv_writer ) {
-				// Flush memory every 50 steps, with 1 seconds of sleeping time.
+				// Flush memory every 50 steps, with 3 seconds of sleeping time.
 				MemoryCleanupHook::cleanup( 3, $index, 50 );
 
 				$index++;
@@ -950,10 +950,12 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				] );
 
 				$this->logger->info( sprintf( '-- Upserted Collection #%d "%s"', $collection_id, $collection_title ) );
-			},
+			}, // callback function
 			0,
-			100 // callback function
+			100
 		); // throttled posts
+
+		$csv_writer->close();
 
 		$this->logger->info( '🏁 Done' );
 
@@ -971,17 +973,24 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 
 		$this->validate_setup( [ 'skip-acfpro' ] );
 
+		$index = 0;
+
 		// Loop through all collections post type rows.
 		(new Posts())->throttled_posts_loop( 
 			[
 				'post_type'    => 'post',
 				'orderby'      => 'ID',
-				'order'        => 'DESC',
+				'order'        => 'ASC',
 				'meta_key'     => 'issue',
 				'meta_value'   => '',
 				'meta_compare' => 'EXISTS',
 			], 
-			function( $post ) use ( $wpdb ) {
+			function( $post ) use ( &$index, $wpdb ) {
+				// Flush memory every 50 steps, with 3 seconds of sleeping time.
+				MemoryCleanupHook::cleanup( 3, $index, 50 );
+
+				$index++;
+
 				$this->logger->info( '-- Post ID: ' . $post->ID );
 
 				$issue_meta = get_post_meta( $post->ID, 'issue', true );
@@ -1005,10 +1014,14 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				$this
 					->collections_helper
 					->assign_post_to_collections_posts( $post->ID, $collection_post_ids );
-			} // callback function
+			}, // callback function
+			0,
+			100
 		); // throttled posts
 
-		$this->logger->info( 'Done.' ); 
+		$this->logger->info( '🏁 Done' );
+
+		wp_cache_flush();
 	}
 
 	/**
@@ -1085,9 +1098,13 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						$collection_section_wp_term->term_id
 					);
 			}
+
+			MemoryCleanupHook::cleanup( 3 );
 		}
 
 		$this->logger->info( 'Done.' ); 
+
+		wp_cache_flush();
 	}
 
 	/************************
