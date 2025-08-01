@@ -1324,6 +1324,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$migrated_slideshows = [];
 
 		foreach ( $raw_slideshows as $index => $slideshow ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $migrate_sample && $index > 4 ) {
 				break;
 			}
@@ -1472,6 +1475,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
@@ -1487,7 +1493,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
 
 			if ( ! $existing_post_id ) {
-				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				$logger->error( sprintf( '[%d] Post %d not migrated', $index, $post->oid ) );
 				continue;
 			}
 
@@ -1501,14 +1507,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 			);
 
 			if ( ! $sponsor_id ) {
-				$logger->error( sprintf( 'Error getting or creating sponsor %s: %s', $post->oid, $sponsor_id->get_error_message() ) );
+				$logger->error( sprintf( '[%d] Error getting or creating sponsor %s: %s', $index, $post->oid, $sponsor_id->get_error_message() ) );
 				continue;
 			}
 
 			// Add sponsor to post.
 			$sponsor_logic->add_sponsor_to_post( $sponsor_id, $existing_post_id );
 
-			$logger->info( sprintf( 'Set sponsor %s to post %d', $sponsor_id, $existing_post_id ) );
+			$logger->info( sprintf( '[%d] Set sponsor %s to post %d', $index, $sponsor_id, $existing_post_id ) );
 		}
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
@@ -1534,6 +1540,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
@@ -1550,7 +1559,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
 
 			if ( ! $existing_post_id ) {
-				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				$logger->error( sprintf( '[%d] Post %d not migrated', $index, $post->oid ) );
 				continue;
 			}
 
@@ -1579,7 +1588,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				// Mark the post as migrated related events.
 				update_post_meta( $existing_post_id, self::MIGRATED_RELATED_EVENTS_META_KEY, true );
 
-				$logger->info( sprintf( 'Migrated related events for post %d with ID %d', $post->oid, $existing_post_id ) );
+				$logger->info( sprintf( '[%d] Migrated related events for post %d with ID %d', $index, $post->oid, $existing_post_id ) );
 			}
 		}
 
@@ -1604,11 +1613,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$post_json_file   = $assoc_args['post-json-file'];
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
-		foreach ( $raw_posts as $post ) {
+		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
 
 			if ( ! $existing_post_id ) {
-				$logger->error( sprintf( 'Post %d not migrated', $post->oid ) );
+				$logger->error( sprintf( '[%d] Post %d not migrated', $index, $post->oid ) );
 				continue;
 			}
 
@@ -1624,7 +1636,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$mapped_related_posts = $this->map_posts( $related_posts );
 			if ( count( $mapped_related_posts ) !== count( array_unique( $related_posts ) ) ) {
-				$logger->error( sprintf( 'Skipping post %d because it has non migrated related posts: %s', $post->oid, implode( ', ', array_diff( $related_posts, array_keys( $mapped_related_posts ) ) ) ) );
+				$logger->error( sprintf( '[%d] Skipping post %d because it has non migrated related posts: %s', $index, $post->oid, implode( ', ', array_diff( $related_posts, array_keys( $mapped_related_posts ) ) ) ) );
 				continue;
 			}
 
@@ -1658,8 +1670,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$wp_post->post_content
 			);
 
-			// If we didn't migrate all the related posts, we'll add the related posts to the end of the post content.
-			if ( $content === $wp_post->post_content || count( $mapped_related_posts ) !== $migrated_related_posts ) {
+			// If we didn't migrate all the related posts and the post content doesn't end with the related posts marker, we'll add the related posts to the end of the post content.
+			preg_match( '/\[content-(\d+)\]$/', trim( wp_strip_all_tags( $post->body ) ), $content_end_with_marker_matches );
+
+			if ( empty( $content_end_with_marker_matches ) && ( $content === $wp_post->post_content || count( $mapped_related_posts ) !== $migrated_related_posts ) ) {
 				// Not all the markers are present in the post content, so we'll add the related posts to the end of the post content.
 				$unique_related_posts = array_values( array_unique( array_values( $mapped_related_posts ) ) );
 				$content              = $content . $this->generate_related_posts_block( $unique_related_posts );
@@ -1679,7 +1693,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$csv_writer->put( [ $post->oid, $existing_post_id, 'https://' . $publisher_domain . $post->permalink, get_permalink( $existing_post_id ) ] );
 			}
 
-			$logger->info( sprintf( 'Migrated related posts for post %d with ID %d', $post->oid, $existing_post_id ) );
+			$logger->info( sprintf( '[%d] Migrated related posts for post %d with ID %d', $index, $post->oid, $existing_post_id ) );
 		}
 
 		$csv_writer->close();
@@ -1707,11 +1721,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$raw_slideshows                           = $this->json_iterator->items( $slideshow_json_file );
 		$count_slideshows_with_related_slideshows = 0;
 
-		foreach ( $raw_slideshows as $slideshow ) {
+		foreach ( $raw_slideshows as $index => $slideshow ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			$existing_post_id = Posts::get_post_by_unique_identifier( $slideshow->oid );
 
 			if ( ! $existing_post_id ) {
-				$logger->error( sprintf( 'Slideshow %d not migrated', $slideshow->oid ) );
+				$logger->error( sprintf( '[%d] Slideshow %d not migrated', $index, $slideshow->oid ) );
 				continue;
 			}
 
@@ -1727,14 +1744,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$mapped_related_slideshows = $this->map_posts( $related_slideshows );
 			if ( count( $mapped_related_slideshows ) !== count( array_unique( $related_slideshows ) ) ) {
-				$logger->error( sprintf( 'Skipping slideshow %d because it has non migrated related slideshows: %s', $slideshow->oid, implode( ', ', array_diff( $related_slideshows, array_keys( $mapped_related_slideshows ) ) ) ) );
+				$logger->error( sprintf( '[%d] Skipping slideshow %d because it has non migrated related slideshows: %s', $index, $slideshow->oid, implode( ', ', array_diff( $related_slideshows, array_keys( $mapped_related_slideshows ) ) ) ) );
 				continue;
 			}
 
 			// Get the migrated slideshow.
 			$wp_post = get_post( $existing_post_id );
 			if ( ! $wp_post ) {
-				$logger->error( sprintf( 'Slideshow %d not found', $existing_post_id ) );
+				$logger->error( sprintf( '[%d] Slideshow %d not found', $index, $existing_post_id ) );
 				continue;
 			}
 
@@ -1785,7 +1802,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			++$count_slideshows_with_related_slideshows;
-			$logger->info( sprintf( 'Migrated related slideshows for slideshow %d with ID %d', $slideshow->oid, $existing_post_id ) );
+			$logger->info( sprintf( '[%d] Migrated related slideshows for slideshow %d with ID %d', $index, $slideshow->oid, $existing_post_id ) );
 		}
 
 		$logger->info( sprintf( 'Migrated %d slideshows with related slideshows. Check the CSV logs: %s', $count_slideshows_with_related_slideshows, __FUNCTION__ . '.csv' ) );
@@ -2359,7 +2376,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		// Migrate images.
-		$content = $this->migrate_images_markers( $post->oid, $content, $migrated_images, $post->imageLinks, $update_content );
+		$content = $this->migrate_images_markers( $post_id, $post->oid, $content, $migrated_images, $post->imageLinks, $update_content );
 
 		// Check if any image markers remain and try robust approach if needed.
 		preg_match_all( '/\[image-(\d+)\]/', $content, $remaining_markers );
@@ -2571,6 +2588,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * For example: [image-1] refers to the first image, [image-2] to the second, etc.
 	 * This method converts these 1-based indices to 0-based indices for array access.
 	 *
+	 * @param int    $post_id      Post ID.
 	 * @param string $post_oid     Post OID.
 	 * @param string $content      Post content.
 	 * @param array  $migrated_images   Migrated images. A key-value pair of post image OID and an array with the raw image data and the attachment ID.
@@ -2578,7 +2596,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 *
 	 * @return string Post content with image markers replaced by Gutenberg blocks.
 	 */
-	private function migrate_images_markers( string $post_oid, string $content, array $migrated_images, array $post_image_oids ): string {
+	private function migrate_images_markers( int $post_id, string $post_oid, string $content, array $migrated_images, array $post_image_oids ): string {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		// Debug: Log initial state.
@@ -2598,7 +2616,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$content = preg_replace_callback(
 			'/\[image-(\d+)\]/',
-			function ( $matches ) use ( $post_oid, $migrated_images, $logger, $post_image_oids ) {
+			function ( $matches ) use ( $post_id, $post_oid, $migrated_images, $logger, $post_image_oids ) {
 				$image_index = (int) $matches[1] - 1; // Convert to 0-based index.
 				$logger->info( sprintf( 'Processing image marker [image-%d] (index %d)', (int) $matches[1], $image_index ) );
 
@@ -2636,20 +2654,6 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
-
-				// Add crop coords if available. They are in the format of "blog: 0,600 1597,1664". with the first pair being the x and y coordinates of the top left corner, and the second pair being the x and y coordinates of the bottom right corner.
-				$crop_coords = null;
-				if ( isset( $raw_image['cropCoords'] ) && ! empty( $raw_image['cropCoords'] ) ) {
-					preg_match( '/blog: (\d+),(\d+) (\d+),(\d+)/', $raw_image['cropCoords'], $crop_coords_matches );
-					if ( ! empty( $crop_coords_matches ) ) {
-						$crop_coords = [
-							'x'      => intval( $crop_coords_matches[1] ),
-							'y'      => intval( $crop_coords_matches[2] ),
-							'width'  => intval( $crop_coords_matches[3] ) - intval( $crop_coords_matches[1] ),
-							'height' => intval( $crop_coords_matches[4] ) - intval( $crop_coords_matches[2] ),
-						];
-					}
-				}
 
 				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false ) );
 				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
@@ -3044,6 +3048,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$caption = isset( $raw_attachment->caption ) ? wp_strip_all_tags( $raw_attachment->caption ) : '';
 		$alt     = isset( $raw_attachment->alt ) ? wp_strip_all_tags( $raw_attachment->alt ) : '';
 
+		$crop_csv_writer = new CsvWriter( __FUNCTION__ . '_crop.csv' );
+		$crop_csv_writer->set_header( [ 'WP Post ID', 'Attachment ID', 'Original URL', 'Cropped URL' ] );
+
 		$credit_url = '';
 		$credit     = '';
 		if ( isset( $raw_attachment->credit ) && ! empty( $raw_attachment->credit ) ) {
@@ -3065,7 +3072,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$local_media_path = isset( $raw_attachment->path ) ? rtrim( $this->media_local_path, '/' ) . '/' . ltrim( $raw_attachment->path, '/' ) : '';
 		$media_path       = is_file( $local_media_path ) ? $local_media_path : $raw_attachment->url;
 
-		return Attachments::import_external_file( $media_path, null, $caption, null, $alt, $post_id, $meta_input, '', true, $raw_attachment->oid );
+		$cropped_url = null;
+		if ( isset( $raw_attachment->cropCoords ) && ! empty( $raw_attachment->cropCoords ) ) {
+			$cropped_url = str_replace( '/original/', '/blog/', $raw_attachment->url );
+			$crop_csv_writer->put( [ $post_id, $raw_attachment->oid, $raw_attachment->url, $cropped_url ] );
+		}
+
+		return Attachments::import_external_file( $media_path, null, $caption, null, $alt, $post_id, $meta_input, '', $cropped_url ? false : true, $raw_attachment->oid, $cropped_url );
 	}
 
 	/**
