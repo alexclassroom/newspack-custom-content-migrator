@@ -312,6 +312,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			[ 
 				'attachment-check-hashes',
 				'attachment-set-hashes',
+				'fg-redirects',
 			]
 		);		
 
@@ -321,6 +322,9 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				break;
 			case 'attachment-set-hashes':
 				$this->bulk_attachment_set_hashes();
+				break;
+			case 'fg-redirects':
+				$this->bulk_fg_redirects( $logger_slug );
 				break;
 			default:
 				$this->logger->error( 'No bulk processing for: ' . $pos_args[0] );
@@ -1230,6 +1234,34 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			}, // function
 			1 // sleep
 		); // throttled posts
+
+	}
+
+	private function bulk_fg_redirects( $logger_slug ) {
+		global $wpdb;
+
+		$results = $wpdb->get_results( "
+			select old_url, id
+			from wp_fg_redirect
+			where type = 'post'
+			order by old_url;
+
+		");
+
+		foreach( $results as $result ) {
+			
+			$this->logger->info( 'fg data: ' . json_encode( $result ) );
+			
+			$permalink = wp_make_link_relative( get_permalink( $result->id ) );
+
+			$this->logger->info( 'permalink: ' . $permalink );
+
+            $this->logger_csv_out( $logger_slug . '-posts-', [
+                'Drupal' => 'https://www.americamagazine.org' . $result->old_url,
+                'WordPress' => 'https://americamagazine-newspack.newspackstaging.com' . $permalink
+            ]);
+
+		}
 
 	}
 
