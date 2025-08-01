@@ -1162,6 +1162,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 				wp_set_post_categories( $migrated_post_id, $post_categories );
 			}
 
+			// Migrate SEO meta.
+			if ( isset( $post->title ) && ! empty( $post->title ) ) {
+				update_post_meta( $migrated_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->title ) );
+			}
+			if ( isset( $post->description ) && ! empty( $post->description ) ) {
+				update_post_meta( $migrated_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
+			}
+			if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
+				update_post_meta( $migrated_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+			}
+
 			// Migrate brand.
 			if ( isset( $post->brand ) && ! empty( $post->brand ) ) {
 				// Check if the brand term exists, if not create it.
@@ -2218,7 +2229,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$redirect_csv_files
 		);
 
-		foreach ( $raw_posts as $post ) {
+		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( ! array_key_exists( $post->oid, $migrated_posts ) ) {
 				$logger->error( sprintf( 'Post %s not found', $post->oid ) );
 				continue;
