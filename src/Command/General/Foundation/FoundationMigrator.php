@@ -378,6 +378,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -1224,6 +1231,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$pdf_json_file       = $assoc_args['pdf-json-file'];
 		$slideshow_json_file = $assoc_args['slideshow-json-file'];
 		$update_content      = $assoc_args['update-content'] ?? false;
+		$oid_to_migrate      = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 
 		$raw_pages               = $this->json_iterator->items( $page_json_file );
 		$all_migrated_pages_oids = array_keys( $this->load_posts() );
@@ -1231,6 +1239,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$migrated_pages = [];
 
 		foreach ( $raw_pages as $page ) {
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $page->oid, $oid_to_migrate ) ) {
+				continue;
+			}
+
 			if ( ! $update_content && in_array( $page->oid, $all_migrated_pages_oids ) ) {
 				$logger->info( sprintf( 'Skipping page %d because it has already been migrated', $page->oid ) );
 				continue;
