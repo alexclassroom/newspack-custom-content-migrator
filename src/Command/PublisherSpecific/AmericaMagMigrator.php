@@ -3,8 +3,10 @@
 namespace NewspackCustomContentMigrator\Command\PublisherSpecific;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use Newspack\MigrationTools\Logic\CollectionsHelper;
 use Newspack\MigrationTools\Logic\Posts;
+use Newspack\MigrationTools\Util\CsvWriter;
 use Newspack\MigrationTools\Util\FgHelper;
 use Newspack\MigrationTools\Util\Log\CliLog;
 use Newspack\MigrationTools\Util\Log\FileLog;
@@ -853,28 +855,46 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 	 */
 	public function cmd_migrate_issues_to_collections( array $pos_args, array $assoc_args ): void {
 		$this->logger_set( __FUNCTION__ );
-		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+		$this->logger->info( sprintf( '[Memory Usage: %s] Running command: %s', size_format( memory_get_usage( true ) ), __FUNCTION__ ) );
 
 		$this->validate_setup( [ 'skip-acfpro' ] );
 
-		// Loop through all collections post type rows.
-		(new Posts())->throttled_posts_loop( 
+		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
+		$csv_writer->set_header( [ '#', 'Issue ID', 'Collection ID', 'Collection Title', 'Collection URL' ] );
+		
+		$index = 0;
+
+		// Loop through all issues post type rows.
+		(new Posts())->throttled_posts_loop(
 			[
 				'post_type' => self::ISSUE_POST_TYPE,
 				'orderby'   => 'ID',
-				'order'     => 'DESC',
-			], 
-			function( $post ) {
-				$this->logger->info( '-- Issue Post ID: ' . $post->ID );
+				'order'     => 'ASC',
+			],
+			function( $post ) use ( &$index, $csv_writer ) {
+				// Flush memory every 50 steps, with 1 seconds of sleeping time.
+				MemoryCleanupHook::cleanup( 3, $index, 50 );
+
+				$index++;
+
+				$this->logger->info( sprintf( '[Memory Usage: %s] [%d] Processing issue %d', size_format( memory_get_usage( true ) ), $index, $post->ID ) );
+
+				$collection_title = $post->post_title;
+				if ( str_contains( $collection_title, ',' ) ) {
+					$this->logger->warning( sprintf( 'Collection title "%s" contains a comma which will be removed', $collection_title ) );
+
+					$collection_title = str_replace( ',', '', $collection_title );
+				}
 
 				$collection_id = $this->collections_helper->get_or_create_collection( [
-					'post_title'    => $post->post_title,
+					'post_title'    => $collection_title,
 					'post_date'     => $post->post_date,
 					'post_date_gmt' => $post->post_date_gmt,
+					'post_author'   => 0,
 				], $post->ID );
 
 				if ( is_wp_error( $collection_id ) ) {
-					$this->logger->error( sprintf( 'Failed to get or create collection for issue post ID %d: %s', $post->ID, $collection_id->get_error_message() ) );
+					$this->logger->error( sprintf( '-- Failed to get or create collection for issue post ID %d: %s', $post->ID, $collection_id->get_error_message() ) );
 
 					return;
 				}
@@ -884,7 +904,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 				wp_update_post( [
 					'ID'                => $collection_id,
 					'post_author'       => $post->post_author,
-					'post_title'        => $post->post_title,
+					'post_title'        => $collection_title,
 					'post_content'      => $post->post_content,
 					'post_date'         => $post->post_date,
 					'post_date_gmt'     => $post->post_date_gmt,
@@ -921,11 +941,23 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 						] );
 				}
 
-				$this->logger->info( sprintf( 'Upserted Collection #%d "%s"', $collection_id, $post->post_title ) );
-			} // callback function
+				$csv_writer->put( [
+					$index,
+					$post->ID,
+					$collection_id,
+					$collection_title,
+					get_permalink( $collection_id ),
+				] );
+
+				$this->logger->info( sprintf( '-- Upserted Collection #%d "%s"', $collection_id, $collection_title ) );
+			},
+			0,
+			100 // callback function
 		); // throttled posts
 
-		$this->logger->info( 'Done.' ); 
+		$this->logger->info( '🏁 Done' );
+
+		wp_cache_flush();
 	}
 
 	/**
