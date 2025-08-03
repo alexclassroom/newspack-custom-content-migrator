@@ -615,6 +615,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -2149,11 +2163,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$publisher_domain  = $assoc_args['publisher-domain'];
 		$comment_json_file = $assoc_args['comment-json-file'];
+		$start_from        = $assoc_args['start-from'] ?? 0;
+		$end_at            = $assoc_args['end-at'] ?? 0;
 
 		$raw_comments      = $this->json_iterator->items( $comment_json_file );
 		$migrated_comments = $this->load_comments();
 
-		foreach ( $raw_comments as $comment ) {
+		foreach ( $raw_comments as $index => $comment ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
 			if ( isset( $migrated_comments[ $comment->oid ] ) ) {
 				continue;
 			}
