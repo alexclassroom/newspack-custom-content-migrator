@@ -1632,8 +1632,22 @@ BLOCK;
 		// this means the oldest url will be captured, but the NEW url will be ignored.
 		
 		// For profiles, this meant that a couple profile urls were swapped.
-		// I belive the path_alias should have been shorted by revision id DESC so the newest
-		// url would be inserted first and old urls ignored (?)
+		// Urls should be insert by path_alias ID DESC so older urls would be
+		// ignored by INSERT IGNORE.
+		
+		// DON'T USE MYSQL MATCHING/GROUPING SINCE IT COULD BE CASE-INSENSITIVE...USE PHP
+		// OR USE 'BINARY` KEYWORD IN MYSQL
+
+		/*
+			actually it's OK:
+
+				-- count 169761
+				select distinct binary alias from path_alias order by alias, id;
+
+				-- count 169760
+				select distinct alias from path_alias order by alias, id;
+		*/
+
 
 		/*
 			-- profiles in wp back to drupal path (bypassing FG)
@@ -1716,7 +1730,6 @@ BLOCK;
 		$results = $wpdb->get_results( "
 			select old_url, id, type
 			from wp_fg_redirect
-			where type = 'post'
 			order by type, old_url, id
 		");
 
@@ -1743,6 +1756,8 @@ BLOCK;
 					$this->logger->error( 'Redirect type not found.' );
 					exit();
 			}
+			
+			$file_suffix = preg_replace( '/[^a-z_]/', '-', $result->type );
 
 			// Check for errors.
 			if( ! is_string( $permalink ) || empty( $permalink ) ) {
@@ -1750,15 +1765,25 @@ BLOCK;
 				exit();
 			}
 	
-			$permalink = wp_make_link_relative( $permalink );
+			$permalink = wp_make_link_relative( trim( $permalink ) );
+			$result->old_url = trim( $result->old_url );
 				
 			// Post, skip if same value.
 			if( 'post' === $result->type ) {
 				
 				$this->logger->info( 'Relative permalink: ' . $permalink );
+
 				if( 0 === strcmp( rtrim( $result->old_url, '/' ), rtrim( $permalink, '/' ) ) ) {
 					$this->logger->notice( 'Skip: Urls match.' );
 					continue;
+				}
+
+				$this->logger->warning( 'Redirect needed.' );
+
+				// post post types:
+				$old_post_type = trim( get_post_meta( $result->id, '_np_migration_old_post_type', true ) );
+				if( ! empty( $old_post_type ) ) {
+					$file_suffix .= '-' . $old_post_type;
 				}
 
 			}
@@ -1793,8 +1818,12 @@ BLOCK;
 
 			}
 			
-            $this->logger_csv_out( $logger_slug . '-redirects--', [
-				'Type' => $result->type,
+			if ( ! ( substr_count( rtrim( $result->old_url, '/' ), '/') > 1 ) ) {
+				$file_suffix .= '-one-slash';
+			}
+
+            $this->logger_csv_out( $logger_slug . '-' . $file_suffix . '-', [
+				'Type' => $file_suffix,
                 'Drupal' => 'https://www.americamagazine.org' . $result->old_url,
                 'WordPress' => 'https://americamagazine-newspack.newspackstaging.com' . $permalink
             ]);
