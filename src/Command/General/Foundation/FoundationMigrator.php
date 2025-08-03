@@ -553,6 +553,20 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => false,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-start-from',
+						'description' => 'Start from the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-end-at',
+						'description' => 'End at the post with the index specified.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -1634,11 +1648,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$publisher_domain = $assoc_args['publisher-domain'];
 		$post_json_file   = $assoc_args['post-json-file'];
+		$post_start_from  = $assoc_args['post-start-from'] ?? 0;
+		$post_end_at      = $assoc_args['post-end-at'] ?? 0;
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
 			// Flush memory every 50 steps, with 1 seconds of sleeping time.
 			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			if ( $index < ( $post_start_from - 1 ) || ( $post_end_at > 0 && $index >= $post_end_at ) ) {
+				continue;
+			}
 
 			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
 
