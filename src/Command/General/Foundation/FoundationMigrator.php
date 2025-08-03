@@ -2292,6 +2292,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 					// remove domain from the legacy URL.
 					$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $legacy_url ), '/' );
 
+					if ( str_contains( $legacy_url, 'http' ) ) {
+						$logger->warning( sprintf( 'Skipping legacy redirect for post %s because it is not a relative URL: %s', $post->oid, $legacy_url ) );
+						continue;
+					}
+
 					if ( $post_relative_permalink !== $legacy_url ) {
 						$logger->info( sprintf( 'Migrating legacy redirect for post %s (%s => %s)', $post->oid, $legacy_url, $post_relative_permalink ) );
 						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
