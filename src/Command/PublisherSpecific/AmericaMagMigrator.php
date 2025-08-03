@@ -306,6 +306,17 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			]
 		);
 
+		WP_CLI::add_command(
+			'newspack-content-migrator america-mag-migrate-legacy-shortcodes',
+			self::get_command_closure( 'cmd_migrate_legacy_shortcodes' ),
+			[
+				'shortdesc' => 'Migrate Legacy Shortcodes.',
+				'synopsis'  => [
+					...BatchLogic::get_batch_args()
+				]
+			]
+		);
+
 	}
 
 	/**
@@ -1267,6 +1278,201 @@ BLOCK;
 					wp_get_attachment_url( $podcast_attachment_id ),
 					get_permalink( $post_id )
 				] );
+		}
+
+		$this->logger->info( 'Done.' );
+
+		$this->logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+		$this->logger->info( sprintf( 'Check the CSV file for migration details: %s', __FUNCTION__ . '.csv' ) );
+
+		wp_cache_flush();
+	}
+
+	/**
+	 * Callable for `newspack-content-migrator america-mag-migrate-legacy-shortcodes`.
+	 */
+	public function cmd_migrate_legacy_shortcodes( array $pos_args, array $assoc_args ): void {
+		$this->logger_set( __FUNCTION__ );
+		$this->logger->info( 'Running command: ' . __FUNCTION__ );
+
+		$start_from = $assoc_args['start'] ?? 0;
+		$end_at     = $assoc_args['end'] ?? 0;
+
+		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
+		$csv_writer->set_header( [
+			'#',
+			'Post ID',
+			'Legacy Post ID',
+			'Post URL',
+			'Legacy Post URL',
+			'Used Shortcodes',
+		] );
+
+		$this->validate_setup( [ 'skip-acfpro' ] );
+
+		global $wpdb;
+
+		$post_ids_with_legacy_shortcodes = $wpdb->get_col(
+			"SELECT `ID`
+			 FROM `{$wpdb->posts}`
+			 WHERE `post_type` = 'post'
+			 AND (
+			 	`post_content` LIKE '%[view:related_video]%'
+			 	OR `post_content` LIKE '%[view:related_content]%'
+			 	OR `post_content` LIKE '%[view: related_content]%'
+			 	OR `post_content` LIKE '%[view:related_sponsorship]%'
+			 	OR `post_content` LIKE '%[view:related_podcast]%'
+			 	OR `post_content` LIKE '%[view:book_in_review]%'
+			 	OR `post_content` LIKE '%[view:word]%'
+			 )
+			 ORDER BY `ID` ASC"
+		);
+
+		$legacy_shortcodes = [
+			'[view:related_content]',
+			'[view: related_content]',
+			'[view:related_video]',
+			'[view:related_sponsorship]',
+			'[view:related_podcast]',
+			'[view:book_in_review]',
+			'[view:word]',
+		];
+
+		foreach ( $post_ids_with_legacy_shortcodes as $index => $post_id ) {
+			// Flush memory every 50 steps, with 3 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 3, $index, 50 );
+
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$this->logger->info(
+				sprintf(
+					'[Memory Usage: %s] [%d / %d] Processing Post #%d',
+					size_format( memory_get_usage( true ) ),
+					$index + 1,
+					count( $post_ids_with_legacy_shortcodes ),
+					(int) $post_id
+				)
+			);
+
+			$post_content = get_post_field( 'post_content', $post_id );
+			$post_content_updated = $post_content;
+
+			$used_shortcodes_in_post = [];
+
+			foreach ( $legacy_shortcodes as $legacy_shortcode ) {
+				if ( ! str_contains( $post_content_updated, $legacy_shortcode ) ) {
+					continue;
+				}
+
+				$this->logger->info( sprintf( '— Found shortcode %s', $legacy_shortcode ) );
+
+				// Replace [view:related_content] or [view: related_content] shortcode.
+				if ( in_array( $legacy_shortcode, [ '[view:related_content]', '[view: related_content]' ] ) ) {
+					$posts_ids = get_post_meta( $post_id, 'op_related_nref', true ) ?: [];
+
+					if ( ! empty( $posts_ids ) ) {
+						if ( is_numeric( $posts_ids ) ) {
+							$posts_ids = [ $posts_ids ];
+						} else if ( is_string( $posts_ids ) && json_validate( $posts_ids ) ) {
+							$posts_ids = json_decode( $posts_ids, true );
+						}
+
+						if ( is_array( $posts_ids ) ) {
+							$posts_ids = array_filter( $posts_ids, fn ( $p_id ) => get_post( $p_id ) );
+							$posts_ids = array_unique( $posts_ids );
+						}
+					}
+
+					if ( is_array( $posts_ids ) && ! empty( $posts_ids ) ) {
+						$replacement = sprintf( '<!-- wp:newspack-blocks/homepage-articles %s /-->', wp_json_encode( [
+							'showExcerpt' => false,
+							'showDate' => false,
+							'showAvatar' => false,
+							'mediaPosition' => 'left',
+							'specificPosts' => $posts_ids,
+							'imageScale' => 1,
+							'sectionHeader' => 'Related Stories',
+							'specificMode' => true,
+						] ) );
+						
+						$used_shortcodes_in_post[] = $legacy_shortcode;
+						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
+					} else {
+						$this->logger->warning( '— No posts found in the related meta' );
+					}
+				}
+
+				// Replace [view:word] shortcode.
+				if ( $legacy_shortcode === '[view:word]' ) {
+					$replacement = '<!-- newspack-migration-hidden [view:word] /-->';
+
+					$used_shortcodes_in_post[] = $legacy_shortcode;
+					$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
+				}
+
+				// Replace [view:related_sponsorship] shortcode.
+				if ( $legacy_shortcode === '[view:related_sponsorship]' ) {
+					$replacement = '<!-- newspack-migration-hidden [view:related_sponsorship] /-->';
+
+					$used_shortcodes_in_post[] = $legacy_shortcode;
+					$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
+				}
+
+				// Replace [view:related_podcast] shortcode.
+				if ( $legacy_shortcode === '[view:related_podcast]' ) {
+					$podcast_id = get_post_meta( $post_id, 'related_podcast', true );
+
+					if ( empty( $podcast_id ) || ! get_post( $podcast_id ) ) {
+						$this->logger->warning( sprintf( '— Skipping — No related podcast for post ID %d', $post_id ) );
+					} else {
+						$replacement = sprintf( '<strong>Listen to the <a href="%s">related podcast</a></strong>', get_permalink( $podcast_id ) );
+
+						$used_shortcodes_in_post[] = $legacy_shortcode;
+						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
+					}
+				}
+
+				// Replace [view:related_video] shortcode.
+				if ( $legacy_shortcode === '[view:related_video]' ) {
+					$video_id = get_post_meta( $post_id, 'related_video', true );
+
+					if ( empty( $video_id ) || ! get_post( $video_id ) ) {
+						$this->logger->warning( sprintf( '— Skipping — No related video for post ID %d', $post_id ) );
+					} else {
+						$replacement = sprintf( '<strong>Watch the <a href="%s">related video</a></strong>', get_permalink( $podcast_id ) );
+
+						$used_shortcodes_in_post[] = $legacy_shortcode;
+						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
+					}
+				}
+			}
+
+			if ( $post_content === $post_content_updated ) {
+				$this->logger->warning( '— Skipping — No changes to post content' );
+				continue;
+			}
+
+			wp_save_post_revision( $post_id );
+
+			add_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10, 2 );
+
+			wp_update_post( [
+				'ID'           => $post_id,
+				'post_content' => $post_content_updated,
+			] );
+
+			remove_filter( 'wp_insert_post_data', [ $this, 'update_post_without_modified_dates' ], 10 );
+
+			$csv_writer->put( [
+				$index + 1,
+				$post_id,
+				get_post_meta( $post_id, '_fgd2wp_old_node_id', true ),
+				get_permalink( $post_id ),
+				'https://www.americamagazine.org/node/' . get_post_meta( $post_id, '_fgd2wp_old_node_id', true ),
+				implode( ', ', $used_shortcodes_in_post ),
+			] );
 		}
 
 		$this->logger->info( 'Done.' );
