@@ -1403,25 +1403,91 @@ BLOCK;
 	}
 
 	private function bulk_fg_redirects( $logger_slug ) {
+
 		global $wpdb;
-
+		
 		$results = $wpdb->get_results( "
-			select old_url, id
+			select old_url, id, type
 			from wp_fg_redirect
-			where type = 'post'
-			order by old_url;
-
+			where type = 'profile'
+			order by type, old_url, id
 		");
 
 		foreach( $results as $result ) {
 			
 			$this->logger->info( 'fg data: ' . json_encode( $result ) );
 			
-			$permalink = wp_make_link_relative( get_permalink( $result->id ) );
+			switch( $result->type ) {
+				case "blog":
+				case "category":
+				case "podcast_series":
+				case "post_tag":
+					// cast to int, else term will attempt match to slug not ID.
+					$permalink = get_term_link( (int) $result->id );
+					break;
+				case "book":
+				case "issue":
+				case "post":
+				case "profile":
+				case "sponsorship":
+					$permalink = get_permalink( (int) $result->id );
+					break;
+				default:
+					$this->logger->error( 'Redirect type not found.' );
+					exit();
+			}
 
-			$this->logger->info( 'permalink: ' . $permalink );
+			// Check for errors.
+			if( ! is_string( $permalink ) || empty( $permalink ) ) {
+				$this->logger->error( 'Permalink is not a valid string.' );
+				exit();
+			}
+	
+			$permalink = wp_make_link_relative( $permalink );
+				
+			// Post, skip if same value.
+			if( 'post' === $result->type ) {
+				
+				$this->logger->info( 'Relative permalink: ' . $permalink );
+				if( 0 === strcmp( rtrim( $result->old_url, '/' ), rtrim( $permalink, '/' ) ) ) {
+					$this->logger->notice( 'Skip: Urls match.' );
+					continue;
+				}
 
-            $this->logger_csv_out( $logger_slug . '-posts-', [
+			}
+			// Profile matches.
+			else if( 'profile' === $result->type ) {
+				
+				$user_nicename = $wpdb->get_var( $wpdb->prepare( "
+					SELECT u.user_nicename
+					FROM wp_usermeta um
+					JOIN wp_users u on u.ID = um.user_id
+					WHERE um.meta_key = %s and um.meta_value = %d
+					",
+					self::META_KEY_PROFILE_POST_ID,
+					$result->id,
+				));
+
+				if( ! is_string( $user_nicename ) || empty( $user_nicename ) ) {
+					$this->logger->error( 'User nicename is not a valid string.' );
+					exit();
+				}
+	
+				$permalink = '/author/' . $user_nicename;
+				$this->logger->info( 'Relative permalink: ' . $permalink );
+
+				// validation.
+				if( '/voices' === dirname( $result->old_url ) && wp_basename( $result->old_url ) === $user_nicename ) {
+					$this->logger->notice( 'Use regex: /voices/.* => /author/$1 ' );
+					continue;
+				}
+
+				$this->logger->warning( 'Redirect needed.' );
+
+			}
+			
+            $this->logger_csv_out( $logger_slug . '-redirects-all-', [
+				'Type' => $result->type,
                 'Drupal' => 'https://www.americamagazine.org' . $result->old_url,
                 'WordPress' => 'https://americamagazine-newspack.newspackstaging.com' . $permalink
             ]);
