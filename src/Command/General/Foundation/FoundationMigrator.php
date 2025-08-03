@@ -555,14 +555,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'post-start-from',
+						'name'        => 'start-from',
 						'description' => 'Start from the post with the index specified.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'post-end-at',
+						'name'        => 'end-at',
 						'description' => 'End at the post with the index specified.',
 						'optional'    => true,
 						'repeating'   => false,
@@ -1648,8 +1648,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$publisher_domain = $assoc_args['publisher-domain'];
 		$post_json_file   = $assoc_args['post-json-file'];
-		$post_start_from  = $assoc_args['post-start-from'] ?? 0;
-		$post_end_at      = $assoc_args['post-end-at'] ?? 0;
+		$post_start_from  = $assoc_args['start-from'] ?? 0;
+		$post_end_at      = $assoc_args['end-at'] ?? 0;
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
