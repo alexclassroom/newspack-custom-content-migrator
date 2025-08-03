@@ -759,6 +759,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 		// Setup FG plugin's filters.
 		add_filter( 'fgd2wp_get_node_taxonomies_terms_sql',      [ $this, 'fgd2wp_get_node_taxonomies_terms_sql' ], 10, 5 );
 		add_filter( 'fgd2wp_get_nodes_sql',                      [ $this, 'fgd2wp_get_nodes_sql' ], 10, 6 );
+		add_filter( 'fgd2wp_get_urls_sql',                       [ $this, 'fgd2wp_get_urls_sql' ], 10 );
 		add_filter( 'fgd2wp_map_acf_field_type',                 [ $this, 'fgd2wp_map_acf_field_type' ], 10, 3);
 		add_filter( 'fgd2wp_map_taxonomy',                       [ $this, 'fgd2wp_map_taxonomy' ], 11, 3 );
 		add_filter( 'fgd2wp_post_import_post',                   [ $this, 'fgd2wp_post_import_post' ], 10, 5 );
@@ -1406,10 +1407,97 @@ BLOCK;
 
 		global $wpdb;
 		
+
+		// BUG IN FG PLUGIN.
+		// FG will add to their redirects table from oldest to newest with INSERT IGNORE
+		// this means the oldest url will be captured, but the NEW url will be ignored.
+		
+		// For profiles, this meant that a couple profile urls were swapped.
+		// I belive the path_alias should have been shorted by revision id DESC so the newest
+		// url would be inserted first and old urls ignored (?)
+
+		/*
+			-- profiles in wp back to drupal path (bypassing FG)
+			select pa.alias, group_concat( pa.path ) as pathgroup
+			from wp_posts p
+			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
+			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
+			where p.post_type = 'profile' and p.post_status = 'publish'
+			group by pa.alias
+			having pathgroup like '%,%'
+			order by alias
+			;
+		*/
+
+
+		/*
+			For posts, this query will get the possible urls that a post ID can have.
+			the highest revision id is the final URL drupal will redirect to.
+
+			select pa.path, group_concat( pa.alias ) as mygroup
+			from wp_posts p
+			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
+			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
+			where p.post_type = 'post' and p.post_status = 'publish'
+			group by pa.path
+			having mygroup like '%,%'
+			order by pa.path
+			;
+
+			This query will give the URLS that could match multiple node ids:
+
+			select pa.alias, group_concat( pa.path ) as pathgroup
+			from wp_posts p
+			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
+			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
+			where p.post_type = 'post' and p.post_status = 'publish'
+			group by pa.alias
+			having pathgroup like '%,%'
+			order by alias
+
+
+			Take the example:
+
+				/Advent-Reflection-and-Prayer	=> /node/124244,/node/124592,/node/124646
+
+				select revision_id, status, path, alias from path_alias where alias = '/Advent-Reflection-and-Prayer'
+				order by revision_id
+
+					revision, status, path, alias
+					144205	1	/node/124244	/Advent-Reflection-and-Prayer
+					144740	1	/node/124592	/Advent-reflection-and-prayer
+					144836	1	/node/124646	/Advent-reflection-and-prayer
+
+				In the browser, Drupal will redirect to: 
+
+					https://www.americamagazine.org/content/good-word/advent-reflection-and-prayer-i
+
+					which is /node/124646
+
+					This is the LATEST revision ID, but what is it's last revision?
+
+					select revision_id, status, path, alias from path_alias where path = '/node/124646'
+					order by revision_id
+
+					144836	1	/node/124646	/Advent-reflection-and-prayer
+					144837	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+					150281	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+					151589	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+					166008	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+					170237	1	/node/124646	/content/advent-reflection-and-prayer-i
+					171573	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+					266906	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
+
+					The last url is the final URL.
+
+				FG on the other hand, thinks it should be: 124244 (the first revision_id)
+
+		*/
+
 		$results = $wpdb->get_results( "
 			select old_url, id, type
 			from wp_fg_redirect
-			where type = 'profile'
+			where type = 'post'
 			order by type, old_url, id
 		");
 
@@ -1486,13 +1574,17 @@ BLOCK;
 
 			}
 			
-            $this->logger_csv_out( $logger_slug . '-redirects-all-', [
+            $this->logger_csv_out( $logger_slug . '-redirects--', [
 				'Type' => $result->type,
                 'Drupal' => 'https://www.americamagazine.org' . $result->old_url,
                 'WordPress' => 'https://americamagazine-newspack.newspackstaging.com' . $permalink
             ]);
 
 		}
+
+
+
+
 
 	}
 
@@ -2941,6 +3033,24 @@ wp newspack-post-image-downloader import-images
 		return $sql;
 	}
 
+	public function fgd2wp_get_urls_sql( $sql ) {
+
+		/*
+		original:
+
+		SELECT u.id AS id, u.path AS source, u.alias
+		FROM path_alias u
+		WHERE u.id > '9223372036854775807'
+		ORDER BY u.id
+		LIMIT 10
+		*/
+
+		$sql = str_replace( 'WHERE u.id > ', 'WHERE u.id < ', $sql );
+		$sql = str_replace( 'ORDER BY u.id', 'ORDER BY u.id DESC', $sql );
+
+		return $sql;
+	}
+
 	/**
 	 * Adjust postmeta (acf types) if needed.
 	 *
@@ -3285,7 +3395,21 @@ wp newspack-post-image-downloader import-images
 			
 			// Reset the counters so new content can be imported (if final data is being run again).
 			// removed: too many issues during migration: update_option('fgd2wp_last_comment_id', 0); // uses fgd2wp_pre_insert_comment (above) for uniqueness.
-			update_option('fgd2wp_last_drupal_url_id', 0); // uses "INSERT IGNORE" into wp_fg_redirects.
+
+			// uses "INSERT IGNORE" into wp_fg_redirects.
+			// need to go from NEWEST TO OLDEST
+			// this can only be run once
+
+			// die if rows already exist
+			
+			global $wpdb;
+
+			if( 'yes' === $wpdb->get_var( "SELECT 'yes' from wp_fg_redirect " ) ) {
+				$this->logger->error( 'FG Redirect table must be empty.' );
+				exit();
+			}
+
+			update_option('fgd2wp_last_drupal_url_id', PHP_INT_MAX );
 			
 			// Allow import.
 			// removed: too many issues during migration: $premium_options['skip_comments']  = false;
