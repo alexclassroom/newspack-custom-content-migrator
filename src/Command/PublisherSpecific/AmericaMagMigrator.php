@@ -1296,7 +1296,7 @@ BLOCK;
 		$this->logger->info( 'Running command: ' . __FUNCTION__ );
 
 		$start_from = $assoc_args['start'] ?? 0;
-		$end_at     = $assoc_args['end'] ?? 0;
+		$end_at     = $assoc_args['end'] ?? PHP_INT_MAX;
 
 		$csv_writer = new CsvWriter( __FUNCTION__ . '.csv' );
 		$csv_writer->set_header( [
@@ -1313,19 +1313,23 @@ BLOCK;
 		global $wpdb;
 
 		$post_ids_with_legacy_shortcodes = $wpdb->get_col(
-			"SELECT `ID`
-			 FROM `{$wpdb->posts}`
-			 WHERE `post_type` = 'post'
-			 AND (
-			 	`post_content` LIKE '%[view:related_video]%'
-			 	OR `post_content` LIKE '%[view:related_content]%'
-			 	OR `post_content` LIKE '%[view: related_content]%'
-			 	OR `post_content` LIKE '%[view:related_sponsorship]%'
-			 	OR `post_content` LIKE '%[view:related_podcast]%'
-			 	OR `post_content` LIKE '%[view:book_in_review]%'
-			 	OR `post_content` LIKE '%[view:word]%'
-			 )
-			 ORDER BY `ID` ASC"
+			$wpdb->prepare(
+				"SELECT `ID`
+				FROM `{$wpdb->posts}`
+				WHERE `post_type` = 'post'
+				AND (
+					`post_content` LIKE '%[view:related_video]%'
+					OR `post_content` LIKE '%[view:related_content]%'
+					OR `post_content` LIKE '%[view: related_content]%'
+					OR `post_content` LIKE '%[view:related_sponsorship]%'
+					OR `post_content` LIKE '%[view:related_podcast]%'
+					OR `post_content` LIKE '%[view:word]%'
+				)
+				ORDER BY `ID` ASC
+				LIMIT %d, %d",
+				$start_from,
+				$end_at
+			)
 		);
 
 		$legacy_shortcodes = [
@@ -1334,7 +1338,6 @@ BLOCK;
 			'[view:related_video]',
 			'[view:related_sponsorship]',
 			'[view:related_podcast]',
-			'[view:book_in_review]',
 			'[view:word]',
 		];
 
@@ -1395,18 +1398,22 @@ BLOCK;
 							'imageScale' => 1,
 							'sectionHeader' => 'Related Stories',
 							'specificMode' => true,
+							'className' => 'newspack-migration-related-content'
 						] ) );
 						
 						$used_shortcodes_in_post[] = $legacy_shortcode;
-						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 					} else {
+						$replacement = '<!-- newspack-migration-hidden related-content /-->';
+						
 						$this->logger->warning( '— No posts found in the related meta' );
 					}
+
+					$post_content_updated = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 				}
 
 				// Replace [view:word] shortcode.
 				if ( $legacy_shortcode === '[view:word]' ) {
-					$replacement = '<!-- newspack-migration-hidden [view:word] /-->';
+					$replacement = '<!-- newspack-migration-hidden view:word /-->';
 
 					$used_shortcodes_in_post[] = $legacy_shortcode;
 					$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
@@ -1414,7 +1421,7 @@ BLOCK;
 
 				// Replace [view:related_sponsorship] shortcode.
 				if ( $legacy_shortcode === '[view:related_sponsorship]' ) {
-					$replacement = '<!-- newspack-migration-hidden [view:related_sponsorship] /-->';
+					$replacement = '<!-- newspack-migration-hidden view:related_sponsorship /-->';
 
 					$used_shortcodes_in_post[] = $legacy_shortcode;
 					$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
@@ -1425,13 +1432,16 @@ BLOCK;
 					$podcast_id = get_post_meta( $post_id, 'related_podcast', true );
 
 					if ( empty( $podcast_id ) || ! get_post( $podcast_id ) ) {
+						$replacement = '<!-- newspack-migration-hidden view:related_podcast /-->';
+
 						$this->logger->warning( sprintf( '— Skipping — No related podcast for post ID %d', $post_id ) );
 					} else {
 						$replacement = sprintf( '<strong>Listen to the <a href="%s">related podcast</a></strong>', get_permalink( $podcast_id ) );
 
 						$used_shortcodes_in_post[] = $legacy_shortcode;
-						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 					}
+
+					$post_content_updated = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 				}
 
 				// Replace [view:related_video] shortcode.
@@ -1439,13 +1449,16 @@ BLOCK;
 					$video_id = get_post_meta( $post_id, 'related_video', true );
 
 					if ( empty( $video_id ) || ! get_post( $video_id ) ) {
+						$replacement = '<!-- newspack-migration-hidden view:related_video /-->';
+
 						$this->logger->warning( sprintf( '— Skipping — No related video for post ID %d', $post_id ) );
 					} else {
-						$replacement = sprintf( '<strong>Watch the <a href="%s">related video</a></strong>', get_permalink( $podcast_id ) );
+						$replacement = sprintf( '<strong>Watch the <a href="%s">related video</a></strong>', get_permalink( $video_id ) );
 
 						$used_shortcodes_in_post[] = $legacy_shortcode;
-						$post_content_updated      = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 					}
+
+					$post_content_updated = str_replace( $legacy_shortcode, $replacement, $post_content_updated );
 				}
 			}
 
