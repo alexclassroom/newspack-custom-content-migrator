@@ -1671,7 +1671,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$post_json_file   = $assoc_args['post-json-file'];
 		$post_start_from  = $assoc_args['start-from'] ?? 0;
 		$post_end_at      = $assoc_args['end-at'] ?? 0;
-		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
+		$oid_to_migrate   = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
@@ -2316,7 +2316,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 				}
 
 				// Migrate different permalink.
-				if ( isset( $post->permalink ) && ! empty( $post->permalink ) ) {
+				if ( isset( $post->permalink ) && ! empty( $post->permalink ) && $post->permalink !== $post_relative_permalink ) {
 					$logger->info( sprintf( 'Migrating different permalink for post %s (%s => %s)', $post->oid, $post->permalink, $post_relative_permalink ) );
 					$this->custom_redirect_generator->add_redirect( $post->permalink, $post_relative_permalink );
 				}
@@ -2336,8 +2336,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $from ), '/' );
 				$new_url    = trim( $to, '/' );
 
-				$logger->info( sprintf( 'Adding a custom redirect (%s => %s)', $legacy_url, $new_url ) );
-				$this->custom_redirect_generator->add_redirect( $legacy_url, $new_url );
+				if ( $legacy_url !== $new_url ) {
+					$logger->info( sprintf( 'Adding a custom redirect (%s => %s)', $legacy_url, $new_url ) );
+					$this->custom_redirect_generator->add_redirect( $legacy_url, $new_url );
+				}
 			}
 		}
 
