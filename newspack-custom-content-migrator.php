@@ -91,6 +91,7 @@ PluginSetup::register_command_classes(
 		Command\PublisherSpecific\TimesOfSanDiegoMigrator::class,
 		Command\PublisherSpecific\NewspapersOfNewEngland\NNEMigrator::class,
 		Command\PublisherSpecific\NewPinePlainsHeraldMigrator::class,
+		Command\PublisherSpecific\CronkiteNewsMigrator::class,
 	]
 );
 
