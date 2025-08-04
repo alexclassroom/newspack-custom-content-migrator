@@ -1636,12 +1636,18 @@ BLOCK;
 		// Urls should be insert by path_alias ID DESC so older urls would be
 		// ignored by INSERT IGNORE.
 
-		// see: fgd2wp_get_urls_sql
+		// fixed with filter: fgd2wp_get_urls_sql
+
+		// Also note that the old site used mixed case in their urls...so when doing
+		// matching do it with PHP (case-sensitive), where as MYSQL will match and group
+		// case-insensitive (unless using BINARY keyword.
 		
 		// Get the FG redirects.
+		// remove types that we're not supporting (CPTs) and already done (profiles).
 		$results = $wpdb->get_results( "
 			select old_url, id, type
 			from wp_fg_redirect
+			where type not in ( 'blog', 'book', 'category', 'podcast_series', 'post_tag', 'profile', 'sponsorship' )
 			order by type, old_url, id
 		");
 
@@ -1669,36 +1675,87 @@ BLOCK;
 					exit();
 			}
 			
-			$file_suffix = preg_replace( '/[^a-z_]/', '-', $result->type );
-
 			// Check for errors.
 			if( ! is_string( $permalink ) || empty( $permalink ) ) {
 				$this->logger->error( 'Permalink is not a valid string.' );
 				exit();
 			}
-	
+
+			// Setup output filename.
+			$file_suffix = preg_replace( '/[^a-z_]/', '-', $result->type );
+
+			// Set wp url to relative.
 			$permalink = wp_make_link_relative( trim( $permalink ) );
+
+			// Just in case old url had hidden whitespace.
 			$result->old_url = trim( $result->old_url );
-				
-			// Post, skip if same value.
-			if( 'post' === $result->type ) {
-				
+
+			// Remove traling slash to standardize old url ( even though none in fg table have trailing slash ).
+			$result->old_url = rtrim( $result->old_url, '/' );
+
+			// For any root level urls (doesn't have multiple slashes), put these in a seperate file.
+			if ( ! ( substr_count( $result->old_url, '/') > 1 ) ) {
+				$file_suffix .= '-root-url';
+			}
+
+
+			// Categories
+			if( 'category' === $result->type ) {
+
 				$this->logger->info( 'Relative permalink: ' . $permalink );
 
-				if( 0 === strcmp( rtrim( $result->old_url, '/' ), rtrim( $permalink, '/' ) ) ) {
-					$this->logger->notice( 'Skip: Urls match.' );
-					continue;
+				// validation.
+				if( preg_replace( '#^/section(s?)/#', '/category/', $result->old_url ) . '/' === $permalink ) {
+					$this->logger->notice( 'Use regex: /sections?/(.*) => /category/$1 ' );
+					$file_suffix .= '-regex-match';
 				}
-
-				$this->logger->warning( 'Redirect needed.' );
-
-				// post post types:
-				$old_post_type = trim( get_post_meta( $result->id, '_np_migration_old_post_type', true ) );
-				if( ! empty( $old_post_type ) ) {
-					$file_suffix .= '-' . $old_post_type;
+				else {
+					$this->logger->warning( 'Redirect needed.' );
+					$file_suffix .= '-need-redirect';
 				}
 
 			}
+
+			// Tags
+			else if( 'post_tag' === $result->type ) {
+
+				$this->logger->info( 'Relative permalink: ' . $permalink );
+
+				// validation.
+				if( preg_replace( '#^/topic/#', '/tag/', $result->old_url ) . '/' === $permalink ) {
+					$this->logger->notice( 'Use regex: /topic/(.*) => /tag/$1 ' );
+					$file_suffix .= '-regex-match';
+				}
+				else {
+					$this->logger->warning( 'Redirect needed.' );
+					$file_suffix .= '-need-redirect';
+				}
+
+			}
+
+			// Posts
+			else if( 'post' === $result->type ) {
+				
+				$this->logger->info( 'Relative permalink: ' . $permalink );
+
+				// Filename logging by old post type.
+				$old_post_type = trim( get_post_meta( $result->id, '_np_migration_old_post_type', true ) );
+				if( ! empty( $old_post_type ) ) {
+					$file_suffix .= '-old-' . $old_post_type;
+				}
+				
+				// See if exact match, removing '/' for matching.
+				if( 0 === strcmp( $result->old_url, rtrim( $permalink, '/' ) ) ) {
+					$this->logger->notice( 'Skip: Urls match.' );
+					$file_suffix .= '-exact-match';
+				}
+				else {
+					$this->logger->warning( 'Redirect needed.' );
+					$file_suffix .= '-need-redirect';
+				}
+
+			}
+
 			// Profile matches.
 			else if( 'profile' === $result->type ) {
 				
@@ -1718,20 +1775,18 @@ BLOCK;
 				}
 	
 				$permalink = '/author/' . $user_nicename;
+
 				$this->logger->info( 'Relative permalink: ' . $permalink );
 
 				// validation.
 				if( '/voices' === dirname( $result->old_url ) && wp_basename( $result->old_url ) === $user_nicename ) {
-					$this->logger->notice( 'Use regex: /voices/.* => /author/$1 ' );
-					continue;
+					$this->logger->notice( 'Use regex: /voices/(.*) => /author/$1 ' );
+					$file_suffix .= '-regex-match';
 				}
-
-				$this->logger->warning( 'Redirect needed.' );
-
-			}
-			
-			if ( ! ( substr_count( rtrim( $result->old_url, '/' ), '/') > 1 ) ) {
-				$file_suffix .= '-one-slash';
+				else {
+					$this->logger->warning( 'Redirect needed.' );
+					$file_suffix .= '-need-redirect';
+				}
 			}
 
             $this->logger_csv_out( $logger_slug . '-' . $file_suffix . '-', [
