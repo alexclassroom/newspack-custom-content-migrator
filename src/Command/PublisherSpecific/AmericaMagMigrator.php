@@ -336,7 +336,7 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			[ 
 				'attachment-check-hashes',
 				'attachment-set-hashes',
-				'fg-redirects',
+				'redirects',
 			]
 		);		
 
@@ -347,8 +347,8 @@ class AmericaMagMigrator implements RegisterCommandInterface {
 			case 'attachment-set-hashes':
 				$this->bulk_attachment_set_hashes();
 				break;
-			case 'fg-redirects':
-				$this->bulk_fg_redirects( $logger_slug );
+			case 'redirects':
+				$this->bulk_redirects( $logger_slug );
 				break;
 			default:
 				$this->logger->error( 'No bulk processing for: ' . $pos_args[0] );
@@ -1622,111 +1622,23 @@ BLOCK;
 
 	}
 
-	private function bulk_fg_redirects( $logger_slug ) {
+	private function bulk_redirects( $logger_slug ) {
 
 		global $wpdb;
 		
-
 		// BUG IN FG PLUGIN.
+
 		// FG will add to their redirects table from oldest to newest with INSERT IGNORE
 		// this means the oldest url will be captured, but the NEW url will be ignored.
 		
 		// For profiles, this meant that a couple profile urls were swapped.
+		
 		// Urls should be insert by path_alias ID DESC so older urls would be
 		// ignored by INSERT IGNORE.
+
+		// see: fgd2wp_get_urls_sql
 		
-		// DON'T USE MYSQL MATCHING/GROUPING SINCE IT COULD BE CASE-INSENSITIVE...USE PHP
-		// OR USE 'BINARY` KEYWORD IN MYSQL
-
-		/*
-			actually it's OK:
-
-				-- count 169761
-				select distinct binary alias from path_alias order by alias, id;
-
-				-- count 169760
-				select distinct alias from path_alias order by alias, id;
-		*/
-
-
-		/*
-			-- profiles in wp back to drupal path (bypassing FG)
-			select pa.alias, group_concat( pa.path ) as pathgroup
-			from wp_posts p
-			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
-			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
-			where p.post_type = 'profile' and p.post_status = 'publish'
-			group by pa.alias
-			having pathgroup like '%,%'
-			order by alias
-			;
-		*/
-
-
-		/*
-			For posts, this query will get the possible urls that a post ID can have.
-			the highest revision id is the final URL drupal will redirect to.
-
-			select pa.path, group_concat( pa.alias ) as mygroup
-			from wp_posts p
-			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
-			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
-			where p.post_type = 'post' and p.post_status = 'publish'
-			group by pa.path
-			having mygroup like '%,%'
-			order by pa.path
-			;
-
-			This query will give the URLS that could match multiple node ids:
-
-			select pa.alias, group_concat( pa.path ) as pathgroup
-			from wp_posts p
-			join wp_postmeta pm on pm.post_id = p.ID and pm.meta_key = '_fgd2wp_old_node_id'
-			join path_alias pa on pa.status = 1 and pa.path = concat( '/node/', pm.meta_value )
-			where p.post_type = 'post' and p.post_status = 'publish'
-			group by pa.alias
-			having pathgroup like '%,%'
-			order by alias
-
-
-			Take the example:
-
-				/Advent-Reflection-and-Prayer	=> /node/124244,/node/124592,/node/124646
-
-				select revision_id, status, path, alias from path_alias where alias = '/Advent-Reflection-and-Prayer'
-				order by revision_id
-
-					revision, status, path, alias
-					144205	1	/node/124244	/Advent-Reflection-and-Prayer
-					144740	1	/node/124592	/Advent-reflection-and-prayer
-					144836	1	/node/124646	/Advent-reflection-and-prayer
-
-				In the browser, Drupal will redirect to: 
-
-					https://www.americamagazine.org/content/good-word/advent-reflection-and-prayer-i
-
-					which is /node/124646
-
-					This is the LATEST revision ID, but what is it's last revision?
-
-					select revision_id, status, path, alias from path_alias where path = '/node/124646'
-					order by revision_id
-
-					144836	1	/node/124646	/Advent-reflection-and-prayer
-					144837	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-					150281	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-					151589	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-					166008	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-					170237	1	/node/124646	/content/advent-reflection-and-prayer-i
-					171573	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-					266906	1	/node/124646	/content/good-word/advent-reflection-and-prayer-i
-
-					The last url is the final URL.
-
-				FG on the other hand, thinks it should be: 124244 (the first revision_id)
-
-		*/
-
+		// Get the FG redirects.
 		$results = $wpdb->get_results( "
 			select old_url, id, type
 			from wp_fg_redirect
@@ -3284,16 +3196,19 @@ wp newspack-post-image-downloader import-images
 	public function fgd2wp_get_urls_sql( $sql ) {
 
 		/*
-		original:
+		 	FG sql:
 
-		SELECT u.id AS id, u.path AS source, u.alias
-		FROM path_alias u
-		WHERE u.id > '9223372036854775807'
-		ORDER BY u.id
-		LIMIT 10
+			SELECT u.id AS id, u.path AS source, u.alias
+			FROM path_alias u
+			WHERE u.id > '9223372036854775807'
+			ORDER BY u.id
+			LIMIT 10
 		*/
 
+		// Change to less than because we are starting with PHP MAX INT
 		$sql = str_replace( 'WHERE u.id > ', 'WHERE u.id < ', $sql );
+
+		// Order by DESC so that new urls will be inserted first and older ignore.
 		$sql = str_replace( 'ORDER BY u.id', 'ORDER BY u.id DESC', $sql );
 
 		return $sql;
@@ -3641,26 +3556,20 @@ wp newspack-post-image-downloader import-images
 		// Allow the redirects to be added.
 		if( $this->flag_set_final_data ) {
 			
-			// Reset the counters so new content can be imported (if final data is being run again).
-			// removed: too many issues during migration: update_option('fgd2wp_last_comment_id', 0); // uses fgd2wp_pre_insert_comment (above) for uniqueness.
+			// -- Legacy Comments:
 
-			// uses "INSERT IGNORE" into wp_fg_redirects.
-			// need to go from NEWEST TO OLDEST
-			// this can only be run once
+			// Reset the comments counter so new comments can be imported.
+			// Uses fgd2wp_pre_insert_comment (above) for uniqueness.
+			// Removed due to too many issues during migration:
+			// update_option('fgd2wp_last_comment_id', 0); 
+			// $premium_options['skip_comments'] = false;
 
-			// die if rows already exist
-			
-			global $wpdb;
+			// -- Legacy Redirects:
 
-			if( 'yes' === $wpdb->get_var( "SELECT 'yes' from wp_fg_redirect " ) ) {
-				$this->logger->error( 'FG Redirect table must be empty.' );
-				exit();
-			}
-
+			// FG uses "INSERT IGNORE" into wp_fg_redirects.
+			// But FG is wrong, the SQL needs to insert from NEWEST TO OLDEST
+			// see: fgd2wp_get_urls_sql
 			update_option('fgd2wp_last_drupal_url_id', PHP_INT_MAX );
-			
-			// Allow import.
-			// removed: too many issues during migration: $premium_options['skip_comments']  = false;
 			$premium_options['skip_redirects'] = false;
 
 		}
