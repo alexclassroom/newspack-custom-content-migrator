@@ -1716,17 +1716,47 @@ BLOCK;
 
 			}
 
-			// Tags
-			else if( 'post_tag' === $result->type ) {
+			// Issues
+			else if( 'issue' === $result->type ) {
+
+				// Get related Collection.
+				$collection_id = $wpdb->get_var( $wpdb->prepare( "
+					SELECT post_id
+					FROM wp_postmeta
+					WHERE meta_key = %s and meta_value = %d
+					",
+					'_nmt_collection_uniqid',
+					$result->id,
+				));
+
+				if( ! is_string( $collection_id ) || empty( $collection_id ) || ! is_numeric( $collection_id ) ) {
+					$this->logger->error( 'Collection postmeta is not a valid value.' );
+					exit();
+				}
+	
+				// Setup new permalink based on related Collection.
+				$permalink = get_permalink( (int) $collection_id );				
+				if( ! is_string( $permalink ) || empty( $permalink ) ) {
+					$this->logger->error( 'Permalink is not a valid string.' );
+					exit();
+				}
+				$permalink = wp_make_link_relative( trim( $permalink ) );
 
 				$this->logger->info( 'Relative permalink: ' . $permalink );
 
 				// validation.
-				if( preg_replace( '#^/topic/#', '/tag/', $result->old_url ) . '/' === $permalink ) {
-					$this->logger->notice( 'Use regex: /topic/(.*) => /tag/$1 ' );
-					$file_suffix .= '-regex-match';
+				$regex_matched = false;
+				if( preg_match( '#^/issue/([0-9]+)/?$#', $result->old_url, $matches )
+					|| preg_match( '#^/magazine/[0-9]{4}/([^/]+)/?$#', $result->old_url, $matches ) 
+				) {
+					if( isset( $matches ) && isset( $matches[1] ) && '/magazine/' . $matches[1] . '/' === $permalink ) {
+						$this->logger->notice( 'Use regex.' );
+						$file_suffix .= '-regex-match';
+						$regex_matched = true;
+					}
 				}
-				else {
+				
+				if( ! $regex_matched ) {
 					$this->logger->warning( 'Redirect needed.' );
 					$file_suffix .= '-need-redirect';
 				}
@@ -1748,6 +1778,23 @@ BLOCK;
 				if( 0 === strcmp( $result->old_url, rtrim( $permalink, '/' ) ) ) {
 					$this->logger->notice( 'Skip: Urls match.' );
 					$file_suffix .= '-exact-match';
+				}
+				else {
+					$this->logger->warning( 'Redirect needed.' );
+					$file_suffix .= '-need-redirect';
+				}
+
+			}
+
+			// Tags
+			else if( 'post_tag' === $result->type ) {
+
+				$this->logger->info( 'Relative permalink: ' . $permalink );
+
+				// validation.
+				if( preg_replace( '#^/topic/#', '/tag/', $result->old_url ) . '/' === $permalink ) {
+					$this->logger->notice( 'Use regex: /topic/(.*) => /tag/$1 ' );
+					$file_suffix .= '-regex-match';
 				}
 				else {
 					$this->logger->warning( 'Redirect needed.' );
