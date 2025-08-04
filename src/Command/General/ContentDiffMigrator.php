@@ -11,6 +11,7 @@ use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
+use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use WP_CLI;
 
 /**
@@ -875,6 +876,8 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 		// Import Posts.
 		$percent_progress = null;
 		foreach ( $post_ids_for_import as $key_post_id => $post_id_live ) {
+			// Flush memory.
+			MemoryCleanupHook::cleanup();
 
 			// Get and output progress meter by 10%.
 			$last_percent_progress = $percent_progress;
