@@ -567,6 +567,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -1664,6 +1671,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$post_json_file   = $assoc_args['post-json-file'];
 		$post_start_from  = $assoc_args['start-from'] ?? 0;
 		$post_end_at      = $assoc_args['end-at'] ?? 0;
+		$oid_to_migrate         = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
@@ -1671,6 +1679,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 			MemoryCleanupHook::cleanup( 1, $index, 50 );
 
 			if ( $index < ( $post_start_from - 1 ) || ( $post_end_at > 0 && $index >= $post_end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
 				continue;
 			}
 

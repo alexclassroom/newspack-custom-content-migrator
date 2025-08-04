@@ -11,17 +11,10 @@ namespace NewspackCustomContentMigrator\Command\General\Foundation;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
-use Newspack\MigrationTools\Logic\GuestContributorsHelper;
 use Newspack\MigrationTools\Logic\Attachments;
-use Newspack\MigrationTools\Logic\Taxonomy;
-use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
-use Newspack\MigrationTools\Logic\UsersHelper;
-use Newspack\MigrationTools\Logic\GutenbergBlockGenerator;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
-use Newspack\MigrationTools\Util\CsvWriter;
-use Newspack\MigrationTools\Util\CustomRedirectGenerator;
 use WP_CLI;
 
 class FoundationFixes implements RegisterCommandInterface {
@@ -246,6 +239,37 @@ class FoundationFixes implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'media-local-path',
 						'description' => 'Local path to the media files (The folder usually have a `mediaserver` folder).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-set-image-license-meta',
+			self::get_command_closure( 'cmd_set_image_license_meta' ),
+			[
+				'shortdesc' => 'Sets the image license meta for posts received from their export.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'image-json-file',
+						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -626,5 +650,43 @@ class FoundationFixes implements RegisterCommandInterface {
 		$media_path       = is_file( $local_media_path ) ? $local_media_path : $raw_attachment->url;
 
 		return Attachments::import_external_file( $media_path, null, $caption, null, $alt, $post_id, $meta_input, '', true, $raw_attachment->oid );
+	}
+
+	/**
+	 * Sets the image license meta for posts received from their export.
+	 * Callable for 'newspack-content-migrator foundation-set-image-license-meta' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_set_image_license_meta( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$image_json_file = $assoc_args['image-json-file'];
+		$start_from      = $assoc_args['start-from'] ?? 0;
+		$end_at          = $assoc_args['end-at'] ?? 0;
+
+		$raw_images = $this->json_iterator->items( $image_json_file );
+		foreach ( $raw_images as $index => $image ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$existing_post_id = Attachments::get_attachment_by_unique_identifier( $image->oid );
+
+			if ( ! isset( $image->license ) || empty( $image->license ) ) {
+				continue;
+			}
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Image %d not found', $image->oid ) );
+				continue;
+			}
+
+			update_post_meta( $existing_post_id, 'distribution_notes', $image->license );
+			$logger->info( sprintf( 'Set distribution notes for image %d to %s', $existing_post_id, $image->license ) );
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
 	}
 }
