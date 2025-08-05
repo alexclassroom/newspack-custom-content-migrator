@@ -3328,7 +3328,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$sub_title_blocks = [];
 
 		if ( 'event' === $type ) {
-			$this->gutenberg_block_generator->get_paragraph(
+			$sub_title_blocks[] = $this->gutenberg_block_generator->get_paragraph(
 				$event_data->time,
 				'',
 				'medium-gray',
@@ -3379,9 +3379,35 @@ class FoundationMigrator implements RegisterCommandInterface {
 			]
 		);
 
-		if ( 'location' === $type && isset( $event_data->phone ) ) {
+		if ( 'location' === $type && isset( $event_data->phone ) && ! empty( $event_data->phone ) ) {
 			$sub_title_blocks[] = $this->gutenberg_block_generator->get_paragraph(
 				$event_data->phone,
+				'',
+				'medium-gray',
+				'small',
+				[],
+				[
+					'metadata'  => [
+						'name' => 'Meta',
+					],
+					'style'     => [
+						'elements' => [
+							'link' => [
+								'color' => [
+									'text' => 'var:preset|color|medium-gray',
+								],
+							],
+						],
+					],
+					'textColor' => 'medium-gray',
+					'fontSize'  => 'small',
+				]
+			);
+		}
+
+		if ( isset( $event_data->contactURL ) && ! empty( $event_data->contactURL ) ) {
+			$sub_title_blocks[] = $this->gutenberg_block_generator->get_paragraph(
+				'<a href="' . $event_data->contactURL . '">website</a>',
 				'',
 				'medium-gray',
 				'small',
@@ -3548,6 +3574,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		if ( ! empty( $location->city ) ) {
 			$location_parts[] = $location->city;
+		}
+
+		if ( ! empty( $location->state ) ) {
+			$location_parts[] = $location->state;
 		}
 
 		return implode( ', ', $location_parts );
