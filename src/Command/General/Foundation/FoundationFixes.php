@@ -128,6 +128,13 @@ class FoundationFixes implements RegisterCommandInterface {
 						'optional'    => true,
 						'repeating'   => false,
 					],
+					[
+						'type'        => 'flag',
+						'name'        => 'is-slideshow',
+						'description' => 'Is the post a slideshow.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
 				],
 			]
 		);
@@ -387,6 +394,7 @@ class FoundationFixes implements RegisterCommandInterface {
 		$post_json_file = $assoc_args['post-json-file'];
 		$start_from     = $assoc_args['start-from'] ?? 0;
 		$end_at         = $assoc_args['end-at'] ?? 0;
+		$is_slideshow   = $assoc_args['is-slideshow'] ?? false;
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
@@ -401,14 +409,26 @@ class FoundationFixes implements RegisterCommandInterface {
 				continue;
 			}
 
-			if ( isset( $post->title ) && ! empty( $post->title ) ) {
-				update_post_meta( $existing_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->title ) );
-			}
-			if ( isset( $post->description ) && ! empty( $post->description ) ) {
-				update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
-			}
-			if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
-				update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+			if ( $is_slideshow ) {
+				if ( isset( $post->title ) && ! empty( $post->title ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->title ) );
+				}
+				if ( isset( $post->description ) && ! empty( $post->description ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
+				}
+				if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+				}
+			} else {
+				if ( isset( $post->title ) && ! empty( $post->title ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->title ) );
+				}
+				if ( isset( $post->description ) && ! empty( $post->description ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
+				}
+				if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+				}
 			}
 
 			$logger->info( sprintf( '[%d] Migrated SEO meta for post %d', $index, $existing_post_id ) );
