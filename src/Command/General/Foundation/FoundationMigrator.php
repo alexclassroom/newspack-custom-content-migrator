@@ -1502,6 +1502,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 			// Always hide the featured image.
 			update_post_meta( $migrated_slideshow_id, 'newspack_featured_image_position', 'hidden' );
 
+			// Migrate SEO meta.
+			if ( isset( $post->metaTitle ) && ! empty( $post->metaTitle ) ) {
+				update_post_meta( $migrated_slideshow_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->metaTitle ) );
+			}
+			if ( isset( $post->metaDescription ) && ! empty( $post->metaDescription ) ) {
+				update_post_meta( $migrated_slideshow_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->metaDescription ) );
+			}
+			if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
+				update_post_meta( $migrated_slideshow_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+			}
+
 			$migrated_slideshows[ $slideshow->oid ] = $migrated_slideshow_id;
 
 			$csv_writer->put( [ $slideshow->oid, $migrated_slideshow_id, 'https://' . $publisher_domain . $slideshow->permalink, get_permalink( $migrated_slideshow_id ) ] );
