@@ -410,14 +410,11 @@ class FoundationFixes implements RegisterCommandInterface {
 			}
 
 			if ( $is_slideshow ) {
-				if ( isset( $post->title ) && ! empty( $post->title ) ) {
-					update_post_meta( $existing_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->title ) );
+				if ( isset( $post->metaTitle ) && ! empty( $post->metaTitle ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_title', wp_strip_all_tags( $post->metaTitle ) );
 				}
-				if ( isset( $post->description ) && ! empty( $post->description ) ) {
-					update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
-				}
-				if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
-					update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
+				if ( isset( $post->metaDescription ) && ! empty( $post->metaDescription ) ) {
+					update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->metaDescription ) );
 				}
 			} else {
 				if ( isset( $post->title ) && ! empty( $post->title ) ) {
@@ -426,9 +423,10 @@ class FoundationFixes implements RegisterCommandInterface {
 				if ( isset( $post->description ) && ! empty( $post->description ) ) {
 					update_post_meta( $existing_post_id, '_yoast_wpseo_metadesc', wp_strip_all_tags( $post->description ) );
 				}
-				if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
-					update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
-				}
+			}
+
+			if ( isset( $post->canonical ) && ! empty( $post->canonical ) ) {
+				update_post_meta( $existing_post_id, '_yoast_wpseo_canonical', wp_strip_all_tags( $post->canonical ) );
 			}
 
 			$logger->info( sprintf( '[%d] Migrated SEO meta for post %d', $index, $existing_post_id ) );
