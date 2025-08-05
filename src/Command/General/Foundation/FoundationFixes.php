@@ -15,6 +15,7 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
+use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use WP_CLI;
 
 class FoundationFixes implements RegisterCommandInterface {
@@ -125,6 +126,13 @@ class FoundationFixes implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'end-at',
 						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'oid-to-migrate',
+						'description' => 'OIDs to migrate (comma separated).',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -395,10 +403,18 @@ class FoundationFixes implements RegisterCommandInterface {
 		$start_from     = $assoc_args['start-from'] ?? 0;
 		$end_at         = $assoc_args['end-at'] ?? 0;
 		$is_slideshow   = $assoc_args['is-slideshow'] ?? false;
+		$oid_to_migrate = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
 				continue;
 			}
 

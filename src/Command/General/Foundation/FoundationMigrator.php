@@ -1134,7 +1134,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				// If the first block is an image, hide the featured image.
 				$content_blocks = parse_blocks( $updated_content );
-				if ( isset( $content_blocks[0]['blockName'] ) && in_array( $content_blocks[0]['blockName'], [ 'core/image', 'core/gallery', 'core/embed', 'jetpack/slideshow' ], true ) ) {
+				if (
+					( isset( $content_blocks[0]['blockName'] ) && in_array( $content_blocks[0]['blockName'], [ 'core/image', 'core/gallery', 'core/embed', 'jetpack/slideshow' ], true ) )
+					|| ( null === $content_blocks[0]['blockName'] && str_starts_with( $updated_content, '<iframe' ) )
+				) {
 					update_post_meta( $migrated_post_id, 'newspack_featured_image_position', 'hidden' );
 				}
 
@@ -4035,7 +4038,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$output = '';
 		foreach ( $paragraphs as $p ) {
 			$trimmed = trim( $p );
-			if ( ! empty( $trimmed ) && ! str_starts_with( $trimmed, '<p>' ) && ! str_starts_with( $trimmed, '[' ) ) {
+			if ( ! empty( $trimmed ) && ! str_starts_with( $trimmed, '<p>' ) && ! str_starts_with( $trimmed, '[' ) && ! str_starts_with( $trimmed, '<iframe' ) && ! str_starts_with( $trimmed, '<style' ) ) {
 				$output .= '<p>' . $trimmed . '</p>' . "\n";
 			} else {
 				$output .= $trimmed . "\n";
