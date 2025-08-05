@@ -911,23 +911,23 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$migrated_comment_authors = [];
 
 		// Migrate comment authors.
-		foreach ( $raw_comment_authors as $comment_author ) {
-			try {
-				$migrated_comment_author_id                       = $this->migrate_to_wp_user( $comment_author, 'subscriber', $logger );
-				$migrated_comment_authors[ $comment_author->oid ] = $migrated_comment_author_id;
-				$logger->info( sprintf( 'Migrated comment author %s with ID %d', $comment_author->oid, $migrated_comment_author_id ) );
-			} catch ( \Exception $e ) {
-				$logger->error( sprintf( 'Error migrating comment author %s (username: %s): %s', $comment_author->oid, $comment_author->username, $e->getMessage() ) );
-			}
-		}
+		// foreach ( $raw_comment_authors as $comment_author ) {
+		// try {
+		// $migrated_comment_author_id                       = $this->migrate_to_wp_user( $comment_author, 'subscriber', $logger );
+		// $migrated_comment_authors[ $comment_author->oid ] = $migrated_comment_author_id;
+		// $logger->info( sprintf( 'Migrated comment author %s with ID %d', $comment_author->oid, $migrated_comment_author_id ) );
+		// } catch ( \Exception $e ) {
+		// $logger->error( sprintf( 'Error migrating comment author %s (username: %s): %s', $comment_author->oid, $comment_author->username, $e->getMessage() ) );
+		// }
+		// }
 
 		// Migrate authors.
-		foreach ( $raw_authors as $author ) {
-			$migrated_author_id = $this->migrate_to_wp_user( $author, 'author', $logger );
+		// foreach ( $raw_authors as $author ) {
+		// $migrated_author_id = $this->migrate_to_wp_user( $author, 'author', $logger );
 
-			$migrated_authors[ $author->oid ] = $migrated_author_id;
-			$logger->info( sprintf( 'Migrated author %s with ID %d', $author->oid, $migrated_author_id ) );
-		}
+		// $migrated_authors[ $author->oid ] = $migrated_author_id;
+		// $logger->info( sprintf( 'Migrated author %s with ID %d', $author->oid, $migrated_author_id ) );
+		// }
 
 		// Migrate contributors.
 		foreach ( $raw_contributors as $contributor ) {
@@ -3710,7 +3710,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			case 'Pending Review':
 				return 'pending';
 			case 'Offline':
-				return 'trash';
+				return 'private';
 			case 'Scheduled':
 				return 'future';
 			default:
