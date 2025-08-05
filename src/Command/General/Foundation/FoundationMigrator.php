@@ -3953,6 +3953,19 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$allowed_tags = wp_kses_allowed_html( 'post' );
 
+		// Add iframe to allowed tags with common attributes.
+		$allowed_tags['iframe'] = array(
+			'src'             => true,
+			'width'           => true,
+			'height'          => true,
+			'frameborder'     => true,
+			'allowfullscreen' => true,
+			'allow'           => true,
+			'title'           => true,
+			'class'           => true,
+			'id'              => true,
+		);
+
 		// Remove style attribute from all tags.
 		foreach ( $allowed_tags as $tag => $attributes ) {
 			unset( $allowed_tags[ $tag ]['style'] );
