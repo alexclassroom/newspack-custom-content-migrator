@@ -1647,7 +1647,7 @@ BLOCK;
 		$results = $wpdb->get_results( "
 			select old_url, id, type
 			from wp_fg_redirect
-			where type not in ( 'blog', 'book', 'category', 'podcast_series', 'post_tag', 'profile', 'sponsorship' )
+			where type not in ( 'blog', 'book', 'category', 'issue', 'podcast_series', 'post_tag', 'profile', 'sponsorship' )
 			order by type, old_url, id
 		");
 
