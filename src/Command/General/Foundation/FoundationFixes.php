@@ -291,6 +291,37 @@ class FoundationFixes implements RegisterCommandInterface {
 				],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-switch-offline-posts-to-private',
+			self::get_command_closure( 'cmd_switch_offline_posts_to_private' ),
+			[
+				'shortdesc' => 'Switches offline posts to private.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -483,6 +514,61 @@ class FoundationFixes implements RegisterCommandInterface {
 				update_post_meta( $existing_post_id, 'newspack_featured_image_position', 'above' );
 
 				$logger->info( sprintf( '[%d] Post %d has post wide layout %s', $index, $existing_post_id, $post->layout ) );
+			}
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Switches offline posts to private.
+	 * Callable for 'newspack-content-migrator foundation-switch-offline-posts-to-private' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_switch_offline_posts_to_private( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file = $assoc_args['post-json-file'];
+		$start_from     = $assoc_args['start-from'] ?? 0;
+		$end_at         = $assoc_args['end-at'] ?? 0;
+		$is_slideshow   = $assoc_args['is-slideshow'] ?? false;
+		$oid_to_migrate = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			if ( ! empty( $oid_to_migrate ) && ! in_array( $post->oid, $oid_to_migrate ) ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( '[%d] Post %d not migrated', $index, $post->oid ) );
+				continue;
+			}
+
+			if ( 'Offline' === $post->status ) {
+				// @phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching
+				$wpdb->update(
+					$wpdb->posts,
+					[
+						'post_status' => 'private',
+					],
+					[ 'ID' => $existing_post_id ]
+				);
+
+				$logger->info( sprintf( '[%d] Switched post %d to private', $index, $existing_post_id ) );
 			}
 		}
 

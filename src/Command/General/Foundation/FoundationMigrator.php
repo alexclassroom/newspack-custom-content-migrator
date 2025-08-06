@@ -1064,7 +1064,15 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$tags = $post->tags ?? [];
 
 			if ( isset( $post->features ) && ! empty( $post->features ) ) {
-				$tags = array_merge( $tags, $post->features );
+				$feature_tags = array_values(
+					array_filter(
+						$post->features,
+						function ( $feature ) {
+							return 'Image' !== $feature;
+						}
+					)
+				);
+				$tags         = array_merge( $tags, $feature_tags );
 			}
 
 			if ( isset( $post->specialPlacement ) && ! empty( $post->specialPlacement ) ) {
@@ -2581,6 +2589,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @param array  $post_image_oids  Post image OIDs.
 	 * @param string $raw_images_file Raw images file.
 	 * @param array  $image_urls      Image URLs to use in we don't have the raw image data.
+	 * @param bool   $update_meta     Whether to update the meta data of the attachment.
 	 *
 	 * @return array Migrated images. A key-value pair of post image OID and an array with the raw image data and the attachment ID.
 	 */
@@ -3233,9 +3242,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @return array|\WP_Error Event data or WP_Error.
 	 */
 	private function get_events_or_locations_data( string $type, string $publisher_domain, string $event_or_location_id ): array|\WP_Error {
+		sleep( 2 );
 		return $this->get_data_from_api(
 			sprintf(
-				'https://posting.%s/gyrobase/API/%s?oid=%s',
+				'https://preview:preview@%s.%s/gyrobase/API/%s?oid=%s',
+				'chronogram.com' === $publisher_domain ? 'calendar' : 'community',
 				$publisher_domain,
 				'event' === $type ? 'EventSearch' : 'LocationSearch',
 				$event_or_location_id
