@@ -2216,7 +2216,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			}
 
 			if ( 'Content' !== $comment->type ) {
-				$logger->error( sprintf( 'Skipping comment %s because it is not a content comment: %s', $comment->oid, $comment->type ) );
+				$logger->warning( sprintf( 'Skipping comment %s because it is not a content comment: %s', $comment->oid, $comment->type ) );
 				continue;
 			}
 
