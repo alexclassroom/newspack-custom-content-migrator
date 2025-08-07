@@ -2292,9 +2292,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 	public function cmd_migrate_legacy_redirects( array $args, array $assoc_args ): void {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
-		$post_json_file     = $assoc_args['post-json-file'];
-		$redirect_csv_files = isset( $assoc_args['redirect-csv-files'] ) ? explode( ',', $assoc_args['redirect-csv-files'] ) : [];
-		$publisher_domain   = $assoc_args['publisher-domain'];
+		$post_json_file               = $assoc_args['post-json-file'];
+		$redirect_csv_files           = isset( $assoc_args['redirect-csv-files'] ) ? explode( ',', $assoc_args['redirect-csv-files'] ) : [];
+		$publisher_domain             = $assoc_args['publisher-domain'];
+		$publisher_domain_without_www = str_replace( 'www.', '', $publisher_domain );
 
 		$raw_posts      = $this->json_iterator->items( $post_json_file );
 		$migrated_posts = $this->load_posts();
@@ -2324,7 +2325,8 @@ class FoundationMigrator implements RegisterCommandInterface {
 				// Migrate legacy redirects.
 				foreach ( $post->legacyURL as $legacy_url ) {
 					// remove domain from the legacy URL.
-					$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $legacy_url ), '/' );
+					$legacy_url_without_www = str_replace( 'www.', '', $legacy_url );
+					$legacy_url             = rtrim( str_replace( 'https://' . $publisher_domain_without_www, '', $legacy_url_without_www ), '/' );
 
 					if ( str_contains( $legacy_url, 'http' ) ) {
 						$logger->warning( sprintf( 'Skipping legacy redirect for post %s because it is not a relative URL: %s', $post->oid, $legacy_url ) );
@@ -2350,13 +2352,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 				$from = $redirect[0];
 				$to   = $redirect[1];
 
-				if ( ! str_contains( $from, $publisher_domain ) ) {
-					$logger->warning( sprintf( 'Skipping redirect "%s" because it does not contain the publisher domain %s', $from, $publisher_domain ) );
+				if ( ! str_contains( $from, $publisher_domain_without_www ) ) {
+					$logger->warning( sprintf( 'Skipping redirect "%s" because it does not contain the publisher domain %s', $from, $publisher_domain_without_www ) );
 					continue;
 				}
 
-				$legacy_url = rtrim( str_replace( 'https://' . $publisher_domain, '', $from ), '/' );
-				$new_url    = trim( $to, '/' );
+				$from_without_www = str_replace( 'www.', '', $from );
+				$legacy_url       = rtrim( str_replace( 'https://' . $publisher_domain_without_www, '', $from_without_www ), '/' );
+				$new_url          = trim( $to, '/' );
 
 				if ( $legacy_url !== $new_url ) {
 					$logger->info( sprintf( 'Adding a custom redirect (%s => %s)', $legacy_url, $new_url ) );
