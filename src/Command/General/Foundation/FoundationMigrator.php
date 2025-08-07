@@ -3314,7 +3314,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 			$teaser_id = $this->migrate_raw_attachment( $event_data->teaser, $post_id );
 
 			if ( is_wp_error( $teaser_id ) ) {
-				$logger->error( sprintf( 'Error migrating teaser image for event %s (%s): %s', $event_data->oid, $event_data->teaser->url, $image_id->get_error_message() ) );
+				$logger->error( sprintf( 'Error migrating teaser image for event %s (%s): %s', $event_data->oid, $event_data->teaser->url, $teaser_id->get_error_message() ) );
 			}
 		}
 		$columns = [];
