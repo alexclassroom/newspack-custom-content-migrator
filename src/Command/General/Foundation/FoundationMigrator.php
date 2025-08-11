@@ -2330,7 +2330,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			if ( isset( $post->legacyURL ) && ! empty( $post->legacyURL ) ) {
 				$logger->info( sprintf( 'Migrating legacy redirect for post %s', $post->oid ) );
-				$post_relative_permalink = rtrim( wp_make_link_relative( get_permalink( $migrated_post_id ) ), '/' );
+				// Generate permalink manually to handle category structure for private posts.
+				$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
+				$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
+
+				if ( str_contains( $post_relative_permalink, '?p=' ) ) {
+					$logger->warning( sprintf( 'Skipping legacy redirect for post %s because it has plain permalink: %s', $post->oid, $post_relative_permalink ) );
+					continue;
+				}
 
 				// Migrate legacy redirects.
 				foreach ( $post->legacyURL as $legacy_url ) {
@@ -2370,7 +2377,9 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			if ( isset( $slideshow->legacyURL ) && ! empty( $slideshow->legacyURL ) ) {
 				$logger->info( sprintf( 'Migrating legacy redirect for slideshow %s', $slideshow->oid ) );
-				$post_relative_permalink = rtrim( wp_make_link_relative( get_permalink( $migrated_post_id ) ), '/' );
+				// Generate permalink manually to handle category structure for private posts.
+				$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
+				$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
 
 				// Migrate legacy redirects.
 				foreach ( $slideshow->legacyURL as $legacy_url ) {
@@ -4417,5 +4426,46 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return $content_updated;
+	}
+
+	/**
+	 * Generate post permalink with category structure for private posts.
+	 *
+	 * @param int $post_id Post ID.
+	 * @return string Full permalink URL.
+	 */
+	private function generate_post_permalink_with_category( int $post_id ): string {
+		$post = get_post( $post_id );
+		if ( ! $post ) {
+			return home_url( "?p={$post_id}" );
+		}
+
+		// Store original post status.
+		$original_status = $post->post_status;
+
+		// Temporarily change post status to 'publish' to get proper permalink.
+		if ( 'publish' !== $original_status ) {
+			wp_update_post(
+				[
+					'ID'          => $post_id,
+					'post_status' => 'publish',
+				]
+			);
+		}
+
+		// Get the permalink with proper category structure.
+		$permalink = get_permalink( $post_id );
+
+		// Restore original post status if it was changed.
+		if ( 'publish' !== $original_status ) {
+			wp_update_post(
+				[
+					'ID'          => $post_id,
+					'post_status' => $original_status,
+				]
+			);
+		}
+
+		return $permalink;
 	}
 }
