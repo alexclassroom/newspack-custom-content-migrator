@@ -662,6 +662,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'slideshow-json-file',
+						'description' => 'Path to the JSON file containing the slideshows (e.g. `Slideshow.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'redirect-csv-files',
 						'description' => 'Paths to the CSV files containing the redirects separated by comma (e.g. `redirects.csv`).',
 						'optional'    => true,
@@ -2293,11 +2300,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		$post_json_file               = $assoc_args['post-json-file'];
+		$slideshow_json_file          = $assoc_args['slideshow-json-file'];
 		$redirect_csv_files           = isset( $assoc_args['redirect-csv-files'] ) ? explode( ',', $assoc_args['redirect-csv-files'] ) : [];
 		$publisher_domain             = $assoc_args['publisher-domain'];
 		$publisher_domain_without_www = str_replace( 'www.', '', $publisher_domain );
 
 		$raw_posts      = $this->json_iterator->items( $post_json_file );
+		$raw_slideshows = $this->json_iterator->items( $slideshow_json_file );
+
 		$migrated_posts = $this->load_posts();
 
 		$raw_redirects_list = array_map(
@@ -2343,6 +2353,46 @@ class FoundationMigrator implements RegisterCommandInterface {
 				if ( isset( $post->permalink ) && ! empty( $post->permalink ) && $post->permalink !== $post_relative_permalink ) {
 					$logger->info( sprintf( 'Migrating different permalink for post %s (%s => %s)', $post->oid, $post->permalink, $post_relative_permalink ) );
 					$this->custom_redirect_generator->add_redirect( $post->permalink, $post_relative_permalink );
+				}
+			}
+		}
+
+		foreach ( $raw_slideshows as $index => $slideshow ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			if ( ! array_key_exists( $slideshow->oid, $migrated_posts ) ) {
+				$logger->error( sprintf( 'Slideshow %s not found', $slideshow->oid ) );
+				continue;
+			}
+
+			$migrated_post_id = $migrated_posts[ $slideshow->oid ];
+
+			if ( isset( $slideshow->legacyURL ) && ! empty( $slideshow->legacyURL ) ) {
+				$logger->info( sprintf( 'Migrating legacy redirect for slideshow %s', $slideshow->oid ) );
+				$post_relative_permalink = rtrim( wp_make_link_relative( get_permalink( $migrated_post_id ) ), '/' );
+
+				// Migrate legacy redirects.
+				foreach ( $slideshow->legacyURL as $legacy_url ) {
+					// remove domain from the legacy URL.
+					$legacy_url_without_www = str_replace( 'www.', '', $legacy_url );
+					$legacy_url             = rtrim( str_replace( 'https://' . $publisher_domain_without_www, '', $legacy_url_without_www ), '/' );
+
+					if ( str_contains( $legacy_url, 'http' ) ) {
+						$logger->warning( sprintf( 'Skipping legacy redirect for slideshow %s because it is not a relative URL: %s', $slideshow->oid, $legacy_url ) );
+						continue;
+					}
+
+					if ( $post_relative_permalink !== $legacy_url ) {
+						$logger->info( sprintf( 'Migrating legacy redirect for slideshow %s (%s => %s)', $slideshow->oid, $legacy_url, $post_relative_permalink ) );
+						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
+					}
+				}
+
+				// Migrate different permalink.
+				if ( isset( $slideshow->permalink ) && ! empty( $slideshow->permalink ) && $slideshow->permalink !== $post_relative_permalink ) {
+					$logger->info( sprintf( 'Migrating different permalink for slideshow %s (%s => %s)', $slideshow->oid, $slideshow->permalink, $post_relative_permalink ) );
+					$this->custom_redirect_generator->add_redirect( $slideshow->permalink, $post_relative_permalink );
 				}
 			}
 		}
