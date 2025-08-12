@@ -845,16 +845,18 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 		$live_prefix           = esc_sql( $assoc_args['live-table-prefix'] );
 		$update_existing_posts = $assoc_args['update-existing-posts'] ?? false;
 		
+		// Init.
+		$this->init_loggers( __FUNCTION__ );
+		$users_helper          = new UsersHelper();
+		$coauthors_plus_helper = new CoAuthorsPlusHelper();
 		// Get post IDs which use different types of authors -- these fetches take into account priority of authors.
 		$live_post_ids_with_staff_authors    = $this->get_post_ids_with_staff_authors( $live_prefix );
 		$live_post_ids_with_external_authors = $this->get_post_ids_with_external_authors( $live_prefix );
 		$live_post_ids_with_post_authors     = $this->get_post_ids_with_postauthor_metas( $live_prefix );
 		MemoryCleanupHook::cleanup();
-		$users_helper          = new UsersHelper();
-		$coauthors_plus_helper = new CoAuthorsPlusHelper();
 
 		// Log post author assignments.
-		$log_file_authors = __FUNCTION__ . '_posts_authors.csv';
+		$log_file_authors = __FUNCTION__ . '__posts_authors.csv';
 		if ( file_exists( $log_file_authors ) ) {
 			unlink( $log_file_authors ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
 		}
@@ -863,32 +865,41 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 		// Headers.
 		// phpcs:disable -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
 		fwrite( $log_handle_authors,
-			'local_post_id', $separator,
-			'live_post_id', $separator,
-			'has_custom_authors', $separator,
-			'has_staff_author', $separator,
-			'has_external_author', $separator,
-			'has_post_authors', $separator,
-			'count_byline_staff_authors', $separator,
-			'external_byline', $separator,
-			'count_external_byline_parsed', $separator,
-			'post_authors_byline', $separator,
-			'count_post_authors_byline_parsed', $separator,
-			'count_assigned_authors', $separator,
+			'local_post_id' . $separator .
+			'live_post_id' . $separator .
+			'has_custom_authors' . $separator .
+			'has_staff_author' . $separator .
+			'has_external_author' . $separator .
+			'has_post_authors' . $separator .
+			'count_byline_staff_authors' . $separator .
+			'external_byline' . $separator .
+			'count_external_byline_parsed' . $separator .
+			'post_authors_byline' . $separator .
+			'count_post_authors_byline_parsed' . $separator .
+			'count_assigned_authors' . $separator .
 			'assigned_authors_names' . PHP_EOL 
 		);
 		// phpcs:enable
 
 		// Log posts which don't have an expected authorship type.
-		$log_file_no_authorship         = __FUNCTION__ . '_posts_no_authorship.csv';
+		$log_file_no_authorship         = __FUNCTION__ . '__posts_no_authorship.csv';
 		$local_post_ids_with_no_authors = [];
+
+		// Log authors created on the fly apart from the main import command.
+		$log_file_authors_created = __FUNCTION__ . '__authors_created.csv';
+		if ( file_exists( $log_file_authors_created ) ) {
+			unlink( $log_file_authors_created ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		$log_handle_authors_created = fopen( $log_file_authors_created, 'w' ); // phpcs:ignore -- WordPress.WP.AlternativeFunctions.file_system_operations_fopen.
+		fwrite( $log_handle_authors_created, 'local_post_id' . $separator . 'live_post_id' . $separator . 'display_name' . $separator . 'from_byline' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
 
 		/**
 		 * Loop over all local post IDs and assign (co)authors.
 		 */
-		$local_post_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type = 'post';" ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
-		foreach ( $local_post_ids as $local_post_id ) {
+		$local_post_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type = 'post';" ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+		foreach ( $local_post_ids as $key_local_post_id => $local_post_id ) {
 			MemoryCleanupHook::cleanup();
+			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( '(%d/%d) %d', $key_local_post_id + 1, count( $local_post_ids ), $local_post_id ) );
 
 			// Live post can be found by either postmeta with meta_key ContentDiffMigrator::SAVED_META_LIVE_POST_ID,
 			// or having the same ID, post_title, post_name, post_date,
@@ -896,15 +907,19 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 			$live_post_id = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where meta_key = %s and post_id = %d;", ContentDiffMigrator::SAVED_META_LIVE_POST_ID, $local_post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
 			if ( ! $live_post_id ) {
 				$live_post_id = $wpdb->get_var( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
-					"select lwp.ID
-					from %i lwp
-					join {$wpdb->posts} wp on (
-						lwp.post_id = wp.ID
-						AND lwp.post_title = wp.post_title
-						AND lwp.post_name = wp.post_name
-						AND lwp.post_date = wp.post_date
+					$wpdb->prepare(
+						"select lwp.ID
+						from %i lwp
+						join {$wpdb->posts} wp on (
+							lwp.ID = wp.ID
+							AND lwp.post_title = wp.post_title
+							AND lwp.post_name = wp.post_name
+							AND lwp.post_date = wp.post_date
+						)
+						where wp.ID = %d;",
+						$live_prefix . 'posts',
+						$local_post_id
 					)
-					where lwp.post_type = 'post';"
 				);
 			}
 			if ( ! $live_post_id ) {
@@ -947,16 +962,18 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 					continue;
 				}
 				foreach ( $live_staff_ids as $live_staff_id ) {
-					$display_name = $wpdb->get_var( $wpdb->prepare( "select display_name from %i where ID = %d;", $live_prefix . 'users', $live_staff_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+					$display_name = $wpdb->get_var( $wpdb->prepare( "select post_title from %i where ID = %d;", $live_prefix . 'posts', $live_staff_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
 					if ( ! $display_name ) {
-						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( '[staff] local %d live %d -- no display_name found for live user ID %d', $local_post_id, $live_post_id, $live_staff_id ) );
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( 'EROR [staff] local %d live %d -- no display_name found for live user ID %d', $local_post_id, $live_post_id, $live_staff_id ) );
 						continue;
 					}
+
 					$user = $users_helper->get_user_by_unique_identifier( $display_name );
 					if ( ! $user ) {
 						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[staff] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
 						continue;
 					}
+
 					$coauthors[] = $user;
 				}           
 			} elseif ( $has_external_authors ) {
@@ -970,9 +987,23 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 				}
 				foreach ( $display_names as $display_name ) {
 					$user = $users_helper->get_user_by_unique_identifier( $display_name );
+					
+					// Not all external byline authors have been created by the import command DB, some byline names are new.
 					if ( ! $user ) {
-						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[external] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
-						continue;
+						$user = $users_helper->create_or_get_user(
+							[
+								'display_name' => $display_name,
+								'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
+							],
+							$display_name
+						);
+						if ( ! $user ) {
+							$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[external] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
+							continue;
+						}
+
+						// Log new user.
+						fwrite( $log_handle_authors_created, $local_post_id . $separator . $live_post_id . $separator . $display_name . $separator . $byline_external . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
 					}
 					$coauthors[] = $user;
 				}           
@@ -996,7 +1027,7 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 			}
 
 			if ( empty( $coauthors ) ) {
-				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( 'ERROR, no (co)authors found for local %d live %d %d', $local_post_id, $live_post_id ) );
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( 'ERROR, no (co)authors found for local %d live %d', $local_post_id, $live_post_id ) );
 				continue;
 			}
 
@@ -1027,33 +1058,35 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 			// Set meta assigned.
 			update_post_meta( $local_post_id, self::META_KEY_POST_AUTHOR_UPDATED, true );
 
+			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( '[%s] -- %d (co)authors assigned', ( $has_staff_authors ? 'staff' : ( $has_external_authors ? 'external' : 'post_author' ) ), count( $coauthors ) ) );
+
 			// Log.
 			// phpcs:disable -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
 			fwrite( $log_handle_authors,
 				// local_post_id
-				$local_post_id, $separator,
+				$local_post_id . $separator .
 				// live_post_id
-				$live_post_id, $separator,
+				$live_post_id . $separator .
 				// has_custom_authors
-				$has_staff_authors || $has_external_authors || $has_post_authors ? 'yes' : 'no', $separator,
+				( $has_staff_authors || $has_external_authors || $has_post_authors ? 'yes' : 'no' ) . $separator .
 				// has_staff_author
-				$has_staff_authors ? 'yes' : 'no', $separator,
+				( $has_staff_authors ? 'yes' : 'no' ) . $separator .
 				// has_external_author
-				$has_external_authors ? 'yes' : 'no', $separator,
+				( $has_external_authors ? 'yes' : 'no' ) . $separator .
 				// has_post_authors
-				$has_post_authors ? 'yes' : 'no', $separator,
+				( $has_post_authors ? 'yes' : 'no' ) . $separator .
 				// count_byline_staff_authors
-				$has_staff_authors ? count( $live_staff_ids ) : 'n/a', $separator,
+				( $has_staff_authors ? count( $live_staff_ids ) : 'n/a' ) . $separator .
 				//external_byline
-				$has_external_authors ? $byline_external : 'n/a', $separator,
+				( $has_external_authors ? $byline_external : 'n/a' ) . $separator .
 				// count_external_byline_parsed
-				$has_external_authors ? count( $display_names ) : 'n/a', $separator,
+				( $has_external_authors ? count( $display_names ) : 'n/a' ) . $separator .
 				// post_authors_byline
-				$has_post_authors ? $byline_postauthor : 'n/a', $separator,
+				( $has_post_authors ? $byline_postauthor : 'n/a' ) . $separator .
 				// count_post_authors_byline_parsed
-				$has_post_authors ? count( $display_names ) : 'n/a', $separator,
+				( $has_post_authors ? count( $display_names ) : 'n/a' ) . $separator .
 				// count_assigned_authors
-				count( $coauthors ), $separator,
+				count( $coauthors ) . $separator .
 				// assigned_authors_names
 				implode( ' | ', $coauthor_display_names ) . PHP_EOL 
 			);
@@ -1073,9 +1106,14 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 			fclose( $log_handle_no_authorship );
 			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::WARNING, sprintf( '%d local posts with no authorship -- see %s for details 📝', count( $local_post_ids_with_no_authors ), $log_file_no_authorship ) );
 		}
+		
+		fclose( $log_handle_authors );
+		fclose( $log_handle_authors_created );
 
 		// Needed for $wpdb->update to sink in.
 		wp_cache_flush();
+
+		$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::INFO, 'Done 🚀' );
 	}
 
 	/**
