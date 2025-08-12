@@ -333,6 +333,44 @@ class FoundationFixes implements RegisterCommandInterface {
 				'synopsis'  => [],
 			]
 		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-fix-large-image-blocks',
+			self::get_command_closure( 'cmd_fix_large_image_block' ),
+			[
+				'shortdesc' => 'Fixes large image block.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'image-json-file',
+						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
 	}
 
 	/**
@@ -868,6 +906,65 @@ class FoundationFixes implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Fixes large image block.
+	 * Callable for 'newspack-content-migrator foundation-fix-large-image-blocks' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_large_image_block( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file  = $assoc_args['post-json-file'];
+		$image_json_file = $assoc_args['image-json-file'];
+		$start_from      = $assoc_args['start-from'] ?? 0;
+		$end_at          = $assoc_args['end-at'] ?? 0;
+
+		$raw_images = $this->json_iterator->items( $image_json_file );
+		$raw_posts  = $this->json_iterator->items( $post_json_file );
+
+		foreach ( $raw_posts as $index => $post ) {
+			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
+				continue;
+			}
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! isset( $post->imageLinks ) || empty( $post->imageLinks ) ) {
+				continue;
+			}
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not found', $post->oid ) );
+				continue;
+			}
+
+			$post_content = get_post_field( 'post_content', $existing_post_id );
+
+			if ( false === strpos( $post_content, '"className":"align' ) ) {
+				continue;
+			}
+
+			// Process the post content to remove className from image blocks with alignment classes.
+			$updated_post_content = $this->remove_alignment_classname_from_image_blocks( $post_content );
+
+			if ( $updated_post_content !== $post_content ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_content' => $updated_post_content ],
+					[ 'ID' => $existing_post_id ]
+				);
+
+				$logger->info( sprintf( 'Post %d is fixed', $existing_post_id ) );
+			}       
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
 	 * Detects content with Latin1 encoding issues.
 	 *
 	 * @return array Array of problematic content items.
@@ -951,13 +1048,13 @@ class FoundationFixes implements RegisterCommandInterface {
 	private function has_latin1_issues( string $content ): bool {
 		// Check for raw Latin1 mojibake characters stored directly in database.
 		$raw_mojibake_patterns = [
-			'/â€œ/', // Left double quotation mark (")
-			'/â€/',  // Right double quotation mark (")
-			'/â€™/',  // Right single quotation mark (')
-			'/â€˜/',  // Left single quotation mark (')
-			'/â€"/',  // Em dash (—)
-			'/â€"/',  // En dash (–)
-			'/â€¦/',  // Horizontal ellipsis (…)
+			'/â€œ/', // Left double quotation mark (").
+			'/â€/',  // Right double quotation mark (").
+			'/â€™/',  // Right single quotation mark (').
+			'/â€˜/',  // Left single quotation mark (').
+			'/â€"/',  // Em dash (—).
+			'/â€"/',  // En dash (–).
+			'/â€¦/',  // Horizontal ellipsis (…).
 		];
 
 		foreach ( $raw_mojibake_patterns as $pattern ) {
@@ -1394,5 +1491,74 @@ class FoundationFixes implements RegisterCommandInterface {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Removes className property from Gutenberg Image Block headers when they contain alignment classes.
+	 *
+	 * @param string $post_content The post content to process.
+	 * @return string The processed post content with className removed from alignment blocks.
+	 */
+	private function remove_alignment_classname_from_image_blocks( string $post_content ): string {
+		// First, remove className from Gutenberg Image Block headers with alignment classes.
+		$pattern = '/<!-- wp:image\s*({[^}]*"className":"[^"]*align(?:center|left|right)[^"]*"[^}]*})\s*-->/';
+
+		$post_content = preg_replace_callback(
+			$pattern,
+			function ( $matches ) {
+				$block_attributes = $matches[1];
+
+				// Remove the className property and its value from the JSON attributes.
+				$block_attributes = preg_replace(
+					'/"className":"[^"]*align(?:center|left|right)[^"]*",?\s*/',
+					'',
+					$block_attributes
+				);
+
+				// Clean up any trailing commas that might be left.
+				$block_attributes = preg_replace( '/,\s*}/', '}', $block_attributes );
+				$block_attributes = preg_replace( '/{\s*,/', '{', $block_attributes );
+
+				return '<!-- wp:image ' . $block_attributes . ' -->';
+			},
+			$post_content
+		);
+
+		// Then, fix duplicated alignment classes in figure tags.
+		$post_content = $this->fix_duplicated_alignment_classes( $post_content );
+
+		return $post_content;
+	}
+
+	/**
+	 * Fixes duplicated alignment classes in figure tags.
+	 *
+	 * @param string $post_content The post content to process.
+	 * @return string The processed post content with duplicated alignment classes removed.
+	 */
+	private function fix_duplicated_alignment_classes( string $post_content ): string {
+		// Pattern to match figure tags with duplicated alignment classes.
+		$pattern = '/<figure\s+class="([^"]*align(?:center|left|right)[^"]*align(?:center|left|right)[^"]*)"/';
+
+		return preg_replace_callback(
+			$pattern,
+			function ( $matches ) {
+				$classes = $matches[1];
+
+				// Remove duplicated alignment classes, keeping only the first occurrence.
+				$classes = preg_replace(
+					'/(align(?:center|left|right))(?=.*\1)/',
+					'',
+					$classes
+				);
+
+				// Clean up extra spaces and commas.
+				$classes = preg_replace( '/\s+/', ' ', $classes );
+				$classes = trim( $classes );
+
+				return '<figure class="' . $classes . '"';
+			},
+			$post_content
+		);
 	}
 }

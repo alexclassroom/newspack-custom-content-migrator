@@ -2820,15 +2820,10 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 				$logger->info( sprintf( 'Found attachment post %d for image %d', $raw_image['attachment_id'], (int) $matches[1] ) );
 
-				$classes = '';
-				if ( ! empty( $raw_image['alignment'] ) ) {
-					$classes = 'align' . strtolower( $raw_image['alignment'] );
-				}
-
 				$destination_url = $raw_image['destinationURL'] ?? null;
 				$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
 
-				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url, false ) );
+				$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, '', $alignment, $destination_url, false ) );
 				$logger->info( sprintf( 'Successfully generated replacement for image %d', (int) $matches[1] ) );
 
 				return $replacement;
@@ -4367,15 +4362,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 					$logger->info( sprintf( 'Iteration %d: Found attachment post %d for image %d', $iteration, $attachment_id, (int) $matches[1] ) );
 
-					$classes         = '';
 					$alignment       = null;
 					$destination_url = null;
 
 					// Use raw_image data if available.
 					if ( $raw_image ) {
-						if ( ! empty( $raw_image['alignment'] ) ) {
-							$classes = 'align' . strtolower( $raw_image['alignment'] );
-						}
 						$destination_url = $raw_image['destinationURL'] ?? null;
 						$alignment       = isset( $raw_image['alignment'] ) ? strtolower( $raw_image['alignment'] ) : null;
 
@@ -4402,7 +4393,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 						}
 					}
 
-					$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, $classes, $alignment, $destination_url ) );
+					$replacement = serialize_block( $this->gutenberg_block_generator->get_image( $attachment_post, 'full', true, '', $alignment, $destination_url ) );
 					$logger->info( sprintf( 'Iteration %d: Successfully generated replacement for image %d', $iteration, (int) $matches[1] ) );
 
 					return $replacement;
