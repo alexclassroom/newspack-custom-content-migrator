@@ -11,6 +11,7 @@ use Newspack\Guest_Contributor_Role;
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
 use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use Newspack\MigrationTools\Logic\UsersHelper;
+use Newspack\MigrationTools\Logic\CoAuthorsPlusHelper;
 use Newspack\MigrationTools\Logic\SimpleLocalAvatars;
 use Newspack\MigrationTools\Logic\Bylines;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
@@ -26,6 +27,13 @@ use Bramus\Monolog\Formatter\ColoredLineFormatter;
 class CronkiteNewsMigrator implements RegisterCommandInterface {
 
 	use WpCliCommandTrait;
+
+	/**
+	 * Meta key used to mark posts which got their (co)authors updated.
+	 * 
+	 * @var string Meta key used to mark posts whose authors have been updated.
+	 */
+	const META_KEY_POST_AUTHOR_UPDATED = 'newspack_migration_post_author_updated';
 
 	/**
 	 * Whether logging is enabled. Useful for testing environment -- if disabled the loggers are NullLogger instances.
@@ -151,7 +159,7 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 					[
 						'type'        => 'flag',
 						'name'        => 'update-existing-posts',
-						'description' => 'Will update existing or already impported users with new data.',
+						'description' => 'Will update post authors, even if they were already previously set by this command.',
 						'optional'    => true,
 					],
 				],
@@ -837,47 +845,237 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 		$live_prefix           = esc_sql( $assoc_args['live-table-prefix'] );
 		$update_existing_posts = $assoc_args['update-existing-posts'] ?? false;
 		
-		/**
-		 * Loop over all post IDs, create users from custom author objects and bylines.
-		 */
-		$post_ids = $wpdb->get_col( $wpdb->prepare( "select ID from %i where post_type = 'post';", $live_prefix . 'posts' ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+		// Get post IDs which use different types of authors -- these fetches take into account priority of authors.
+		$live_post_ids_with_staff_authors    = $this->get_post_ids_with_staff_authors( $live_prefix );
+		$live_post_ids_with_external_authors = $this->get_post_ids_with_external_authors( $live_prefix );
+		$live_post_ids_with_post_authors     = $this->get_post_ids_with_postauthor_metas( $live_prefix );
 		MemoryCleanupHook::cleanup();
+		$users_helper          = new UsersHelper();
+		$coauthors_plus_helper = new CoAuthorsPlusHelper();
 
-		// Get post IDs which use different types of authors.
-		$post_ids_with_staff_authors    = $this->get_post_ids_with_staff_authors( $live_prefix );
-		$post_ids_with_external_authors = $this->get_post_ids_with_external_authors( $live_prefix );
-		$post_ids_with_post_authors     = $this->get_post_ids_with_postauthor_metas( $live_prefix );
+		// Log post author assignments.
+		$log_file_authors = __FUNCTION__ . '_posts_authors.csv';
+		if ( file_exists( $log_file_authors ) ) {
+			unlink( $log_file_authors ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_unlink.
+		}
+		$log_handle_authors = fopen( $log_file_authors, 'w' ); // phpcs:ignore -- WordPress.WP.AlternativeFunctions.file_system_operations_fopen.
+		$separator          = '§';
+		// Headers.
+		// phpcs:disable -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
+		fwrite( $log_handle_authors,
+			'local_post_id', $separator,
+			'live_post_id', $separator,
+			'has_custom_authors', $separator,
+			'has_staff_author', $separator,
+			'has_external_author', $separator,
+			'has_post_authors', $separator,
+			'count_byline_staff_authors', $separator,
+			'external_byline', $separator,
+			'count_external_byline_parsed', $separator,
+			'post_authors_byline', $separator,
+			'count_post_authors_byline_parsed', $separator,
+			'count_assigned_authors', $separator,
+			'assigned_authors_names' . PHP_EOL 
+		);
+		// phpcs:enable
 
-		foreach ( $post_ids as $post_id ) {
-			$has_staff_authors    = in_array( $post_id, $post_ids_with_staff_authors, true );
-			$has_external_authors = in_array( $post_id, $post_ids_with_external_authors, true );
-			$has_post_authors     = in_array( $post_id, $post_ids_with_post_authors, true );
-			
-			$authors = [];
-			// Assign coauthors to posts.
-			if ( $has_staff_authors ) {
-				
-			} elseif ( $has_external_authors ) {
+		// Log posts which don't have an expected authorship type.
+		$log_file_no_authorship         = __FUNCTION__ . '_posts_no_authorship.csv';
+		$local_post_ids_with_no_authors = [];
 
-				// --------------------------
-					$byline = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = 'byline_info_external_authors_repeater_0_external_authors';", $live_prefix . 'postmeta', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
-					$byline        = $byline ? trim( $byline ) : $byline;
-					$display_names = $this->parse_external_byline( $byline );
-				// --------------------------
+		/**
+		 * Loop over all local post IDs and assign (co)authors.
+		 */
+		$local_post_ids = $wpdb->get_col( "select ID from {$wpdb->posts} where post_type = 'post';" ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+		foreach ( $local_post_ids as $local_post_id ) {
+			MemoryCleanupHook::cleanup();
 
-				
-			} elseif ( $has_post_authors ) {
-
-				// TODO
-				
-			} else {
-				// Log the posts which don't use authors via Staff, External, or post_author postmeta.
+			// Live post can be found by either postmeta with meta_key ContentDiffMigrator::SAVED_META_LIVE_POST_ID,
+			// or having the same ID, post_title, post_name, post_date,
+			// or else it can't be found.
+			$live_post_id = $wpdb->get_var( $wpdb->prepare( "select meta_value from {$wpdb->postmeta} where meta_key = %s and post_id = %d;", ContentDiffMigrator::SAVED_META_LIVE_POST_ID, $local_post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+			if ( ! $live_post_id ) {
+				$live_post_id = $wpdb->get_var( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+					"select lwp.ID
+					from %i lwp
+					join {$wpdb->posts} wp on (
+						lwp.post_id = wp.ID
+						AND lwp.post_title = wp.post_title
+						AND lwp.post_name = wp.post_name
+						AND lwp.post_date = wp.post_date
+					)
+					where lwp.post_type = 'post';"
+				);
+			}
+			if ( ! $live_post_id ) {
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( 'ERROR, live post not found for local post %d', $local_post_id ) );
 				continue;
 			}
 
-			// Set post (co)authors.
+			// Check if post needs updating.
+			if ( ! $update_existing_posts && get_post_meta( $local_post_id, self::META_KEY_POST_AUTHOR_UPDATED, true ) ) {
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( 'Skipping, live post %d -- already updated by this command', $live_post_id ) );
+				continue;
+			}
 
+			// Type of authorship for this post.
+			$has_staff_authors    = in_array( $live_post_id, $live_post_ids_with_staff_authors );
+			$has_external_authors = in_array( $live_post_id, $live_post_ids_with_external_authors );
+			$has_post_authors     = in_array( $live_post_id, $live_post_ids_with_post_authors );
+			if ( ! $has_staff_authors && ! $has_external_authors && ! $has_post_authors ) {
+				// Log the posts which don't use authors via Staff, External, or post_author postmeta.
+				$local_post_ids_with_no_authors[] = $local_post_id;
+				continue;
+			}
+
+			// Custom metas used to associate various types of authors to posts.
+			$meta_key_staff_byline    = 'byline_info_cn_staff';
+			$meta_key_external_byline = 'byline_info_external_authors_repeater_0_external_authors';
+			$meta_key_post_author     = 'post_author';
+			
+			// Assign coauthors to posts.
+			$coauthors = [];
+			if ( $has_staff_authors ) {
+
+				/**
+				 * Posts with Staff CPT authors use postmeta byline_info_cn_staff.
+				 */
+				$live_staff_ids = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = %s;", $live_prefix . 'postmeta', $live_post_id, $meta_key_staff_byline ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+				$live_staff_ids = $live_staff_ids ? unserialize( $live_staff_ids ) : []; // phpcs:ignore -- WordPress.PHP.DiscouragedPHPFunctions.serialize_unserialize.
+				if ( empty( $live_staff_ids ) ) {
+					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( '[staff] local %d live %d -- no staff byline found', $local_post_id, $live_post_id ) );
+					continue;
+				}
+				foreach ( $live_staff_ids as $live_staff_id ) {
+					$display_name = $wpdb->get_var( $wpdb->prepare( "select display_name from %i where ID = %d;", $live_prefix . 'users', $live_staff_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+					if ( ! $display_name ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( '[staff] local %d live %d -- no display_name found for live user ID %d', $local_post_id, $live_post_id, $live_staff_id ) );
+						continue;
+					}
+					$user = $users_helper->get_user_by_unique_identifier( $display_name );
+					if ( ! $user ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[staff] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
+						continue;
+					}
+					$coauthors[] = $user;
+				}           
+			} elseif ( $has_external_authors ) {
+
+				$byline_external = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = %s;", $live_prefix . 'postmeta', $live_post_id, $meta_key_external_byline ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+				$byline_external = trim( $byline_external );
+				$display_names   = $byline_external ? $this->parse_external_byline( $byline_external ) : [];
+				if ( empty( $display_names ) ) {
+					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[external] local %d live %d -- no parsed display_names found for byline '%s'", $local_post_id, $live_post_id, $byline_external ) );
+					continue;
+				}
+				foreach ( $display_names as $display_name ) {
+					$user = $users_helper->get_user_by_unique_identifier( $display_name );
+					if ( ! $user ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[external] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
+						continue;
+					}
+					$coauthors[] = $user;
+				}           
+			} elseif ( $has_post_authors ) {
+
+				$byline_postauthor = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = %s;", $live_prefix . 'postmeta', $live_post_id, $meta_key_post_author ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+				$byline_postauthor = trim( $byline_postauthor );
+				$display_names     = $byline_postauthor ? $this->parse_post_author_byline( $byline_postauthor ) : [];
+				if ( empty( $display_names ) ) {
+					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[post_author] local %d live %d -- no parsed display_names extracted from byline '%s'", $local_post_id, $live_post_id, $byline_postauthor ) );
+					continue;
+				}
+				foreach ( $display_names as $display_name ) {
+					$user = $users_helper->get_user_by_unique_identifier( $display_name );
+					if ( ! $user ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "[post_author] local %d live %d -- no local user found for display_name '%s'", $local_post_id, $live_post_id, $display_name ) );
+						continue;
+					}
+					$coauthors[] = $user;
+				}           
+			}
+
+			if ( empty( $coauthors ) ) {
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( 'ERROR, no (co)authors found for local %d live %d %d', $local_post_id, $live_post_id ) );
+				continue;
+			}
+
+			// Set coauthors.
+			if ( 1 === count( $coauthors ) ) {
+				// Unassign previous coauthors.
+				$coauthors_plus_helper->unassign_all_guest_authors_from_post( $local_post_id );
+				
+				// Set single regular post author.
+				$wpdb->update( // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.DirectQuery.NoCaching, WordPress.DB.DirectDatabaseQuery.DirectQuery.
+					$wpdb->posts,
+					[ 'post_author' => $coauthors[0]->ID ],
+					[ 'ID' => $local_post_id ]
+				);
+			} else {
+				// Multiple coauthors.
+				$coauthors_plus_helper->assign_authors_to_post( $coauthors, $local_post_id );
+			}
+
+			// Get assigned display names.
+			$coauthor_display_names = array_map(
+				function ( $coauthor ) {
+					return $coauthor->display_name;
+				},
+				$coauthors 
+			);
+
+			// Set meta assigned.
+			update_post_meta( $local_post_id, self::META_KEY_POST_AUTHOR_UPDATED, true );
+
+			// Log.
+			// phpcs:disable -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
+			fwrite( $log_handle_authors,
+				// local_post_id
+				$local_post_id, $separator,
+				// live_post_id
+				$live_post_id, $separator,
+				// has_custom_authors
+				$has_staff_authors || $has_external_authors || $has_post_authors ? 'yes' : 'no', $separator,
+				// has_staff_author
+				$has_staff_authors ? 'yes' : 'no', $separator,
+				// has_external_author
+				$has_external_authors ? 'yes' : 'no', $separator,
+				// has_post_authors
+				$has_post_authors ? 'yes' : 'no', $separator,
+				// count_byline_staff_authors
+				$has_staff_authors ? count( $live_staff_ids ) : 'n/a', $separator,
+				//external_byline
+				$has_external_authors ? $byline_external : 'n/a', $separator,
+				// count_external_byline_parsed
+				$has_external_authors ? count( $display_names ) : 'n/a', $separator,
+				// post_authors_byline
+				$has_post_authors ? $byline_postauthor : 'n/a', $separator,
+				// count_post_authors_byline_parsed
+				$has_post_authors ? count( $display_names ) : 'n/a', $separator,
+				// count_assigned_authors
+				count( $coauthors ), $separator,
+				// assigned_authors_names
+				implode( ' | ', $coauthor_display_names ) . PHP_EOL 
+			);
+			// phpcs:enable
 		}
+
+		// Log posts which have no authorship.
+		if ( ! empty( $local_post_ids_with_no_authors ) ) {
+			if ( file_exists( $log_file_no_authorship ) ) {
+				unlink( $log_file_no_authorship ); // phpcs:ignore -- WordPress.WP.AlternativeFunctions.file_system_operations_unlink.
+			}
+			$log_handle_no_authorship = fopen( $log_file_no_authorship, 'w' ); // phpcs:ignore -- WordPress.WP.AlternativeFunctions.file_system_operations_fopen.
+			fwrite( $log_handle_no_authorship, 'post_id' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
+			foreach ( $local_post_ids_with_no_authors as $local_post_id ) {
+				fwrite( $log_handle_no_authorship, $local_post_id . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
+			}
+			fclose( $log_handle_no_authorship );
+			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::WARNING, sprintf( '%d local posts with no authorship -- see %s for details 📝', count( $local_post_ids_with_no_authors ), $log_file_no_authorship ) );
+		}
+
+		// Needed for $wpdb->update to sink in.
+		wp_cache_flush();
 	}
 
 	/**
