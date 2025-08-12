@@ -502,7 +502,7 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 			"SELECT ID, display_name FROM {$wpdb->users} WHERE display_name IN (
 				SELECT display_name FROM {$wpdb->users} GROUP BY display_name HAVING COUNT(*) > 1
 			)
-			ORDER BY display_name, ID;;",
+			ORDER BY display_name, ID;",
 			ARRAY_A
 		);
 		// phpcs:enable
@@ -546,10 +546,102 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 		 */
 		fwrite( $log_handle, 'user_id' . $separator . 'status' . $separator . 'type' . $separator . 'cpt_post_id' . $separator . 'postauthor_post_id' . $separator . 'postauthor_byline' . $separator . 'postauthor_parsed_display_name' . PHP_EOL ); // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
 
+
+		/**
+		 * Import users from post_author postmetas.
+		 */
+		$post_ids_post_author = $this->get_post_ids_with_postauthor_metas( $live_prefix );
+		foreach ( $post_ids_post_author as $key_post_id => $post_id ) {
+			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( '[post_author] (%d)/(%d) %d', $key_post_id + 1, count( $post_ids_post_author ), $post_id ) );
+
+			// Get byline.
+			$byline = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = 'post_author';", $live_prefix . 'postmeta', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
+			$byline = $byline ? trim( $byline ) : $byline;
+			if ( ! $byline ) {
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Warning [post_author] -- no byline found for 'post_author' meta in post ID %d, skipping.", $post_id ) );
+				continue;
+			}
+
+			// Parse byline.
+			$display_names = $this->parse_post_author_byline( $byline );
+			if ( ! $display_names ) {
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Warning [post_author] -- no display names found for 'post_author' meta in byline '%s', skipping post ID %d.", $byline, $post_id ) );
+				continue;
+			}
+
+			// Create users.
+			foreach ( $display_names as $display_name ) {
+
+				// Check if user with same display_name exists.
+				$existing_user = $users_helper->get_user_by_unique_identifier( $display_name );
+
+				// Skip existing user if it's not being updated.
+				if ( $existing_user && ! $update_existing_users ) {
+					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Skipping [post_author] -- '%s' exists.", $display_name ) );
+					continue;
+				}
+
+				$user_data = [
+					'display_name' => $display_name,
+					'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
+				];
+				if ( $existing_user ) {
+					// Update existing user.
+					$user_data_update       = $user_data;
+					$user_data_update['ID'] = $existing_user->ID;
+					unset( $user_data_update['display_name'] );
+					$result = wp_update_user( $user_data_update );
+					if ( is_wp_error( $result ) ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "ERROR [post_author], failed to update existing user ID %d, error message: '%s'. User data: %s", $existing_user->ID, $result->get_error_message(), wp_json_encode( $user_data_update ) ) );
+						continue;
+					}
+				} else {
+					// Create new user.
+					$user = $users_helper->create_or_get_user( $user_data, $display_name );
+					if ( ! $user ) {
+						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "ERROR [post_author], failed to create user '%s', error message: '%s'. Data: %s", $display_name, $e->getMessage(), wp_json_encode( $user_data ) ) );
+						continue;
+					}
+				}
+
+				// CSV log success.
+				fwrite( // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
+					$log_handle,
+					sprintf(
+						'%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s', // phpcs:ignore -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
+						// user_id.
+						$user->ID,
+						$separator,
+						// status.
+						$existing_user ? 'existing' : 'imported',
+						$separator,
+						// type.
+						'',
+						$separator,
+						// cpt_post_id.
+						'',
+						$separator,
+						// postauthor_post_id.
+						$post_id,
+						$separator,
+						// postauthor_byline.
+						$byline,
+						$separator,
+						// postauthor_parsed_display_name.
+						$display_name
+					) . PHP_EOL 
+				);
+
+
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Success [post_author] -- '%s' %d %s", $display_name, $user->ID, $existing_user ? 'updated' : 'imported' ) );
+			}
+		}
+
+
 		/**
 		 * Import Staff and Students from live DB to local WP_Users.
 		 */
-		$cpts = [ 'cn_staff', 'students' ];
+		$cpts = [ 'students', 'cn_staff' ];
 		// Map CPT postmeta keys.
 		$cpts_metas = [
 			'cn_staff' => [
@@ -570,8 +662,6 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 		foreach ( $cpts as $cpt ) {
 			$cpt_rows = $wpdb->get_results( $wpdb->prepare( "select * from %i where post_type = %s;", $live_prefix . 'posts', $cpt ), ARRAY_A ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
 			foreach ( $cpt_rows as $key_cpt_row => $cpt_row ) {
-				if ( $key_cpt_row + 1 > 2 ) {
-					continue; }
 				MemoryCleanupHook::cleanup( 0, $key_cpt_row + 1, 20 );
 
 				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "[%s] (%d)/(%d) '%s'", $cpt, $key_cpt_row + 1, count( $cpt_rows ), $cpt_row['post_title'] ) );
@@ -587,7 +677,7 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 
 				// Skip existing user if it's not being updated.
 				if ( $existing_user && ! $update_existing_users ) {
-					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Skipping [%s] -- user '%s' exists.", $cpt, $display_name ) );
+					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Skipping [%s] -- '%s' exists.", $cpt, $display_name ) );
 					continue;
 				}
 				
@@ -724,97 +814,7 @@ class CronkiteNewsMigrator implements RegisterCommandInterface {
 					) . PHP_EOL 
 				);
 
-				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Success [%s] -- user '%s' %s", $cpt, $display_name, $existing_user ? 'updated' : 'imported' ) );
-			}
-		}
-
-		/**
-		 * Import users from post_author postmetas.
-		 */
-		$post_ids_post_author = $this->get_post_ids_with_postauthor_metas( $live_prefix );
-		foreach ( $post_ids_post_author as $key_post_id => $post_id ) {
-			$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( '[post_author] (%d)/(%d) %d', $key_post_id + 1, count( $post_ids_post_author ), $post_id ) );
-
-			// Get byline.
-			$byline = $wpdb->get_var( $wpdb->prepare( "select meta_value from %i where post_id = %d and meta_key = 'post_author';", $live_prefix . 'postmeta', $post_id ) ); // phpcs:ignore -- WordPress.DB.DirectDatabaseQuery.NoCaching.
-			$byline = $byline ? trim( $byline ) : $byline;
-			if ( ! $byline ) {
-				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Warning [post_author] -- no byline found for 'post_author' meta in post ID %d, skipping.", $post_id ) );
-				continue;
-			}
-
-			// Parse byline.
-			$display_names = $this->parse_post_author_byline( $byline );
-			if ( ! $display_names ) {
-				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Warning [post_author] -- no display names found for 'post_author' meta in byline '%s', skipping post ID %d.", $byline, $post_id ) );
-				continue;
-			}
-
-			// Create users.
-			foreach ( $display_names as $display_name ) {
-
-				// Check if user with same display_name exists.
-				$existing_user = $users_helper->get_user_by_unique_identifier( $display_name );
-
-				// Skip existing user if it's not being updated.
-				if ( $existing_user && ! $update_existing_users ) {
-					$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Skipping [post_author] -- user '%s' exists.", $display_name ) );
-					continue;
-				}
-
-				$user_data = [
-					'display_name' => $display_name,
-					'role'         => Guest_Contributor_Role::CONTRIBUTOR_NO_EDIT_ROLE_NAME,
-				];
-				if ( $existing_user ) {
-					// Update existing user.
-					$user_data_update       = $user_data;
-					$user_data_update['ID'] = $existing_user->ID;
-					unset( $user_data_update['display_name'] );
-					$result = wp_update_user( $user_data_update );
-					if ( is_wp_error( $result ) ) {
-						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "ERROR [post_author], failed to update existing user ID %d, error message: '%s'. User data: %s", $existing_user->ID, $result->get_error_message(), wp_json_encode( $user_data_update ) ) );
-						continue;
-					}
-				} else {
-					// Create new user.
-					$user = $users_helper->create_or_get_user( $user_data, $display_name );
-					if ( ! $user ) {
-						$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::ERROR, sprintf( "ERROR [post_author], failed to create user '%s', error message: '%s'. Data: %s", $display_name, $e->getMessage(), wp_json_encode( $user_data ) ) );
-						continue;
-					}
-				}
-
-				// CSV log success.
-				fwrite( // phpcs:ignore -- WordPressVIPMinimum.Functions.RestrictedFunctions.file_ops_fwrite.
-					$log_handle,
-					sprintf(
-						'%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s%s' . '%s', // phpcs:ignore -- Allow for readability. Generic.Strings.UnnecessaryStringConcat.Found.
-						// user_id.
-						$user->ID,
-						$separator,
-						// status.
-						$existing_user ? 'existing' : 'imported',
-						$separator,
-						// type.
-						'',
-						$separator,
-						// cpt_post_id.
-						'',
-						$separator,
-						// postauthor_post_id.
-						$post_id,
-						$separator,
-						// postauthor_byline.
-						$byline,
-						$separator,
-						// postauthor_parsed_display_name.
-						$display_name
-					) . PHP_EOL 
-				);
-
-
-				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Success [post_author] -- user '%s' %s.", $display_name, $existing_user ? 'updated' : 'imported' ) );
+				$this->log( self::LOG_OUTPUTS['CLI'], LogLevel::DEBUG, sprintf( "Success [%s] -- '%s' %d %s", $cpt, $display_name, $user->ID, $existing_user ? 'updated' : 'imported' ) );
 			}
 		}
 
