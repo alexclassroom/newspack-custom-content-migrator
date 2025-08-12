@@ -917,15 +917,16 @@ class FoundationFixes implements RegisterCommandInterface {
 
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
-		$post_json_file  = $assoc_args['post-json-file'];
-		$image_json_file = $assoc_args['image-json-file'];
-		$start_from      = $assoc_args['start-from'] ?? 0;
-		$end_at          = $assoc_args['end-at'] ?? 0;
+		$post_json_file = $assoc_args['post-json-file'];
+		$start_from     = $assoc_args['start-from'] ?? 0;
+		$end_at         = $assoc_args['end-at'] ?? 0;
 
-		$raw_images = $this->json_iterator->items( $image_json_file );
-		$raw_posts  = $this->json_iterator->items( $post_json_file );
+		$raw_posts = $this->json_iterator->items( $post_json_file );
 
 		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
 			if ( $index < ( $start_from - 1 ) || ( $end_at > 0 && $index >= $end_at ) ) {
 				continue;
 			}
@@ -958,7 +959,7 @@ class FoundationFixes implements RegisterCommandInterface {
 				);
 
 				$logger->info( sprintf( 'Post %d is fixed', $existing_post_id ) );
-			}       
+			}
 		}
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
