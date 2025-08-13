@@ -669,6 +669,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
+						'name'        => 'page-json-file',
+						'description' => 'Path to the JSON file containing the pages (e.g. `Page.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
 						'name'        => 'redirect-csv-files',
 						'description' => 'Paths to the CSV files containing the redirects separated by comma (e.g. `redirects.csv`).',
 						'optional'    => true,
@@ -754,6 +761,13 @@ class FoundationMigrator implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'oid-to-migrate',
 						'description' => 'OIDs to migrate (comma separated).',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'base-url',
+						'description' => 'Base URL for the Foundation API.',
 						'optional'    => true,
 						'repeating'   => false,
 					],
@@ -1088,7 +1102,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'post',
-				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $post->headline ) ),
+				'post_title'        => $this->clean_title( $post->headline ),
 				'post_name'         => $post->basename . '-' . $post->oid,
 				'post_excerpt'      => $post->summary,
 				'post_status'       => $this->map_post_status( $post->status ),
@@ -1316,7 +1330,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'page',
-				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $page->headline ) ),
+				'post_title'        => $this->clean_title( $page->headline ),
 				'post_name'         => $page->permalink,
 				'post_status'       => $this->map_post_status( $page->status ),
 				'post_modified'     => $last_modified->format( 'Y-m-d H:i:s' ),
@@ -1449,7 +1463,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$post_data = [
 				'post_type'         => 'post',
-				'post_title'        => wp_strip_all_tags( preg_replace( '/&#(?:10|13);/', '', $slideshow->title ) ),
+				'post_title'        => $this->clean_title( $slideshow->headline ),
 				'post_name'         => $slideshow->basename . '-' . $slideshow->oid,
 				'post_status'       => $this->map_post_status( $slideshow->status ),
 				'post_date'         => $release_date->format( 'Y-m-d H:i:s' ),
@@ -1624,6 +1638,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		$start_from       = $assoc_args['start-from'] ?? 0;
 		$end_at           = $assoc_args['end-at'] ?? 0;
 		$oid_to_migrate   = isset( $assoc_args['oid-to-migrate'] ) ? explode( ',', $assoc_args['oid-to-migrate'] ) : [];
+		$base_url         = $assoc_args['base-url'] ?? null;
 
 		$raw_posts = $this->json_iterator->items( $post_json_file );
 		foreach ( $raw_posts as $index => $post ) {
@@ -1660,12 +1675,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			// Migrate events.
 			if ( ! empty( $post->relatedEvents ) ) {
-				$content = $this->migrate_event_or_location_markers( 'event', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedEvents );
+				$content = $this->migrate_event_or_location_markers( 'event', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedEvents, $base_url );
 			}
 
 			// Migrate location.
 			if ( ! empty( $post->relatedLocations ) ) {
-				$content = $this->migrate_event_or_location_markers( 'location', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedLocations );
+				$content = $this->migrate_event_or_location_markers( 'location', $publisher_domain, $post->oid, $existing_post_id, $content, $post->relatedLocations, $base_url );
 			}
 
 			if ( $content !== $post_content ) {
@@ -2301,12 +2316,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$post_json_file               = $assoc_args['post-json-file'];
 		$slideshow_json_file          = $assoc_args['slideshow-json-file'];
+		$page_json_file               = $assoc_args['page-json-file'];
 		$redirect_csv_files           = isset( $assoc_args['redirect-csv-files'] ) ? explode( ',', $assoc_args['redirect-csv-files'] ) : [];
 		$publisher_domain             = $assoc_args['publisher-domain'];
 		$publisher_domain_without_www = str_replace( 'www.', '', $publisher_domain );
 
 		$raw_posts      = $this->json_iterator->items( $post_json_file );
 		$raw_slideshows = $this->json_iterator->items( $slideshow_json_file );
+		$raw_pages      = $this->json_iterator->items( $page_json_file );
 
 		$migrated_posts = $this->load_posts();
 
@@ -2405,6 +2422,54 @@ class FoundationMigrator implements RegisterCommandInterface {
 			if ( isset( $slideshow->permalink ) && ! empty( $slideshow->permalink ) && $slideshow->permalink !== $post_relative_permalink ) {
 				$logger->info( sprintf( 'Migrating different permalink for slideshow %s (%s => %s)', $slideshow->oid, $slideshow->permalink, $post_relative_permalink ) );
 				$this->custom_redirect_generator->add_redirect( $slideshow->permalink, $post_relative_permalink );
+			}
+		}
+
+		foreach ( $raw_pages as $index => $page ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			if ( ! array_key_exists( $page->oid, $migrated_posts ) ) {
+				$logger->error( sprintf( 'Page %s not found', $page->oid ) );
+				continue;
+			}
+
+			$migrated_page_id = $migrated_posts[ $page->oid ];
+
+			// Generate permalink manually to handle category structure for private posts.
+			$post_permalink          = $this->generate_post_permalink_with_category( $migrated_page_id );
+			$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
+
+			if ( isset( $page->legacyURL ) && ! empty( $page->legacyURL ) ) {
+				$logger->info( sprintf( 'Migrating legacy redirect for page %s', $page->oid ) );
+
+				if ( str_contains( $post_relative_permalink, '?p=' ) ) {
+					$logger->warning( sprintf( 'Skipping legacy redirect for page %s because it has plain permalink: %s', $page->oid, $post_relative_permalink ) );
+					continue;
+				}
+
+				// Migrate legacy redirects.
+				foreach ( $page->legacyURL as $legacy_url ) {
+					// remove domain from the legacy URL.
+					$legacy_url_without_www = str_replace( 'www.', '', $legacy_url );
+					$legacy_url             = rtrim( str_replace( 'https://' . $publisher_domain_without_www, '', $legacy_url_without_www ), '/' );
+
+					if ( str_contains( $legacy_url, 'http' ) ) {
+						$logger->warning( sprintf( 'Skipping legacy redirect for page %s because it is not a relative URL: %s', $page->oid, $legacy_url ) );
+						continue;
+					}
+
+					if ( $post_relative_permalink !== $legacy_url ) {
+						$logger->info( sprintf( 'Migrating legacy redirect for page %s (%s => %s)', $page->oid, $legacy_url, $post_relative_permalink ) );
+						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
+					}
+				}
+			}
+
+			// Migrate different permalink.
+			if ( isset( $page->permalink ) && ! empty( $page->permalink ) && $page->permalink !== $post_relative_permalink ) {
+				$logger->info( sprintf( 'Migrating different permalink for page %s (%s => %s)', $page->oid, $page->permalink, $post_relative_permalink ) );
+				$this->custom_redirect_generator->add_redirect( $page->permalink, $post_relative_permalink );
 			}
 		}
 
@@ -2968,10 +3033,11 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @param int    $post_id          Post ID.
 	 * @param string $content          Post content.
 	 * @param array  $post_event_ids   Post event IDs.
+	 * @param string $base_url         Base URL.
 	 *
 	 * @return string Post content with embed markers replaced by Gutenberg blocks.
 	 */
-	private function migrate_event_or_location_markers( string $type, string $publisher_domain, string $post_oid, int $post_id, string $content, array $post_event_ids ): string {
+	private function migrate_event_or_location_markers( string $type, string $publisher_domain, string $post_oid, int $post_id, string $content, array $post_event_ids, ?string $base_url = null ): string {
 		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
 
 		if ( empty( $post_event_ids ) ) {
@@ -2990,7 +3056,7 @@ class FoundationMigrator implements RegisterCommandInterface {
 		if ( ! preg_match( $marker_pattern, $content ) && 'event' === $type ) {
 			$content_blocks = [];
 			foreach ( $post_event_ids as $event_id ) {
-				$events_data = $this->get_events_or_locations_data( $type, $publisher_domain, $event_id );
+				$events_data = $this->get_events_or_locations_data( $type, $publisher_domain, $event_id, $base_url );
 
 				if ( is_wp_error( $events_data ) ) {
 					$logger->error( sprintf( 'Error getting event data for event %s: %s', $event_id, $events_data->get_error_message() ) );
@@ -3013,14 +3079,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 		$content = preg_replace_callback(
 			$marker_pattern,
-			function ( $matches ) use ( $post_oid, $logger, $publisher_domain, $post_event_ids, $post_id, $type ) {
+			function ( $matches ) use ( $post_oid, $logger, $publisher_domain, $post_event_ids, $post_id, $type, $base_url ) {
 				$index = (int) $matches[1] - 1; // Convert to 0-based index.
 				if ( ! isset( $post_event_ids[ $index ] ) ) {
 					$logger->warning( sprintf( '%s %d not found in post %s for post %s', $type, (int) $matches[1], $post_oid ) );
 					return $matches[0];
 				}
 				$event_or_location_id = $post_event_ids[ $index ];
-				$events_data          = $this->get_events_or_locations_data( $type, $publisher_domain, $event_or_location_id );
+				$events_data          = $this->get_events_or_locations_data( $type, $publisher_domain, $event_or_location_id, $base_url );
 
 				if ( is_wp_error( $events_data ) ) {
 					$logger->error( sprintf( 'Error getting event data for event %s: %s', $event_or_location_id, $events_data->get_error_message() ) );
@@ -3304,19 +3370,23 @@ class FoundationMigrator implements RegisterCommandInterface {
 	 * @param string $type Type of content to get data for.
 	 * @param string $publisher_domain Publisher domain.
 	 * @param string $event_or_location_id Event or location ID.
+	 * @param string $base_url Base URL for the Foundation API.
 	 *
 	 * @return array|\WP_Error Event data or WP_Error.
 	 */
-	private function get_events_or_locations_data( string $type, string $publisher_domain, string $event_or_location_id ): array|\WP_Error {
-		return $this->get_data_from_api(
-			sprintf(
-				'https://preview:preview@%s.%s/gyrobase/API/%s?oid=%s',
-				'chronogram.com' === $publisher_domain ? 'calendar' : 'community',
-				$publisher_domain,
-				'event' === $type ? 'EventSearch' : 'LocationSearch',
-				$event_or_location_id
-			)
+	private function get_events_or_locations_data( string $type, string $publisher_domain, string $event_or_location_id, ?string $base_url = null ): array|\WP_Error {
+		$base_url = $base_url ?? sprintf( 'https://preview:preview@%s.%s', 'chronogram.com' === $publisher_domain ? 'calendar' : 'community', $publisher_domain );
+
+		$endpoint = sprintf(
+			'%s/gyrobase/API/%s?oid=%s',
+			$base_url,
+			'event' === $type ? 'EventSearch' : 'LocationSearch',
+			$event_or_location_id
 		);
+
+		\WP_CLI::log( sprintf( 'Getting %s data for %s: %s', $type, $event_or_location_id, $endpoint ) );
+
+		return $this->get_data_from_api( $endpoint );
 	}
 
 	/**
@@ -3769,6 +3839,17 @@ class FoundationMigrator implements RegisterCommandInterface {
 		}
 
 		return implode( "\n\n", $bio_parts );
+	}
+
+	/**
+	 * Clean title.
+	 *
+	 * @param string $title Title.
+	 * @return string Cleaned title.
+	 */
+	private function clean_title( string $title ): string {
+		$title = preg_replace( '/&#(?:10|13);/', '', $title );
+		return str_contains( $title, '<i>' ) ? $title : wp_strip_all_tags( $title );
 	}
 
 	/**

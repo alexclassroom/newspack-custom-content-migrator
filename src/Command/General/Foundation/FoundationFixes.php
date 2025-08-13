@@ -15,6 +15,7 @@ use Newspack\MigrationTools\Logic\Attachments;
 use Newspack\MigrationTools\Logic\Posts;
 use Newspack\MigrationTools\Util\JsonIterator;
 use Newspack\MigrationTools\Util\Log\MultiLog;
+use Newspack\MigrationTools\Logic\UsersHelper;
 use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use WP_CLI;
 use ReflectionClass;
@@ -335,6 +336,30 @@ class FoundationFixes implements RegisterCommandInterface {
 		);
 
 		WP_CLI::add_command(
+			'newspack-content-migrator foundation-merge-tag-to-category',
+			self::get_command_closure( 'cmd_merge_tag_to_category' ),
+			[
+				'shortdesc' => 'Merges tag to category.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'tag-id',
+						'description' => 'Tag ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'category-id',
+						'description' => 'Category ID.',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
 			'newspack-content-migrator foundation-fix-large-image-blocks',
 			self::get_command_closure( 'cmd_fix_large_image_block' ),
 			[
@@ -344,6 +369,54 @@ class FoundationFixes implements RegisterCommandInterface {
 						'type'        => 'assoc',
 						'name'        => 'post-json-file',
 						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'start-from',
+						'description' => 'Start from the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+					[
+						'type'        => 'assoc',
+						'name'        => 'end-at',
+						'description' => 'End at the post with the given index.',
+						'optional'    => true,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-fix-headline',
+			self::get_command_closure( 'cmd_fix_headline' ),
+			[
+				'shortdesc' => 'Fixes headline.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'post-json-file',
+						'description' => 'Path to the JSON file containing the posts (e.g. `Post.json`).',
+						'optional'    => false,
+						'repeating'   => false,
+					],
+				],
+			]
+		);
+
+		WP_CLI::add_command(
+			'newspack-content-migrator foundation-fix-contributers-descriptions',
+			self::get_command_closure( 'cmd_fix_contributers_descriptions' ),
+			[
+				'shortdesc' => 'Fixes contributers descriptions.',
+				'synopsis'  => [
+					[
+						'type'        => 'assoc',
+						'name'        => 'wp-contributor-json-file',
+						'description' => 'Path to the JSON file containing the contributors (e.g. `WPContributor.json`).',
 						'optional'    => false,
 						'repeating'   => false,
 					],
@@ -899,6 +972,36 @@ class FoundationFixes implements RegisterCommandInterface {
 	}
 
 	/**
+	 * Merges tag to category.
+	 * Callable for 'newspack-content-migrator foundation-merge-tag-to-category' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_merge_tag_to_category( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$tag_id      = $assoc_args['tag-id'];
+		$category_id = $assoc_args['category-id'];
+
+		// get the tag posts.
+		$tag_posts = get_posts(
+			[
+				'post_type'      => 'post',
+				'posts_per_page' => -1,
+				'tag__in'        => [ $tag_id ],
+			]
+		);
+
+		foreach ( $tag_posts as $post ) {
+			wp_set_post_categories( $post->ID, $category_id, true );
+			$logger->info( sprintf( 'Merged tag %d to category %d for post %d', $tag_id, $category_id, $post->ID ) );
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
 	 * Fixes large image block.
 	 * Callable for 'newspack-content-migrator foundation-fix-large-image-blocks' command.
 	 *
@@ -953,6 +1056,96 @@ class FoundationFixes implements RegisterCommandInterface {
 
 				$logger->info( sprintf( 'Post %d is fixed', $existing_post_id ) );
 			}
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Fixes headline.
+	 * Callable for 'newspack-content-migrator foundation-fix-headline' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_headline( array $args, array $assoc_args ): void {
+		global $wpdb;
+
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$post_json_file = $assoc_args['post-json-file'];
+
+		$raw_posts = $this->json_iterator->items( $post_json_file );
+
+		foreach ( $raw_posts as $index => $post ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			$existing_post_id = Posts::get_post_by_unique_identifier( $post->oid );
+
+			if ( ! isset( $post->headline ) || empty( $post->headline ) ) {
+				continue;
+			}
+
+			if ( ! $existing_post_id ) {
+				$logger->error( sprintf( 'Post %d not found', $post->oid ) );
+				continue;
+			}
+
+			$post_title = get_post_field( 'post_title', $existing_post_id );
+
+			if ( $post_title === $post->headline ) {
+				continue;
+			}
+
+			$updated_post_title = preg_replace( '/&#(?:10|13);/', '', $post->headline );
+			$updated_post_title = str_contains( $updated_post_title, '<i>' ) ? $updated_post_title : wp_strip_all_tags( $updated_post_title );
+
+			if ( $updated_post_title !== $post_title ) {
+				$wpdb->update(
+					$wpdb->posts,
+					[ 'post_title' => $updated_post_title ],
+					[ 'ID' => $existing_post_id ]
+				);
+
+				$logger->info( sprintf( 'Post %d is fixed', $existing_post_id ) );
+			}
+		}
+
+		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
+	}
+
+	/**
+	 * Fixes contributors descriptions.
+	 * Callable for 'newspack-content-migrator foundation-fix-contributers-descriptions' command.
+	 *
+	 * @param array $args       Positional arguments.
+	 * @param array $assoc_args Associative arguments.
+	 */
+	public function cmd_fix_contributers_descriptions( array $args, array $assoc_args ): void {
+		$logger = MultiLog::get_cli_and_file_logger( __FUNCTION__ );
+
+		$wp_contributor_json_file = $assoc_args['wp-contributor-json-file'];
+
+		$raw_contributors = $this->json_iterator->items( $wp_contributor_json_file );
+
+		foreach ( $raw_contributors as $index => $contributor ) {
+			// Flush memory every 50 steps, with 1 seconds of sleeping time.
+			MemoryCleanupHook::cleanup( 1, $index, 50 );
+
+			$existing_user = UsersHelper::get_user_by_unique_identifier( $contributor->oid );
+
+			if ( ! isset( $contributor->bio ) || empty( $contributor->bio ) ) {
+				continue;
+			}
+
+			if ( ! $existing_user ) {
+				$logger->error( sprintf( 'Contributor %d not found', $contributor->oid ) );
+				continue;
+			}
+
+			update_user_meta( $existing_user->ID, 'description', $contributor->bio );
+			$logger->info( sprintf( 'Updated contributor %d description to: %s', $existing_user->ID, $contributor->bio ) );
 		}
 
 		$logger->info( sprintf( 'Check the log file for migration details: %s', __FUNCTION__ . '.log' ) );
