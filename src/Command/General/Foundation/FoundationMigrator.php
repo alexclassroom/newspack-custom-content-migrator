@@ -2328,11 +2328,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$migrated_post_id = $migrated_posts[ $post->oid ];
 
+			// Generate permalink manually to handle category structure for private posts.
+			$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
+			$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
+
 			if ( isset( $post->legacyURL ) && ! empty( $post->legacyURL ) ) {
 				$logger->info( sprintf( 'Migrating legacy redirect for post %s', $post->oid ) );
-				// Generate permalink manually to handle category structure for private posts.
-				$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
-				$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
 
 				if ( str_contains( $post_relative_permalink, '?p=' ) ) {
 					$logger->warning( sprintf( 'Skipping legacy redirect for post %s because it has plain permalink: %s', $post->oid, $post_relative_permalink ) );
@@ -2355,12 +2356,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
 					}
 				}
+			}
 
-				// Migrate different permalink.
-				if ( isset( $post->permalink ) && ! empty( $post->permalink ) && $post->permalink !== $post_relative_permalink ) {
-					$logger->info( sprintf( 'Migrating different permalink for post %s (%s => %s)', $post->oid, $post->permalink, $post_relative_permalink ) );
-					$this->custom_redirect_generator->add_redirect( $post->permalink, $post_relative_permalink );
-				}
+			// Migrate different permalink.
+			if ( isset( $post->permalink ) && ! empty( $post->permalink ) && $post->permalink !== $post_relative_permalink ) {
+				$logger->info( sprintf( 'Migrating different permalink for post %s (%s => %s)', $post->oid, $post->permalink, $post_relative_permalink ) );
+				$this->custom_redirect_generator->add_redirect( $post->permalink, $post_relative_permalink );
 			}
 		}
 
@@ -2375,11 +2376,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 
 			$migrated_post_id = $migrated_posts[ $slideshow->oid ];
 
+			// Generate permalink manually to handle category structure for private posts.
+			$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
+			$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
+
 			if ( isset( $slideshow->legacyURL ) && ! empty( $slideshow->legacyURL ) ) {
 				$logger->info( sprintf( 'Migrating legacy redirect for slideshow %s', $slideshow->oid ) );
-				// Generate permalink manually to handle category structure for private posts.
-				$post_permalink          = $this->generate_post_permalink_with_category( $migrated_post_id );
-				$post_relative_permalink = rtrim( wp_make_link_relative( $post_permalink ), '/' );
 
 				// Migrate legacy redirects.
 				foreach ( $slideshow->legacyURL as $legacy_url ) {
@@ -2397,12 +2399,12 @@ class FoundationMigrator implements RegisterCommandInterface {
 						$this->custom_redirect_generator->add_redirect( $legacy_url, $post_relative_permalink );
 					}
 				}
+			}
 
-				// Migrate different permalink.
-				if ( isset( $slideshow->permalink ) && ! empty( $slideshow->permalink ) && $slideshow->permalink !== $post_relative_permalink ) {
-					$logger->info( sprintf( 'Migrating different permalink for slideshow %s (%s => %s)', $slideshow->oid, $slideshow->permalink, $post_relative_permalink ) );
-					$this->custom_redirect_generator->add_redirect( $slideshow->permalink, $post_relative_permalink );
-				}
+			// Migrate different permalink.
+			if ( isset( $slideshow->permalink ) && ! empty( $slideshow->permalink ) && $slideshow->permalink !== $post_relative_permalink ) {
+				$logger->info( sprintf( 'Migrating different permalink for slideshow %s (%s => %s)', $slideshow->oid, $slideshow->permalink, $post_relative_permalink ) );
+				$this->custom_redirect_generator->add_redirect( $slideshow->permalink, $post_relative_permalink );
 			}
 		}
 
@@ -3266,7 +3268,14 @@ class FoundationMigrator implements RegisterCommandInterface {
 				return new \WP_Error( 'missing_embed_url', 'Embed URL is missing' );
 			}
 
-			return serialize_block( $this->gutenberg_block_generator->get_youtube( $raw_embed->embedURL ) );
+			$youtube_video_url = str_contains( $raw_embed->embedURL, 'amp;' )
+				? htmlspecialchars_decode( $raw_embed->embedURL )
+				: $raw_embed->embedURL;
+
+			// If the URL does have URL params we'll migrate the body instead.
+			if ( ! str_contains( $youtube_video_url, '?' ) && ! str_contains( $youtube_video_url, 'amp;' ) ) {
+				return serialize_block( $this->gutenberg_block_generator->get_youtube( $youtube_video_url ) );
+			}
 		}
 
 		if ( isset( $raw_embed->specialPlacement ) && in_array( 'Info Box', $raw_embed->specialPlacement, true ) ) {

@@ -349,13 +349,6 @@ class FoundationFixes implements RegisterCommandInterface {
 					],
 					[
 						'type'        => 'assoc',
-						'name'        => 'image-json-file',
-						'description' => 'Path to the JSON file containing the images (e.g. `Image.json`).',
-						'optional'    => false,
-						'repeating'   => false,
-					],
-					[
-						'type'        => 'assoc',
 						'name'        => 'start-from',
 						'description' => 'Start from the post with the given index.',
 						'optional'    => true,
@@ -1502,7 +1495,7 @@ class FoundationFixes implements RegisterCommandInterface {
 	 */
 	private function remove_alignment_classname_from_image_blocks( string $post_content ): string {
 		// First, remove className from Gutenberg Image Block headers with alignment classes.
-		$pattern = '/<!-- wp:image\s*({[^}]*"className":"[^"]*align(?:center|left|right)[^"]*"[^}]*})\s*-->/';
+		$pattern = '/<!-- wp:image\s*({[^}]*"(?:className":"[^"]*align[^"]*"|align":"(?:center|left|right|wide|full))[^-]*})\s*-->/';
 
 		$post_content = preg_replace_callback(
 			$pattern,
@@ -1511,7 +1504,14 @@ class FoundationFixes implements RegisterCommandInterface {
 
 				// Remove the className property and its value from the JSON attributes.
 				$block_attributes = preg_replace(
-					'/"className":"[^"]*align(?:center|left|right)[^"]*",?\s*/',
+					'/"className":"[^"]*align[^"]*",?\s*/',
+					'',
+					$block_attributes
+				);
+
+				// Remove the align property and its value from the JSON attributes.
+				$block_attributes = preg_replace(
+					'/"align":"(?:center|left|right|wide|full)",?\s*/',
 					'',
 					$block_attributes
 				);
