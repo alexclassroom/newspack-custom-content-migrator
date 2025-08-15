@@ -1,4 +1,5 @@
 <?php
+
 /**
  * Publisher Specific migrator for BridgeMI.
  * 
@@ -31,10 +32,11 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     
     // Live site constants.
     
-    const FEED_TYPES = [ 'articles', 'authors', 'tags', 'topics' ];
+    const FEED_TYPES = [ 'articles', 'authors', 'redirects-v2', 'tags', 'topics' ];
     
     const FEED_URL_ARTICLES  = 'https://www.bridgemi.com/article-export.json';
     const FEED_URL_AUTHORS   = 'https://www.bridgemi.com/authors-export.json';
+    const FEED_URL_REDIRECTS = 'https://www.bridgemi.com/redirects-export.json';
     const FEED_URL_TAGS      = 'https://www.bridgemi.com/tags-export.json';
     const FEED_URL_TOPICS    = 'https://www.bridgemi.com/topics-export.json';
 
@@ -58,6 +60,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     const META_KEY_HERO_IMAGE_COUNT = '_np_import_bridgemi_hero_image_count';
     const META_KEY_HEROS_PROCESSED  = '_np_import_bridgemi_heros_processed';
     const META_KEY_PROCESSED        = '_np_import_bridgemi_processed';
+    const META_KEY_CLEANED          = '_np_import_bridgemi_cleaned';
 
     // Newspack constants.
 
@@ -85,6 +88,13 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 	private $logger;
 
     /**
+     * Loggers for CSVs.
+     *
+     * @var array
+     */
+    private $logger_csvs = [];
+
+    /**
 	 * Constructor.
 	 */
 	private function __construct() {
@@ -100,6 +110,15 @@ class BridgeMIMigrator implements RegisterCommandInterface {
      */
     public static function register_commands(): void {
     
+        WP_CLI::add_command(
+            'newspack-content-migrator bridgemi-clean-up',
+            self::get_command_closure( 'cmd_clean_up' ),
+            [
+                'shortdesc' => 'Clean up.',
+                'synopsis'  => [],
+            ]
+        );
+
         WP_CLI::add_command(
             'newspack-content-migrator bridgemi-heros',
             self::get_command_closure( 'cmd_heros' ),
@@ -170,6 +189,96 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
     }
     
+    /**
+     * Cleanup certain types.
+     *
+     * @param array $pos_args Command arguments.
+     * @param array $assoc_args Command associative arguments.
+     */
+    public function cmd_clean_up( array $pos_args, array $assoc_args ): void {
+
+        $this->validate_dependencies();
+
+        $this->validate_feed_type( $pos_args );
+            
+        // Logger.
+        $logger_slug = __FUNCTION__ . '__' . $pos_args[0];
+        $this->logger_set( $logger_slug );
+
+        // Run command.
+        $this->logger->info( 'Running command: ' . $logger_slug );
+                
+        do {
+
+            // Has json item from import, but not cleaned up.
+            $meta_query = [
+                [
+                    'key'     => self::META_KEY_JSON_ITEM,
+                    'compare' => 'EXISTS',
+                ],
+                [
+                    'key'     => self::META_KEY_CLEANED,
+                    'compare' => 'NOT EXISTS',
+                ],
+            ];
+
+            $limit = 10;
+            
+            // Get items for processing.
+            switch( $pos_args[0] ) {
+                case 'articles':
+                    $db_items = get_posts( [ 'fields' => 'ids', 'numberposts' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+                case 'authors':
+                    $db_items = get_users( [ 'fields' => 'ID', 'number' => $limit, 'meta_query' => $meta_query ] );
+                    break;
+                case 'tags':
+                    $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'post_tag', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+                    break;
+                case 'topics':
+                    $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'category', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
+                    break;
+                default:
+                    $this->logger->error( 'No clean-up needed for: ' . $pos_args[0] );
+                    exit();
+            }
+
+            // Process items.
+            foreach( $db_items as $db_id ) {
+
+                $this->logger->info( '------------ processing id: ' . $db_id );
+
+                switch( $pos_args[0] ) {
+                    case 'articles':
+                        $json_item = $this->validate_get_from_db( 'post', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_article( $db_id, $json_item, $logger_slug );
+                        update_post_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
+                    case 'authors':
+                        $json_item = $this->validate_get_from_db( 'user', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_author( $db_id, $json_item, $logger_slug );
+                        update_user_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
+                    case 'tags':
+                    case 'topics':
+                        $json_item = $this->validate_get_from_db( 'term', $db_id );
+                        $this->logger->info( 'old url: ' . $json_item->url );
+                        $this->clean_up_term( $db_id, $json_item, $logger_slug, $pos_args[0] );
+                        update_term_meta( $db_id, self::META_KEY_CLEANED, 'yes' );
+                        break;
+                }
+
+                $this->logger->info( '-- done with item' );
+
+            } // foreach item.
+            
+        } while( ! empty( $db_items ) );
+
+        $this->logger->info( 'Done.' );
+    }
+
     /**
      * Convert hero image arrays to slideshows.
      *
@@ -446,6 +555,10 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $feed_url = self::FEED_URL_AUTHORS;
                 $item_callback = [ $this, 'import_json_author' ];
                 break;
+            case 'redirects-v2':
+                $feed_url = self::FEED_URL_REDIRECTS;
+                $item_callback = [ $this, 'import_json_redirect_v2' ];
+                break;
             case 'tags':
                 $feed_url = self::FEED_URL_TAGS;
                 $item_callback = [ $this, 'import_json_tag' ];
@@ -454,6 +567,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 $feed_url = self::FEED_URL_TOPICS;
                 $item_callback = [ $this, 'import_json_topic' ];
                 break;
+            default:
+                $this->logger->error( 'No import needed for: ' . $pos_args[0] );
+                exit();
         }
         
         // Import pages.
@@ -524,6 +640,9 @@ class BridgeMIMigrator implements RegisterCommandInterface {
                 case 'topics':
                     $db_items = get_terms( [ 'fields' => 'ids', 'taxonomy' => 'category', 'number' => $limit, 'hide_empty' => false, 'meta_query' => $meta_query ] );
                     break;
+                default:
+                    $this->logger->error( 'No processing needed for: ' . $pos_args[0] );
+                    exit();
             }
 
             // Process items.
@@ -568,6 +687,203 @@ class BridgeMIMigrator implements RegisterCommandInterface {
     }
 
     /**
+     * Clean up one article (post) using verified (checksum) json_item.
+     *
+     */
+    private function clean_up_article( int $post_id, object $json_item, $logger_slug ): void {
+
+        // Post info.
+        $post_content = get_post_field( 'post_content', $post_id, 'raw' );
+        $post_date    = get_post_field( 'post_date', $post_id, 'raw' );
+
+        // fuzzy match on int or string for 0 post_author.
+        if( 0 == get_post_field( 'post_author', $post_id, 'raw' ) ) {
+            
+            $this->logger->info( 'Post without author, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-no-author-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                'Date' => $post_date,
+                'JSON Author' => json_encode( $json_item->author ),
+            ]);
+            
+        }
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $post_content ) ) {
+            
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Post with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/?p=' . $post_id,
+                    'Date' => $post_date,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+
+    }
+
+    /**
+     * Clean up one author using verified (checksum) json_item.
+     */
+    private function clean_up_author( int $user_id, object $json_item, $logger_slug ): void {
+
+        $user_data = get_userdata( $user_id );
+        $description = trim( get_user_meta( $user_id, 'description', true ) );
+
+        $json_item->biography = trim( $json_item->biography );
+        $json_item->byline = trim( $json_item->byline );
+
+        // Must have both values and not start with "guest author line"...
+        // Could be a case where the same info is displayed twice on top of eachother.
+        if( ! empty( $json_item->biography ) && ! empty( $json_item->byline ) && ! str_starts_with( $description, 'A guest author for Bridge' ) ) {
+    
+            $this->logger->info( 'Both bio and byline, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-bios-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                'Bio' => $description,
+            ]);
+
+        }
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->biography . $json_item->byline ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Bios with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+        
+        // redirects (trimmed author urls).
+        if( str_replace( '/about/', '', $json_item->url ) !== $user_data->user_nicename ) {
+            
+            $this->logger->info( 'Author url changed, adding to CSV.' );
+
+            $this->logger_csv_out( $logger_slug . '-redirects-', [
+                'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com/author/' . $user_data->user_nicename,
+            ]);
+    
+        }
+
+    }
+
+    /**
+     * Clean up one term using verified (checksum) json_item.
+     */
+    private function clean_up_term( int $term_id, object $json_item, $logger_slug, $type ): void {
+
+        if( 'tags' === $type ) $type = 'post_tag';
+        else if( 'topics' === $type ) $type = 'category';
+
+        $json_item->description = trim( $json_item->description );
+
+        // Look for un-fetch assets.
+        if( $un_fetched = $this->clean_up_content_un_fetched( $json_item->description ) ) {
+    
+            foreach( $un_fetched as $link ) {
+
+                $this->logger->info( 'Terms with un fetched asset, adding to CSV.' );
+
+                $this->logger_csv_out( $logger_slug . '-un-fetched-', [
+                    'Live' => 'https://www.bridgemi.com' . $json_item->url,
+                    'Staging' => 'https://bridgemichigan-newspack.newspackstaging.com' . wp_make_link_relative( get_term_link( $term_id, $type ) ),
+                    'Un-fetched' => $link,
+                ]);
+    
+            }
+        }
+
+    }
+
+    private function clean_up_content_un_fetched( $post_content ) {
+
+        $un_fetched = [];
+
+        $html_doc = new HtmlDocument( $post_content );
+    
+        // Assets in img src.
+        $images = $html_doc->find( 'img' );
+        foreach ( $images as $img ) {
+            $src = $img?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in script src.
+        $scripts = $html_doc->find( 'script' );
+        foreach ( $scripts as $script ) {
+            $src = $script?->getAttribute( 'src' );            
+            if ( ! $src ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $src ) ) {
+                $un_fetched[] = $src;
+            }
+        }
+
+        // Assets in a href.
+        $links = $html_doc->find( 'a' );
+        foreach ( $links as $link ) {
+            $href = $link?->getAttribute( 'href' );            
+            if ( ! $href ) {
+                continue;
+            }
+            if( $this->clean_up_content_un_fetched_assets_single( $href ) ) {
+                $un_fetched[] = $href;
+            }
+        }
+
+        return $un_fetched;
+
+    }
+
+    private function clean_up_content_un_fetched_assets_single( $url_from_cralwer ) {
+        
+        // Everything already expects relative paths so convert to relative.
+        $relative_path = trim( $url_from_cralwer );
+        $relative_path = preg_replace( '#^//(www\.)?bridgemi\.com#i', '', $relative_path ); // no scheme
+        $relative_path = preg_replace( '#^https?://(www\.)?bridgemi\.com#i', '', $relative_path ); // with scheme
+
+        // Must be relative at this point or return;
+        if( str_starts_with( $relative_path, '//' ) || ! str_starts_with( $relative_path, '/' ) ) return false;
+
+        // Must be link to an asset ext.
+        $parsed_url_path = parse_url( $relative_path, PHP_URL_PATH );
+        if( ! is_string( $parsed_url_path ) || empty( $parsed_url_path ) ) {
+            return false;
+        }
+        $parsed_url_ext = pathinfo( $parsed_url_path, PATHINFO_EXTENSION );
+        if( ! is_string( $parsed_url_ext ) || empty( $parsed_url_ext ) ) {
+            return false;
+        }
+        
+        $this->logger->info( 'Un fetched: ' . $url_from_cralwer );
+
+        return true;
+    }
+
+    /**
      * Import one feed page.
      *
      * @param string $feed_url Feed URL.
@@ -609,7 +925,7 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
             $this->logger->info( sprintf( '------------ JSON index: %d:', $loop_index ) );
 
-            // Log old slug url as unique key for easier debugging.
+            // Log old slug url as unique key for easier debugging.            
             $this->logger->info( sprintf( 'Old slug url: %s', $json_item->url ?? 'missing' ) );
 
             // Generate checksum for this json item for comparison with future imports.
@@ -816,6 +1132,122 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 
         // Log success.
         $this->logger->info( sprintf( 'Imported user ID: %d', $user_id ) );
+
+    }
+
+    /**
+     * Import one redirect item.
+     *
+     * @param object $json_item JSON data.
+     * @param string $checksum Checksum for comparison with future imports.
+     */
+    public function import_json_redirect_v2( object $json_item, string $checksum ): void {
+        
+        // Define expected properties and additional validation rules        
+        $expected_properties = [
+            'from'        => [ 'type' => 'string', 'required' => true, ],
+            'to'          => [ 'type' => 'string', 'required' => true, ],
+            'status_code' => [ 'type' => 'string' ],
+            'created'     => [ 'type' => 'string' ],
+        ];
+
+        // Error out if json_item is not valid.
+        $this->validate_json_item( $json_item, $expected_properties );
+
+        // Dry run, return.
+        if ( $this->dry_run ) {
+            $this->logger->notice( 'Skip: Dry run not supported for redirects import.' );
+            return;
+        }
+
+        // Set vars.
+        $from_url = trim( $json_item->from );
+        $this->logger->info( 'From url: ' . $from_url );
+        
+        // short circuit check.
+        if( (new Redirection())->redirect_from_exists( $from_url) ) {
+			$this->logger->notice( 'Skip: short-circuit redirect already exists.' );
+			return;
+		}
+
+        // ok to continue;
+        $to_url = trim( $json_item->to );
+        $this->logger->info( 'To url: ' . $to_url );
+
+        // Remove BrideMI url from front of to url, but off-site urls might still have http.
+        // leave the absolute / in front
+        $to_url = preg_replace( '#^http(s?)://(www\.)?bridgemi.com#', '', $to_url );
+        
+        // must be absolute url (starts with /) but not "//".
+        if( ! preg_match( '#^/[^/]+#', $from_url ) ) {
+            $this->logger->notice( 'Skip: From url not absolute.' );
+            return;            
+        }
+
+        // must be absolute url or http
+        if( ! preg_match( '#^(/|http)#', $to_url ) ) {
+            $this->logger->notice( 'Skip: to url not absolute nor http.' );
+            return;            
+        }
+
+        // test url
+        $from_response = $this->util_get_remote_head( self::LIVE_SITE_URL . $from_url );
+
+        if( is_wp_error( $from_response ) || ! is_array( $from_response ) || empty( $from_response )
+            || empty( $from_response['response']['code'] ) || empty( $from_response['headers']['location'] )
+        ) {
+            $this->logger->notice( 'Skip: From response not set or error.' );
+            return;
+        }
+
+        // Must be a redirect.
+        if( ! preg_match( '/^3\d{2}$/', $from_response['response']['code'] ) ) {
+            $this->logger->notice( 'Skip: From code not 3xx...' );
+            return;            
+        }
+
+        $this->logger->info( 'From header location: ' . $from_response['headers']['location'] );
+
+        // If header location is BridgeMI, then make sure it's an end-state url.
+        // otherwise off-site urls can just be added as-is.
+        if( preg_match( '#^(http(s?):)?//(www\.)?bridgemi.com#', $from_response['headers']['location'] ) ) {
+
+            // Check redirect landing page is same as to_url
+            if( 0 !== strcmp( self::LIVE_SITE_URL . $to_url, $from_response['headers']['location'] ) ) {
+                $this->logger->notice( 'Skip: To url is not same as redirect url.' );
+                return;
+            }
+
+            // Check to url is final state url;
+            $to_response = $this->util_get_remote_head( self::LIVE_SITE_URL . $to_url );
+
+            if( is_wp_error( $to_response ) || ! is_array( $to_response ) || empty( $to_response )
+                || empty( $to_response['response']['code'] )
+            ) {
+                $this->logger->notice( 'Skip: to response not set or error.' );
+                return;
+            }
+
+            // Must be a 200.
+            if( ! preg_match( '/^2\d{2}$/', $to_response['response']['code'] ) ) {
+                $this->logger->notice( 'Skip: to code not 2xx...' );
+                return;            
+            }
+
+        }
+        else {
+
+            // Check redirect landing page is same as to_url
+            if( 0 !== strcmp( $to_url, $from_response['headers']['location'] ) ) {
+                $this->logger->notice( 'Skip: Off-site url is not same as redirect url.' );
+                return;
+            }
+            
+            $this->logger->notice( 'Off-site url.' );
+        }
+
+        // Set the redirect using the built-in method
+        $this->set_redirect( $from_url, $to_url, 'redirects_v2' );
 
     }
 
@@ -1635,6 +2067,58 @@ class BridgeMIMigrator implements RegisterCommandInterface {
 		);
 	}
     
+    /**
+     * Logger for csvs
+     */
+    private function logger_csv_out( $logger_slug_csv, $data ) {
+    
+        // Create and set header row.
+        if( ! isset( $this->logger_csvs[ $logger_slug_csv ] ) ) {
+            $this->logger_csvs[ $logger_slug_csv ] = fopen( str_replace( __NAMESPACE__ . '\\', '', __CLASS__ ) . '_' . $logger_slug_csv . microtime( true ) . '.csv', 'w' );
+            fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_keys( $data ) );
+        }
+
+        // data values.
+        fputcsv( $this->logger_csvs[ $logger_slug_csv ], array_values( $data ) );
+
+    }
+
+    /****************
+     * UTILS
+     ***************/
+
+    function util_get_remote_head( $url, $max_tries = 2 ) {
+
+		$this->logger->info( 'Requesting head: ' . $url );
+
+		$response = wp_remote_head( $url, [ 'timeout' => 60 ] ); // increase timeout to be safe.
+
+		if ( is_wp_error( $response ) ) {
+			
+			// for some reason remote head is ignoring timeout...so if timeout, just try again....
+			// stop infinite loop with max tries.				
+			// message: Connection timeout after
+			// message: Connection timed out
+			if( 'http_request_failed' === $response->get_error_code() 
+				&& str_contains( $response->get_error_message(), 'Connection time' )
+				&& $max_tries > 0
+			) {
+				sleep(3);
+				return $this->util_get_remote_head( $url, --$max_tries );
+			}
+
+			return $response;
+
+		}
+		
+        return $response;
+
+	}
+
+    /******************
+     * VALIDATORS
+     *****************/
+
     /**
      * Validate (and write to log) if an existing item (post, term, or user) exists and then compare the checksum.
      * 
