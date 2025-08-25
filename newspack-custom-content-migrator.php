@@ -79,6 +79,7 @@ PluginSetup::register_command_classes(
 
 		// Publisher specific commands. Remove from below when launched.
 		Command\PublisherSpecific\JEPBailiwickMigrator::class,
+		Command\PublisherSpecific\AmericaMagMigrator::class,
 		Command\PublisherSpecific\ArkansasTimesMigrator::class,
 		Command\PublisherSpecific\MiradorProvincialMigrator::class,
 		Command\PublisherSpecific\SouthwestRegionalPublishingMigrator::class,
