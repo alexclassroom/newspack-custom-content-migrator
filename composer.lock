@@ -55,17 +55,17 @@
             "source": {
                 "type": "git",
                 "url": "https://github.com/Automattic/newspack-migration-tools.git",
-                "reference": "2998c4b39c09eca07b52b25bde03b4b66aae6f3c"
+                "reference": "05422f3fda8484707cc3502885eed47be3c2116a"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/2998c4b39c09eca07b52b25bde03b4b66aae6f3c",
-                "reference": "2998c4b39c09eca07b52b25bde03b4b66aae6f3c",
+                "url": "https://api.github.com/repos/Automattic/newspack-migration-tools/zipball/05422f3fda8484707cc3502885eed47be3c2116a",
+                "reference": "05422f3fda8484707cc3502885eed47be3c2116a",
                 "shasum": ""
             },
             "require": {
                 "bramus/monolog-colored-line-formatter": "^3.1",
-                "halaxa/json-machine": "^1.1",
+                "halaxa/json-machine": "^1.1.5",
                 "monolog/monolog": "^3.7",
                 "php": ">=8.1"
             },
@@ -114,7 +114,7 @@
                 "source": "https://github.com/Automattic/newspack-migration-tools/tree/trunk",
                 "issues": "https://github.com/Automattic/newspack-migration-tools/issues"
             },
-            "time": "2025-07-29T14:36:45+00:00"
+            "time": "2025-09-19T17:09:14+00:00"
         },
         {
             "name": "automattic/newspack-post-image-downloader",
@@ -5343,15 +5343,15 @@
     "aliases": [],
     "minimum-stability": "stable",
     "stability-flags": {
-        "automattic/newspack-content-converter": 20,
-        "automattic/newspack-migration-tools": 20,
         "automattic/newspack-post-image-downloader": 20,
+        "automattic/newspack-content-converter": 20,
+        "simplehtmldom/simplehtmldom": 5,
         "automattic/newspack-scraper-migrator": 20,
-        "simplehtmldom/simplehtmldom": 5
+        "automattic/newspack-migration-tools": 20
     },
     "prefer-stable": false,
     "prefer-lowest": false,
-    "platform": {},
-    "platform-dev": {},
-    "plugin-api-version": "2.6.0"
+    "platform": [],
+    "platform-dev": [],
+    "plugin-api-version": "2.2.0"
 }
