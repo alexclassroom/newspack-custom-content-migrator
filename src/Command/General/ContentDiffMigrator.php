@@ -8,6 +8,7 @@
 namespace NewspackCustomContentMigrator\Command\General;
 
 use Newspack\MigrationTools\Command\WpCliCommandTrait;
+use Newspack\MigrationTools\Hooks\MemoryCleanupHook;
 use NewspackCustomContentMigrator\Command\RegisterCommandInterface;
 use NewspackCustomContentMigrator\Logic\ContentDiffMigrator as ContentDiffMigratorLogic;
 use NewspackCustomContentMigrator\Utils\PHP as PHPUtil;
@@ -432,18 +433,22 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 			WP_CLI::log( sprintf( 'Querying %s types...', implode( ',', $post_types_non_attachments ) ) );
 			$results_live_posts  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
 			$results_local_posts = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', $post_types_non_attachments, [ 'publish', 'future', 'draft', 'pending', 'private' ] );
+			MemoryCleanupHook::cleanup( 1 );
 
 			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_posts ) ) );
 			$new_live_ids = self::$logic->filter_new_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d new IDs found.', count( $new_live_ids ) ) );
+			MemoryCleanupHook::cleanup( 1 );
 
 			WP_CLI::log( 'Searching for records more recently modified on live...' );
 			$modified_live_ids = self::$logic->filter_modified_live_ids( $results_live_posts, $results_local_posts );
 			WP_CLI::success( sprintf( '%d modified IDs found.', count( $modified_live_ids ) ) );
+			MemoryCleanupHook::cleanup( 1 );
 
 			WP_CLI::log( 'Querying attachments...' );
 			$results_live_attachments  = self::$logic->get_posts_rows_for_content_diff( $live_table_prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
 			$results_local_attachments = self::$logic->get_posts_rows_for_content_diff( $wpdb->prefix . 'posts', [ 'attachment' ], [ 'inherit' ] );
+			MemoryCleanupHook::cleanup( 1 );
 
 			WP_CLI::log( sprintf( 'Fetched %s total from live site. Searching new ones...', count( $results_live_attachments ) ) );
 			$new_live_attachment_ids = self::$logic->filter_new_live_ids( $results_live_attachments, $results_local_attachments );
@@ -570,10 +575,12 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 		$taxonomies_to_recreate = array_diff( $taxonomies_to_migrate, [ 'post_tag' ] );
 		WP_CLI::log( sprintf( 'Recreating taxonomies %s ...', "\n- " . implode( "\n- ", $taxonomies_to_recreate ) ) );
 		$hierarchical_taxonomy_term_id_updates = $this->recreate_hierarchical_taxonomies( $taxonomies_to_recreate );
+		MemoryCleanupHook::cleanup( 1 );
 
 		// Migrate all WP_Users (for WooComm data).
 		WP_CLI::log( 'Migrating all WP_Users...' );
 		$this->migrate_all_users( $live_table_prefix );
+		MemoryCleanupHook::cleanup( 1 );
 
 		if ( ! empty( $all_live_modified_posts_data ) ) {
 			WP_CLI::log( sprintf( 'Deleting %s modified posts before they are reimported...', count( $all_live_modified_posts_data ) ) );
@@ -601,15 +608,19 @@ class ContentDiffMigrator implements RegisterCommandInterface {
 
 		WP_CLI::log( sprintf( 'Importing %d objects, hold tight...', count( $all_live_posts_ids ) ) );
 		$imported_posts_data = $this->import_posts( $all_live_posts_ids, $hierarchical_taxonomy_term_id_updates );
+		MemoryCleanupHook::cleanup( 1 );
 
 		WP_CLI::log( 'Updating Post parent IDs...' );
 		$this->update_post_parent_ids( $all_live_posts_ids, $imported_posts_data );
+		MemoryCleanupHook::cleanup( 1 );
 
 		WP_CLI::log( 'Updating Featured images IDs...' );
 		$this->update_featured_image_ids( $imported_posts_data );
+		MemoryCleanupHook::cleanup( 1 );
 
 		WP_CLI::log( 'Updating attachment IDs in block content...' );
 		$this->update_attachment_ids_in_blocks( $imported_posts_data );
+		MemoryCleanupHook::cleanup( 1 );
 
 		WP_CLI::success( 'All done migrating content! 🙌 ' );
 
