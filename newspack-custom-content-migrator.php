@@ -5,7 +5,7 @@
  * Plugin URI:  https://newspack.com
  * Author:      Automattic
  * Author URI:  https://newspack.com
- * Version:     1.8.2
+ * Version:     1.8.3
  *
  * @package  Newspack_Custom_Content_Migrator
  */
@@ -43,7 +43,6 @@ PluginSetup::register_command_classes(
 		Command\General\SportsPressMigrator::class,
 		Command\General\FeaturedImagesMigrator::class,
 		Command\General\FixMissingMedia::class,
-		Command\General\ContentDiffMigrator::class,
 		Command\General\WooCommOrdersAndSubscriptionsMigrator::class,
 		Command\General\NextgenGalleryMigrator::class,
 		Command\General\TablePressMigrator::class,
